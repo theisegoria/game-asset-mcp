@@ -1,0 +1,56 @@
+{
+  "name": "game-asset-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for an agentic game-asset generation pipeline: reference images to 3D models with PBR textures, plus retexturing meshes you already own.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "3d",
+    "game-assets",
+    "pbr",
+    "tripo",
+    "leonardo",
+    "gltf",
+    "glb",
+    "text-to-3d",
+    "image-to-3d"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "bin": {
+    "game-asset-mcp": "dist/server.js"
+  },
+  "main": "dist/server.js",
+  "files": [
+    "dist",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src tests scripts",
+    "verify": "npm run build && node scripts/verify-install.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/server.js",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.1.1",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets — never commit. See .env.example.
+.env
+.env.*
+!.env.example
+
+# Default asset workspace (generated output can be large)
+assets/generated/
+.game-asset-mcp/
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/
