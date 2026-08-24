@@ -55,6 +55,7 @@ Set these in your MCP client's `env` block — see the snippets below. **There i
 | --- | --- | --- | --- |
 | `TRIPO_API_KEY` | for 3D tools | — | Tripo API key. Create one at [platform.tripo3d.ai](https://platform.tripo3d.ai). |
 | `LEONARDO_API_KEY` | for image and audio tools | — | Leonardo.Ai key with API access enabled. One key covers both reference images and sound effects. |
+| `LEONARDO_MODEL_ID` | no | built-in default | Override the default Leonardo image model. A per-call `modelId` also exists. |
 | `ASSET_OUTPUT_DIR` | no | `./assets/generated` | Where assets and job records are written. Relative to the server's working directory. |
 | `ASSET_MAX_DOWNLOAD_BYTES` | no | `268435456` (256 MiB) | Hard ceiling on any single download, enforced while streaming. |
 | `ASSET_HTTP_TIMEOUT_MS` | no | `60000` | Per-request HTTP timeout. |
@@ -272,7 +273,7 @@ Three known causes, and the server now names the first two itself rather than dy
 There is no local Blender on `PATH`. On macOS the app bundle is not on `PATH` even when Blender is installed — set `BLENDER_PATH` to the executable inside the bundle. `batch_prepare_meshes` degrades rather than failing: it still validates every mesh and reports what *would* need repairing.
 
 **`CONFIG_MISSING` — missing credential.**
-The tool you called needs a provider you have not configured. The message names the exact environment variable. Set it in your MCP client's `env` block and restart the client — a `.env` file is only read if the server's working directory is where you think it is, which under an MCP client it usually is not.
+The tool you called needs a provider you have not configured. The message names the exact environment variable. Set it in your MCP client's `env` block and restart the client. A `.env` file is **never** read: there is no dotenv dependency, so the variable must be exported by whatever launches the server.
 
 **`PROVIDER_HTTP` with status 401/403 — invalid API key.**
 The key is wrong, revoked, or the wrong provider's. Two specific traps: Leonardo keys need API access enabled on the account (a web login alone does not grant it), and a Tripo key with no **API** credit balance can fail on the first paid call even though the key itself is valid. See the credits warning above.
@@ -306,7 +307,7 @@ This is early software, and the parts most likely to drift are marked as such ra
 
 **Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. If they are wrong you will see a 404 that looks exactly like a bad API key, so check the path before the key.
 
-**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 305 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
+**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 316 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
 
 Concretely, these remain **unverified**:
 

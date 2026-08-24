@@ -23,7 +23,9 @@ Four layers, each of which knows only about the one below it:
 
 Two invariants hold the layering together:
 
-1. **No vendor type escapes the provider layer.** Tripo's `{ code, data, message }` envelope, Leonardo's `PENDING`/`COMPLETE`/`FAILED` vocabulary, their differing id schemes — all of it is normalized at the boundary. Nothing above the provider layer imports a vendor module.
+1. **No vendor type escapes the provider layer.** Tripo's `{ code, data, message }` envelope, Leonardo's `PENDING`/`COMPLETE`/`FAILED` vocabulary, their differing id schemes — all of it is normalized at the boundary, and no vendor *type* appears in a domain signature.
+
+   Two honest exceptions, since the stronger claim — that nothing above the layer imports a vendor module at all — is not true. `tools/context.ts` constructs the concrete providers, which is what a composition root is for. And `tools/assets3d.ts` and `tools/animation.ts` import `TRIPO_DEFAULT_MODEL_VERSION`, which is interpolated into an advertised tool description: a genuine leak of a vendor detail into the MCP surface, and the one place this invariant is currently bent.
 2. **Nothing is lost in normalization.** Every mapped value keeps its raw counterpart beside it: `AssetJob.providerStatus` holds the provider's own string next to our `status`, and `Model3DTaskResult.raw` carries the entire untouched payload. Normalization that discards the original just relocates the debugging problem to a place where you no longer have the evidence.
 
 ### Why three interfaces and not one
@@ -93,7 +95,7 @@ Jobs are persisted as one JSON file per job in `<ASSET_OUTPUT_DIR>/.jobs/`, writ
 
 SQLite would buy indexed queries and transactions across rows. This workload has no cross-row transaction and one query pattern. That is paying an installation tax for capability that never gets used.
 
-**Durability is not conceded.** `save()` writes to a temp file, **fsyncs**, then renames. Rename is atomic; the fsync is what stops the renamed file being empty after a power loss — atomic-but-unflushed is a real and commonly-missed failure. A crash mid-write leaves either the intact old file or the intact new one, never a half-parsed job. `list()` additionally tolerates one unreadable file rather than failing the whole listing: the other jobs are still valid and the caller still needs them.
+**Durability is not conceded.** `save()` writes to a temp file, **fsyncs**, then renames. Rename is atomic; the fsync is what stops the renamed file being empty after a power loss — atomic-but-unflushed is a real and commonly-missed failure. A crash mid-write leaves either the intact old file or the intact new one, never a half-parsed job. `list()` additionally tolerates any number of UNPARSEABLE records rather than failing the whole listing: the other jobs are still valid and the caller still needs them. It does not tolerate an unreadable one — EACCES, EISDIR and EMFILE are rethrown, because a permission or descriptor problem is a fact about the workspace rather than about one job, and swallowing it would report a short list as a complete one.
 
 **The extension point, if SQLite is later warranted.** `JobStore` is a class with a narrow async interface — `open`, `save`, `get`, `find`, `list`, `findByProviderTaskId`, `delete` — and every method already returns a promise. Nothing above it knows how a job is stored. If the workload ever changes shape (many thousands of jobs, cross-job queries, multiple writers), implement that interface over SQLite and change one construction site. The design keeps that door open; it just does not walk through it before there is a reason.
 
@@ -131,7 +133,8 @@ There is no client-side test that separates those cases. Idempotency keys would 
 The rule is drawn at the exact boundary that matters — **does this call spend money?** — not at the HTTP verb:
 
 - **Never retried:** task creation (`POST /task` for `image_to_model`, `text_to_model`, `texture_model`), image generation. Uploads are also unretried, being POSTs whose duplicate side effects are pointless.
-- **Retried freely,** with deterministic backoff (400 ms, 800 ms, 1600 ms, capped at 8 s): status polls, file downloads. Repeating them costs nothing and changes nothing.
+- **Retried freely,** with deterministic backoff (400 ms, 800 ms, 1600 ms, capped at 8 s): status polls. Repeating them costs nothing and changes nothing.
+- **Not retried, though they could be:** file downloads. `downloadFile` streams in a single attempt. Re-issuing one is safe, but the caller must do it — and because provider URLs expire, re-poll for a fresh URL first rather than retrying a stale one.
 
 The backoff carries no jitter, deliberately. Jitter exists to de-synchronize a herd of clients; a single client polling a single task has no herd to de-synchronize, and determinism makes the behaviour testable.
 
@@ -177,6 +180,6 @@ A few decisions apply everywhere and are enforced centrally rather than by conve
 - **Secrets are redacted in the logger,** not at call sites, by matching secret-bearing key names.
 - **Provider responses are untrusted input.** Filenames are stripped to a basename and sanitized; every write path is resolved and refused if it escapes the workspace root; non-HTTPS URLs are rejected outright.
 - **Download caps are enforced while streaming,** not from `Content-Length` — a server that lies about or omits the header would otherwise exhaust memory before the check ran.
-- **Errors are structured.** A machine-readable `code` so an agent can branch without parsing prose, and a `retryable` flag so no caller retries something that would double-charge.
+- **Errors are structured.** A machine-readable class in the `error` field so an agent can branch without parsing prose, and a `retryable` flag so no caller retries something that would double-charge. (The field is named `error` on the wire — `toJSON()` emits it — not `code`.)
 - **Illegal state transitions are refused,** not silently permitted. Allowing one would let a job report `ready` without ever having produced a model, which is the failure mode where the tool lies to the user.
 - **Nothing is silently overwritten.** Colliding names get a numeric suffix; workspace reservation uses non-recursive `mkdir` so it is atomic against a concurrent caller rather than a racy check-then-create.

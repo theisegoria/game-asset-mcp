@@ -52,7 +52,7 @@ export class AssetPipelineError extends Error {
 export function configMissing(envVar: string, provider: string): AssetPipelineError {
   return new AssetPipelineError(
     'CONFIG_MISSING',
-    `${provider} is not configured: set ${envVar} in the environment (see .env.example). ` +
+    `${provider} is not configured: set ${envVar} in the environment. ` +
       `Other providers remain usable.`,
     { details: { envVar, provider } },
   );
