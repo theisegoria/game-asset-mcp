@@ -16,14 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAssetJob } from '../src/domain/asset-job.js';
 import type { AssetJob } from '../src/domain/asset-job.js';
 import { gameAssetSpecSchema } from '../src/domain/asset-spec.js';
-import {
-  ASSET_SUBDIRS,
-  reserveWorkspace,
-  safeJoin,
-  sanitizeFileName,
-  uniqueFilePath,
-  writeFileAtomic,
-} from '../src/storage/filesystem.js';
+import { ASSET_SUBDIRS, assertExistingDirectory, reserveWorkspace, safeJoin, sanitizeFileName, uniqueFilePath, writeFileAtomic } from '../src/storage/filesystem.js';
 import { JobStore } from '../src/storage/jobs.js';
 import { AssetPipelineError } from '../src/util/errors.js';
 import type { ErrorCode } from '../src/util/errors.js';
@@ -314,5 +307,47 @@ describe('safeJoin distinguishes a .. segment from a .. prefix', () => {
 
   it('still refuses an absolute path', () => {
     expect(() => safeJoin('/ws', '/etc/passwd')).toThrow(/outside the asset workspace/);
+  });
+});
+
+describe('a caller-named output directory is never created', () => {
+  it('refuses a directory that does not exist', async () => {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), 'assert-dir-'));
+    try {
+      // `~` is not expanded — no shell is involved — so this used to create a
+      // literal "~" tree wherever the MCP client happened to run the server.
+      // extract_pbr_trio wrote five files into one and reported success.
+      await expect(assertExistingDirectory(path.join(dir, '~', 'nested'), 'destination'))
+        .rejects.toThrow(/does not exist as a directory/);
+      expect(await listDir(dir)).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a path that exists but is a FILE', async () => {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), 'assert-dir-'));
+    try {
+      const file = path.join(dir, 'not-a-dir');
+      await fs.writeFile(file, 'x');
+      await expect(assertExistingDirectory(file, 'destination'))
+        .rejects.toThrow(/does not exist as a directory/);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a real directory', async () => {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), 'assert-dir-'));
+    try {
+      await expect(assertExistingDirectory(dir, 'destination')).resolves.toBeUndefined();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('names the parameter so the caller knows which argument to fix', async () => {
+    await expect(assertExistingDirectory('/nowhere/at/all', 'outputDir'))
+      .rejects.toThrow(/outputDir does not exist/);
   });
 });

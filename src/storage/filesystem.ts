@@ -81,6 +81,37 @@ export async function assertRealPathInside(root: string, target: string): Promis
  * Reserve a workspace directory for `slug`, appending `_2`, `_3`, … if taken.
  * Returns the absolute directory and the slug actually used.
  */
+/**
+ * Refuse a caller-named output directory that does not already exist.
+ *
+ * Three tools take a `destination` and used to `mkdir -p` it before any
+ * validation, so a mistyped path silently built a directory tree anywhere the
+ * process could write. `destination: "~/out"` is not expanded — no shell is
+ * involved — and created a literal `~` directory in whatever working directory
+ * the MCP client happened to choose. `extract_pbr_trio` wrote five files into
+ * one and reported success.
+ *
+ * The server's OWN workspace (ASSET_OUTPUT_DIR) is still created on demand:
+ * that path is configuration, not caller input.
+ */
+export async function assertExistingDirectory(dir: string, parameter: string): Promise<void> {
+  let isDirectory = false;
+  try {
+    isDirectory = (await fs.stat(dir)).isDirectory();
+  } catch {
+    isDirectory = false;
+  }
+  if (!isDirectory) {
+    throw new AssetPipelineError(
+      'INVALID_INPUT',
+      `${parameter} does not exist as a directory: ${dir}. Create it first, or omit ${parameter} ` +
+      `to use the configured workspace. A leading ~ is NOT expanded here, and a relative path ` +
+      `resolves against the SERVER's working directory rather than yours.`,
+      { details: { [parameter]: dir } },
+    );
+  }
+}
+
 export async function reserveWorkspace(
   root: string,
   slug: string,

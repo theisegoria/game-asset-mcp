@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2
+
+- **`extract_pbr_trio`, `download_asset` and `generate_sound_effect` built
+  directory trees from a caller-named `destination`.** All three ran `mkdir -p`
+  on it before any validation, so `destination: "~/out"` — not expanded, because
+  no shell is involved — created a literal `~` directory wherever the MCP client
+  happened to run the server. `extract_pbr_trio` wrote five files into one and
+  reported success. This is the same defect removed from `normalize_mesh` in
+  0.3.0 and from `batch_prepare_meshes` in 0.3.1; it was found by checking the
+  rule against every tool that writes to a caller-named path, rather than
+  waiting for it to be reported a third time. A caller-named directory must now
+  already exist. The server's own configured workspace is still created on demand.
+
 ## 0.3.1
 
 **0.3.0 should not be used.** A review of that release found four live paths

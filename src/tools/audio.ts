@@ -14,7 +14,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createAssetJob, summarizeAssetJob, type DownloadedFile } from '../domain/asset-job.js';
 import { sanitizeAssetName } from '../domain/asset-spec.js';
 import { downloadFile } from '../util/http.js';
-import { reserveWorkspace, safeJoin, sanitizeFileName, uniqueFilePath, writeFileAtomic, writeJsonAtomic } from '../storage/filesystem.js';
+import { assertExistingDirectory, reserveWorkspace, safeJoin, sanitizeFileName, uniqueFilePath, writeFileAtomic, writeJsonAtomic } from '../storage/filesystem.js';
 import {
   SOUND_EFFECT_MAX_QUANTITY,
   SOUND_EFFECT_MAX_SECONDS,
@@ -160,6 +160,7 @@ export function registerAudioTools(server: McpServer, ctx: ToolContext): void {
       }
 
       const root = args.destination ? path.resolve(args.destination) : ctx.config.outputDir;
+      if (args.destination) await assertExistingDirectory(root, 'destination');
       const workspace = await reserveWorkspace(root, job.slug);
       job.workspacePath = workspace.dir;
       const audioDir = safeJoin(workspace.dir, 'previews');

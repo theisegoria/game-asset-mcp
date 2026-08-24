@@ -19,14 +19,7 @@ import type { AssetJob, DownloadedFile } from '../domain/asset-job.js';
 import { summarizeAssetJob } from '../domain/asset-job.js';
 import { invalidState } from '../util/errors.js';
 import { downloadFile } from '../util/http.js';
-import {
-  reserveWorkspace,
-  safeJoin,
-  sanitizeFileName,
-  uniqueFilePath,
-  writeFileAtomic,
-  writeJsonAtomic,
-} from '../storage/filesystem.js';
+import { assertExistingDirectory, reserveWorkspace, safeJoin, sanitizeFileName, uniqueFilePath, writeFileAtomic, writeJsonAtomic } from '../storage/filesystem.js';
 import { guard, ok, type ToolContext } from './context.js';
 import { refreshAssetJob } from './jobs.js';
 
@@ -142,6 +135,7 @@ export function registerDownloadTools(server: McpServer, ctx: ToolContext): void
       }
 
       const root = args.destination ? path.resolve(args.destination) : ctx.config.outputDir;
+      if (args.destination) await assertExistingDirectory(root, 'destination');
       const workspace = await reserveWorkspace(root, job.slug);
       job.workspacePath = workspace.dir;
 

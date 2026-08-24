@@ -28,7 +28,7 @@ import {
 } from '../inspection/image.js';
 import { invalidInput, invalidState } from '../util/errors.js';
 import { MESH_EXTENSIONS } from '../util/local-file.js';
-import { safeJoin, uniqueFilePath, writeFileAtomic, writeJsonAtomic } from '../storage/filesystem.js';
+import { assertExistingDirectory, safeJoin, uniqueFilePath, writeFileAtomic, writeJsonAtomic } from '../storage/filesystem.js';
 import { promises as fs } from 'node:fs';
 import { guard, ok, type ToolContext } from './context.js';
 
@@ -150,6 +150,9 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
       );
       const size = args.resolution ?? (sourceMax > 0 ? sourceMax : 1024);
 
+      // A caller-named destination must already exist; only the configured
+      // workspace is created on demand.
+      if (args.destination) await assertExistingDirectory(outputRoot, 'destination');
       await fs.mkdir(outputRoot, { recursive: true });
       const stem = path.basename(source, path.extname(source));
       const planes: PlaneReceipt[] = [];
