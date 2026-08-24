@@ -344,7 +344,7 @@ describe('where the bytes actually land', () => {
     expect(paths[0]).not.toBe(paths[1]);
     // prepared must equal files on disk, or a success describes bytes that a
     // later item already overwrote.
-    expect(readdirSync(outDir)).toHaveLength(result.prepared);
+    expect(readdirSync(outDir)).toHaveLength(result.outputsWritten);
     expect(readFileSync(paths[0] as string, 'utf8')).toContain(path.join('a', 'crate.glb'));
     expect(readFileSync(paths[1] as string, 'utf8')).toContain(path.join('b', 'crate.glb'));
   });
@@ -448,5 +448,55 @@ describe('the production wiring, not just the loop', () => {
 
     expect(existsSync(reserved)).toBe(false);
     expect(readdirSync(work)).toHaveLength(0);
+  });
+});
+
+describe('a cleanup failure never displaces the real cause', () => {
+  it('reports the normalizer error, not the discard error', async () => {
+    const h = harness({ broken: ['/a/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const exploding: MeshBatchDeps = {
+      ...h.deps,
+      discardReservation: async () => {
+        throw new Error('EPERM_cleanup_failed');
+      },
+    };
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, exploding);
+
+    // The discard used to throw first, so the caller learned only that tidying
+    // up failed and never why the work did.
+    expect(result.items[0]?.error).toContain('Blender exited non-zero');
+    expect(result.items[0]?.error).not.toContain('EPERM_cleanup_failed');
+  });
+});
+
+describe('a normalized mesh that fails policy is kept, and counted', () => {
+  it('keeps the file, names it, and marks it kept', async () => {
+    const h = harness({ broken: ['/a/one.glb'], repairFails: true });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    // Normalization SUCCEEDED and produced a real mesh; it just did not clear
+    // the policy. Deleting it would destroy work worth inspecting — but a kept
+    // file must never be a silent write.
+    expect(result.items[0]?.status).toBe('failed');
+    expect(result.items[0]?.normalizedPath).toBeDefined();
+    expect(result.items[0]?.outputKept).toBe(true);
+    expect(h.discarded).toHaveLength(0);
+  });
+
+  it('counts outputs separately from verdicts', async () => {
+    const h = harness({ broken: ['/a/one.glb', '/a/two.glb'], repairFails: true });
+    const result = await runMeshBatch(['/a/one.glb', '/a/two.glb'], OPTIONS, h.deps);
+
+    // prepared is a VERDICT. Conflating it with the file count made a
+    // deliberate keep look like a leak.
+    expect(result.prepared).toBe(0);
+    expect(result.outputsWritten).toBe(2);
+  });
+
+  it('counts nothing written when the normalizer itself failed', async () => {
+    const h = harness({ broken: ['/a/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.outputsWritten).toBe(0);
   });
 });

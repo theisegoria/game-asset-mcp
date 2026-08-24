@@ -25,6 +25,8 @@ export interface MeshBatchItem {
   trianglesBefore?: number;
   trianglesAfter?: number;
   failures?: string[];
+  /** True when a normalized file was produced but did not clear the policy. */
+  outputKept?: boolean;
   error?: string;
 }
 
@@ -33,6 +35,13 @@ export interface MeshBatchResult {
   prepared: number;
   alreadyValid: number;
   failed: number;
+  /**
+   * Files written to the output directory: every prepared item, plus every
+   * failed item that still produced a mesh. `prepared` is a verdict, not a
+   * file count, and conflating them made a leaked file look like an invariant
+   * violation instead of a deliberate keep.
+   */
+  outputsWritten: number;
   blenderAvailable: boolean;
   items: MeshBatchItem[];
 }
@@ -86,6 +95,18 @@ function errorIds(report: ReturnType<typeof evaluateAsset>): string[] {
     .map((check) => check.id);
 }
 
+/**
+ * Releases a reservation without letting the cleanup become the reported error.
+ */
+async function release(deps: MeshBatchDeps, target: string): Promise<void> {
+  try {
+    await deps.discardReservation(target);
+  } catch {
+    // Swallowed on purpose. A failure to tidy up is strictly less interesting
+    // than whatever made the item fail, and must never displace it.
+  }
+}
+
 async function prepareOne(
   source: string,
   options: MeshBatchOptions,
@@ -133,7 +154,11 @@ async function prepareOne(
   try {
     receipt = await deps.normalize(source, target);
   } catch (err) {
-    await deps.discardReservation(target);
+    // The discard must not be able to replace the reason we are here. It
+    // could: an EPERM from the cleanup threw first, so a caller whose Blender
+    // had segfaulted was told only "EPERM_cleanup_failed" and the real cause
+    // was gone.
+    await release(deps, target);
     throw err;
   }
   item.normalizedPath = target;
@@ -145,13 +170,21 @@ async function prepareOne(
   try {
     after = evaluateAsset(await deps.inspect(target), options.policy);
   } catch (err) {
-    await deps.discardReservation(target);
+    await release(deps, target);
     delete item.normalizedPath;
     throw err;
   }
   item.passedAfter = after.passed;
   item.status = after.passed ? 'prepared' : 'failed';
-  if (!after.passed) item.failures = errorIds(after);
+  if (!after.passed) {
+    item.failures = errorIds(after);
+    // The file is KEPT deliberately. Normalization succeeded and produced a
+    // real mesh; it simply did not clear the policy. Deleting it would destroy
+    // work the caller may want to inspect or re-policy. But it must not be a
+    // silent write: `normalizedPath` names it, and `outputsWritten` counts it,
+    // because "prepared" is a verdict and was never the file count.
+    item.outputKept = true;
+  }
   return item;
 }
 
@@ -188,6 +221,7 @@ export async function runMeshBatch(
     prepared: items.filter((item) => item.status === 'prepared').length,
     alreadyValid: items.filter((item) => item.status === 'already_valid').length,
     failed: items.filter((item) => item.status === 'failed').length,
+    outputsWritten: items.filter((item) => item.normalizedPath !== undefined).length,
     blenderAvailable: deps.blenderAvailable,
     items,
   };

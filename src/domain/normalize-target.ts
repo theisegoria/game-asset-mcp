@@ -1,23 +1,41 @@
 /**
  * Choosing where a normalized mesh is written.
  *
- * Separated from the tool because this is the part that was wrong. An explicit
- * `outputPath` used to be written verbatim with no check of any kind, so
- * `outputPath === modelPath` replaced the caller's own mesh in place and
- * reported success, and any existing file at that path was destroyed silently —
- * while the derived-name branch three lines away went through an exclusive
- * reservation. One rule, enforced on one branch and dropped on the other.
+ * Separated from the tool because this is the part that was wrong, twice.
  *
- * Living inside the tool handler meant no test could reach it: mutants that
- * removed both guards passed the entire suite.
+ * First an explicit `outputPath` was written verbatim with no check at all, so
+ * passing the input mesh as the output replaced it in place and reported
+ * success. That was fixed with a string comparison — which was still wrong,
+ * because a path is not a file. A symlink, a hardlink, a symlinked parent
+ * directory, or merely a different capitalisation on a case-insensitive volume
+ * all name the SAME file by a different string, and all four destroyed the
+ * source while the receipt reported two distinct paths and a healthy byte count.
+ * The capitalisation case needs no symlink and no privilege: `Crate.glb` and
+ * `crate.glb` are one file on APFS, and capitalised asset filenames are
+ * entirely ordinary.
+ *
+ * Identity is therefore decided by the filesystem — device plus inode — never
+ * by comparing strings.
  */
 
 import path from 'node:path';
 import { invalidInput } from '../util/errors.js';
 
+/** Device and inode. Two paths with the same pair are the same file. */
+export interface FileIdentity {
+  dev: number;
+  ino: number;
+}
+
 export interface NormalizeTargetDeps {
-  /** True when something already exists at the path. */
-  exists(target: string): Promise<boolean>;
+  /**
+   * The identity of whatever is at `target`, or null if nothing is.
+   *
+   * MUST follow symlinks: the question is "which file would a write land on",
+   * not "what is this link". A path that does not exist cannot alias anything,
+   * so null is a safe answer.
+   */
+  fileIdentity(target: string): Promise<FileIdentity | null>;
   /** Atomically claims an unused path in `dir` for `fileName`. */
   reserve(dir: string, fileName: string): Promise<string>;
 }
@@ -31,8 +49,12 @@ export interface NormalizeTargetRequest {
   outputDir: string;
   /** Caller-supplied destination, if any. */
   outputPath?: string | undefined;
-  /** Explicit opt-in to replacing an existing file. Never permits in-place. */
+  /** Explicit opt-in to replacing a DIFFERENT file. Never permits in-place. */
   overwrite?: boolean | undefined;
+}
+
+function sameFile(a: FileIdentity | null, b: FileIdentity | null): boolean {
+  return a !== null && b !== null && a.dev === b.dev && a.ino === b.ino;
 }
 
 export async function resolveNormalizeTarget(
@@ -45,19 +67,28 @@ export async function resolveNormalizeTarget(
   }
 
   const target = path.resolve(request.outputPath);
+  const [sourceIdentity, targetIdentity] = await Promise.all([
+    deps.fileIdentity(request.source),
+    deps.fileIdentity(target),
+  ]);
 
-  // Unconditional: there is no opt-in for this. Normalizing over the input
-  // destroys the original with no copy anywhere, and the caller cannot undo it.
-  if (target === request.source) {
+  // Checked BEFORE the overwrite rule, deliberately. When the target aliased
+  // the source, the overwrite branch used to fire first and answer "refusing to
+  // overwrite an existing file — pass overwrite:true if you genuinely mean to
+  // replace it". That instruction is the destruction: following it fed the very
+  // input mesh to the writer. A guard must not name the flag that defeats it.
+  if (target === request.source || sameFile(sourceIdentity, targetIdentity)) {
     throw invalidInput(
-      'outputPath is the input mesh; normalizing in place would destroy the original ' +
-      'irrecoverably. Omit outputPath to write <name>_normalized.glb beside it, or name a ' +
-      'different destination.',
-      { modelPath: request.source },
+      'outputPath resolves to the input mesh itself; normalizing in place would destroy the ' +
+      'original irrecoverably. Note this is decided by filesystem identity, so a symlink, a ' +
+      'hardlink, a symlinked parent directory, or a different capitalisation on a ' +
+      'case-insensitive volume all count. Omit outputPath to write <name>_normalized.glb ' +
+      'beside it, or name a genuinely different destination.',
+      { modelPath: request.source, outputPath: target },
     );
   }
 
-  if ((await deps.exists(target)) && !request.overwrite) {
+  if (targetIdentity !== null && !request.overwrite) {
     throw invalidInput(
       `refusing to overwrite an existing file at ${target}. Pass overwrite:true if you ` +
       'genuinely mean to replace it, or omit outputPath to get a numbered name instead.',

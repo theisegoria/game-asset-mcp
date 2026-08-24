@@ -20,7 +20,7 @@
  * so the envelope is checked on every call.
  */
 
-import { requestJson } from '../../util/http.js';
+import { assertHttps, requestJson } from '../../util/http.js';
 import { AssetPipelineError } from '../../util/errors.js';
 import type {
   RigOptions,
@@ -85,7 +85,14 @@ export class TripoProvider implements Model3DProvider {
   private readonly baseUrl: string;
 
   constructor(private readonly options: TripoClientOptions) {
-    this.baseUrl = (options.baseUrl ?? process.env.TRIPO_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    const configured = (options.baseUrl ?? process.env.TRIPO_BASE_URL ?? DEFAULT_BASE_URL)
+      .replace(/\/$/, '');
+    // Validated HERE, not at first use. TRIPO_BASE_URL was accepted verbatim,
+    // and `upload` then sent the mesh AND the Bearer key through a raw fetch —
+    // so an http:// base put the API key on the wire in cleartext. Failing at
+    // construction means a misconfiguration cannot reach a request at all.
+    assertHttps(configured);
+    this.baseUrl = configured;
   }
 
   private authHeaders(): Record<string, string> {
@@ -127,12 +134,28 @@ export class TripoProvider implements Model3DProvider {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs);
     try {
-      const response = await fetch(`${this.baseUrl}/upload/sts`, {
+      const uploadUrl = `${this.baseUrl}/upload/sts`;
+      assertHttps(uploadUrl);
+      const response = await fetch(uploadUrl, {
         method: 'POST',
         headers: this.authHeaders(),
         body: form,
+        // Manual, and then refused outright. This is a POST carrying both a
+        // mesh and an Authorization header: a 307 re-sends the body to the new
+        // location, which is a double-spend, and a cross-origin hop would leak
+        // the key. The shared HTTP layer refuses redirects on non-GET for
+        // exactly these reasons; this call bypassed that layer entirely.
+        redirect: 'manual',
         signal: controller.signal,
       });
+      if (response.status >= 300 && response.status < 400) {
+        throw new AssetPipelineError(
+          'PROVIDER_HTTP',
+          `Tripo ${context} upload was redirected (HTTP ${response.status}); refusing to re-send ` +
+          'an authenticated upload to a new location',
+          { details: { status: response.status } },
+        );
+      }
       const text = await response.text();
       if (!response.ok) {
         throw new AssetPipelineError(

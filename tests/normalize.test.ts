@@ -7,10 +7,12 @@
  * for work that never ran.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs, existsSync } from 'node:fs';
 import path from 'node:path';
 import pathModule from 'node:path';
+import { existsSync as existsSyncFs, linkSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolveNormalizeTarget } from '../src/domain/normalize-target.js';
 import os from 'node:os';
 import { findBlender, packagedScript, requireBlender, runBlenderScript } from '../src/util/blender.js';
@@ -149,93 +151,130 @@ describe.skipIf(!haveBlender || !haveFixture)('normalizing a real UV-less mesh',
 // removing them passed the whole suite.
 // ---------------------------------------------------------------------------
 describe('choosing the output path', () => {
-  const SOURCE = '/art/crate.glb';
-  const deps = (existing: string[] = []) => {
-    const taken = new Set(existing);
-    const reserved: string[] = [];
-    return {
-      reserved,
-      deps: {
-        exists: async (target: string) => taken.has(target),
-        reserve: async (dir: string, fileName: string) => {
-          const target = pathModule.join(dir, fileName);
-          reserved.push(target);
-          return target;
-        },
-      },
-    };
+  // Real files, real symlinks, real hardlinks. A fake identity function would
+  // prove nothing about aliasing: the whole defect was that a path is not a
+  // file, and only the filesystem can settle which file a path names.
+  let work: string;
+  let source: string;
+
+  const realDeps = {
+    fileIdentity: async (target: string) => {
+      try {
+        const info = statSync(target);
+        return { dev: info.dev, ino: info.ino };
+      } catch {
+        return null;
+      }
+    },
+    reserve: async (dir: string, fileName: string) => pathModule.join(dir, fileName),
   };
 
-  it('refuses to write over the input mesh, with no opt-out', async () => {
-    const d = deps();
-    await expect(
-      resolveNormalizeTarget(
-        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: SOURCE },
-        d.deps,
-      ),
-    ).rejects.toThrow(/destroy the original/);
+  beforeEach(() => {
+    work = realpathSync(mkdtempSync(pathModule.join(tmpdir(), 'normalize-target-')));
+    source = pathModule.join(work, 'crate.glb');
+    writeFileSync(source, 'ORIGINAL-MESH');
   });
 
-  it('still refuses in place even when overwrite is requested', async () => {
-    const d = deps();
-    // overwrite:true means "replace that other file", never "shred my input".
-    await expect(
-      resolveNormalizeTarget(
-        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: SOURCE, overwrite: true },
-        d.deps,
-      ),
-    ).rejects.toThrow(/destroy the original/);
+  afterEach(() => {
+    rmSync(work, { recursive: true, force: true });
   });
 
-  it('refuses to silently replace an existing file', async () => {
-    const d = deps(['/art/reviewed.glb']);
-    await expect(
-      resolveNormalizeTarget(
-        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: '/art/reviewed.glb' },
-        d.deps,
-      ),
-    ).rejects.toThrow(/refusing to overwrite/);
+  const resolve = (outputPath?: string, overwrite?: boolean) =>
+    resolveNormalizeTarget(
+      {
+        source,
+        sourceExtension: '.glb',
+        outputDir: work,
+        ...(outputPath !== undefined ? { outputPath } : {}),
+        ...(overwrite !== undefined ? { overwrite } : {}),
+      },
+      realDeps,
+    );
+
+  it('refuses the literal input path', async () => {
+    await expect(resolve(source)).rejects.toThrow(/destroy the original/);
   });
 
-  it('replaces an existing file when overwrite is explicit', async () => {
-    const d = deps(['/art/reviewed.glb']);
-    await expect(
-      resolveNormalizeTarget(
-        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: '/art/reviewed.glb', overwrite: true },
-        d.deps,
-      ),
-    ).resolves.toBe('/art/reviewed.glb');
+  it('refuses a SYMLINK that points at the input', async () => {
+    const link = pathModule.join(work, 'link.glb');
+    symlinkSync(source, link);
+    await expect(resolve(link)).rejects.toThrow(/destroy the original/);
   });
 
-  it('accepts a free explicit path without reserving anything', async () => {
-    const d = deps();
-    await expect(
-      resolveNormalizeTarget(
-        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: '/art/out.glb' },
-        d.deps,
-      ),
-    ).resolves.toBe('/art/out.glb');
-    expect(d.reserved).toHaveLength(0);
+  it('refuses a HARDLINK to the input', async () => {
+    const hard = pathModule.join(work, 'hard.glb');
+    linkSync(source, hard);
+    await expect(resolve(hard)).rejects.toThrow(/destroy the original/);
+  });
+
+  it('refuses the input reached through a SYMLINKED PARENT directory', async () => {
+    const linkedDir = pathModule.join(work, 'alias');
+    symlinkSync(work, linkedDir);
+    await expect(resolve(pathModule.join(linkedDir, 'crate.glb'))).rejects.toThrow(/destroy the original/);
+  });
+
+  // No symlink, no privilege — just a capital letter. On a case-insensitive
+  // volume this is the same file, and capitalised asset names are ordinary.
+  const caseInsensitive = (() => {
+    try {
+      const probe = mkdtempSync(pathModule.join(tmpdir(), 'case-probe-'));
+      writeFileSync(pathModule.join(probe, 'a.txt'), 'x');
+      const same = existsSyncFs(pathModule.join(probe, 'A.txt'));
+      rmSync(probe, { recursive: true, force: true });
+      return same;
+    } catch {
+      return false;
+    }
+  })();
+
+  it.skipIf(!caseInsensitive)('refuses a path differing only by CASE', async () => {
+    await expect(resolve(pathModule.join(work, 'Crate.glb'))).rejects.toThrow(/destroy the original/);
+  });
+
+  it('refuses in place even when overwrite is requested', async () => {
+    const link = pathModule.join(work, 'link.glb');
+    symlinkSync(source, link);
+    // overwrite:true means "replace that OTHER file", never "shred my input".
+    await expect(resolve(link, true)).rejects.toThrow(/destroy the original/);
+  });
+
+  it('does not recommend overwrite:true when the target aliases the source', async () => {
+    const link = pathModule.join(work, 'link.glb');
+    symlinkSync(source, link);
+    // The old refusal fired the WRONG branch and told the caller to pass the
+    // exact flag that destroys the mesh.
+    await expect(resolve(link)).rejects.not.toThrow(/Pass overwrite:true/);
+  });
+
+  it('refuses to silently replace a genuinely different existing file', async () => {
+    const other = pathModule.join(work, 'reviewed.glb');
+    writeFileSync(other, 'REVIEWED');
+    await expect(resolve(other)).rejects.toThrow(/refusing to overwrite/);
+  });
+
+  it('replaces a different existing file when overwrite is explicit', async () => {
+    const other = pathModule.join(work, 'reviewed.glb');
+    writeFileSync(other, 'REVIEWED');
+    await expect(resolve(other, true)).resolves.toBe(other);
+  });
+
+  it('accepts a free explicit path', async () => {
+    const free = pathModule.join(work, 'out.glb');
+    await expect(resolve(free)).resolves.toBe(free);
   });
 
   it('reserves a derived name when no outputPath is given', async () => {
-    const d = deps();
-    await expect(
-      resolveNormalizeTarget(
-        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art' },
-        d.deps,
-      ),
-    ).resolves.toBe(pathModule.join('/art', 'crate_normalized.glb'));
-    expect(d.reserved).toHaveLength(1);
+    await expect(resolve()).resolves.toBe(pathModule.join(work, 'crate_normalized.glb'));
   });
 
   it('strips an uppercase extension rather than embedding it', async () => {
-    const d = deps();
+    const shouty = pathModule.join(work, 'BARREL.GLB');
+    writeFileSync(shouty, 'x');
     await expect(
       resolveNormalizeTarget(
-        { source: '/art/BARREL.GLB', sourceExtension: '.GLB', outputDir: '/art' },
-        d.deps,
+        { source: shouty, sourceExtension: '.GLB', outputDir: work },
+        realDeps,
       ),
-    ).resolves.toBe(pathModule.join('/art', 'BARREL_normalized.glb'));
+    ).resolves.toBe(pathModule.join(work, 'BARREL_normalized.glb'));
   });
 });

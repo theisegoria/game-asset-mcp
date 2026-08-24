@@ -100,7 +100,8 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         source = model.path;
       }
 
-      const ext = path.extname(source).toLowerCase();
+      const actualExt = path.extname(source);
+      const ext = actualExt.toLowerCase();
       if (!MESH_EXTENSIONS.has(ext)) {
         throw invalidInput(`unsupported mesh type "${ext}"`, { allowed: [...MESH_EXTENSIONS] });
       }
@@ -118,18 +119,20 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
       const output = await resolveNormalizeTarget(
         {
           source,
-          sourceExtension: ext,
+          sourceExtension: actualExt,
           outputDir,
           outputPath: args.outputPath,
           overwrite: args.overwrite,
         },
         {
-          exists: async (target) => {
+          // stat, not lstat: the question is which file a write would land on,
+          // so symlinks must be followed. A missing path aliases nothing.
+          fileIdentity: async (target) => {
             try {
-              await fs.access(target);
-              return true;
+              const info = await fs.stat(target);
+              return { dev: info.dev, ino: info.ino };
             } catch {
-              return false;
+              return null;
             }
           },
           reserve: (dir, fileName) => uniqueFilePath(dir, fileName),

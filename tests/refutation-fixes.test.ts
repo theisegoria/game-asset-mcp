@@ -6,6 +6,7 @@
  * that is not executed is not a rule.
  */
 
+import { TripoProvider } from '../src/providers/model3d/tripo.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requestJson, assertHttps, safeUrlForLogs } from '../src/util/http.js';
 import { AssetPipelineError } from '../src/util/errors.js';
@@ -373,5 +374,36 @@ describe('metadata cannot drift', () => {
     for (const name of ['extract_pbr_trio', 'generate_sound_effect', 'normalize_mesh']) {
       expect(script).toContain(name);
     }
+  });
+});
+
+describe('the Tripo client cannot put an API key on the wire in cleartext', () => {
+  it('refuses an http:// base URL at construction', () => {
+    // TRIPO_BASE_URL was accepted verbatim and `upload` used a raw fetch, so
+    // an http:// base sent the mesh AND the Bearer key unencrypted.
+    expect(() => new TripoProvider({ apiKey: 'tsk_x', baseUrl: 'http://evil.example/v3', timeoutMs: 1000 }))
+      .toThrow(/non-HTTPS/);
+  });
+
+  it('refuses a non-URL base', () => {
+    expect(() => new TripoProvider({ apiKey: 'tsk_x', baseUrl: 'not-a-url', timeoutMs: 1000 }))
+      .toThrow(/not a valid URL/);
+  });
+
+  it('accepts an https base URL', () => {
+    expect(() => new TripoProvider({ apiKey: 'tsk_x', baseUrl: 'https://openapi.tripo3d.ai/v3', timeoutMs: 1000 }))
+      .not.toThrow();
+  });
+
+  it('never sends the key over a plain-http request', async () => {
+    // The guard is at construction, so no request can be built at all — which
+    // is the point: a misconfiguration must not be able to reach the network.
+    let constructed = true;
+    try {
+      new TripoProvider({ apiKey: 'tsk_secret', baseUrl: 'http://127.0.0.1:1/v3', timeoutMs: 200 });
+    } catch {
+      constructed = false;
+    }
+    expect(constructed).toBe(false);
   });
 });
