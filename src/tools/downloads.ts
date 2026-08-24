@@ -231,11 +231,20 @@ export function registerDownloadTools(server: McpServer, ctx: ToolContext): void
           }
         } catch (err) {
           // A container we cannot open is a real finding, but the model itself
-          // downloaded fine — surface it as a warning rather than discarding a
-          // successful download.
+          // downloaded fine — surface it rather than discarding a successful
+          // download.
+          //
+          // Surfaced to the CALLER, not only to stderr. The per-texture half of
+          // this was fixed while this sibling path was left reporting
+          // `textureCount: 0` with no failures named — indistinguishable from
+          // "this model has no embedded textures". A Draco/meshopt/KTX2 GLB
+          // lands here, and providers do return those. The rule was already
+          // written two lines below: a stderr warning is invisible to the caller.
+          const reason = err instanceof Error ? err.message : String(err);
+          textureFailures = [`could not read ${path.basename(modelFile.path)}: ${reason}`];
           ctx.logger.warn('texture extraction failed', {
             assetJobId: job.id,
-            reason: err instanceof Error ? err.message : String(err),
+            reason,
           });
         }
       }

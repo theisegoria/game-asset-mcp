@@ -121,7 +121,7 @@ def world_threshold_divisor(obj):
     return largest if largest > 1e-12 else 1.0
 
 
-def clean_geometry(obj, merge_distance, weld=True):
+def clean_geometry(obj, merge_distance, weld=True, dissolve_threshold=None):
     """Weld coincident vertices and dissolve zero-area faces.
 
     `merge_distance` arrives in LOCAL units — the caller divides the documented
@@ -141,27 +141,29 @@ def clean_geometry(obj, merge_distance, weld=True):
         except AttributeError:
             bpy.ops.mesh.merge(type="BY_DISTANCE")
 
-        # An EXPLICIT threshold. This was a bare call using Blender's 1e-4
-        # default, in local space, entirely independent of mergeDistance — so a
-        # 2 mm part at true scale went from 3042 triangles to ZERO even with
-        # mergeDistance set to 0, and the refusal named the one knob that could
-        # not fix it. Screws, gems, bullets, coins and PCB detail are all inside
-        # that default.
-        #
-        # ⚠ GATED ON `weld`, and this is the whole point. It used to sit outside
-        # the branch clamped as `max(min(merge_distance, 1.0), 1e-6)`, so when
-        # the weld was skipped for being unrepresentable the dissolve ran at
-        # 1e-6 local anyway. That is not an edge case, it is an identity: the
-        # skip fires exactly when merge_distance < 1e-6, and the clamp then
-        # yields exactly 1e-6 — by construction STRICTLY WIDER than what the
-        # caller asked for, by a factor of 1e-6·divisor / mergeDistance.
-        # So the honesty counter fired precisely on the runs where the
-        # protection had failed. Measured: two meshes with byte-identical WORLD
-        # geometry, differing only in how the scale was split between node and
-        # vertices, went to 61 and 1 triangles respectively — the node scale
-        # changing the world result being the exact thing the divisor exists to
-        # prevent — and the husk was reported readyToTexture.
-        bpy.ops.mesh.dissolve_degenerate(threshold=min(merge_distance, 1.0))
+
+    # An EXPLICIT threshold. This was once a bare call using Blender's 1e-4
+    # default, in local space, independent of mergeDistance — a 2 mm part at
+    # true scale went from 3042 triangles to ZERO even at mergeDistance 0, and
+    # the refusal named the one knob that could not fix it.
+    #
+    # Dissolve is gated SEPARATELY from the weld, because the two conditions
+    # that used to share one flag are different questions:
+    #
+    #   "the caller asked for zero welding"  -> still wants zero-area faces
+    #                                           repaired; a zero-area face is
+    #                                           degenerate at ANY threshold,
+    #                                           including Blender's 1e-6 floor,
+    #                                           so skipping protects nothing.
+    #   "the threshold is unrepresentable"   -> must skip, because the clamp to
+    #                                           1e-6 would be WIDER than asked.
+    #
+    # Folding them together meant `mergeDistance: 0` silently left degenerate
+    # faces intact while the receipt still counted the object as cleaned.
+    # Measured on a cube plus five zero-area faces: 17 -> 12 at the default, and
+    # 17 -> 17 at mergeDistance 0, both reporting objectsCleaned 1.
+    if dissolve_threshold is not None:
+        bpy.ops.mesh.dissolve_degenerate(threshold=min(dissolve_threshold, 1.0))
 
     # NOT gated. Recalculating normals outward has no threshold and cannot
     # delete geometry, and skipping the whole function handed back a mesh with
@@ -254,6 +256,7 @@ def main():
 
     scaled_objects = 0
     weld_skipped = 0
+    dissolve_skipped = 0
     largest_divisor = 1.0
     requested_merge = float(options.get("mergeDistance", 0.0001))
     for obj in objects:
@@ -280,8 +283,29 @@ def main():
                 # threshold larger than asked for on exactly the objects whose
                 # scale makes them fragile. Skipping the WELD destroys nothing.
                 weld_skipped += 1
-            # The other repairs still run either way.
-            clean_geometry(obj, local_merge, weld=weldable)
+
+            # A SEPARATE question from weldability — see clean_geometry.
+            #
+            #   requested 0     -> "merge nothing, but still repair": dissolve at
+            #                      the 1e-6 floor, which removes only faces that
+            #                      are degenerate at any threshold.
+            #   representable   -> dissolve at the same local threshold.
+            #   unrepresentable -> skip, because the clamp would exceed what was
+            #                      asked for. This is the r11 data-loss fix.
+            if requested_merge <= 0.0:
+                dissolve_threshold = BLENDER_MIN_THRESHOLD
+            elif local_merge >= BLENDER_MIN_THRESHOLD:
+                dissolve_threshold = local_merge
+            else:
+                dissolve_threshold = None
+                dissolve_skipped += 1
+
+            clean_geometry(
+                obj,
+                local_merge,
+                weld=weldable,
+                dissolve_threshold=dissolve_threshold,
+            )
             cleaned += 1
         # Only unwrap what is actually missing UVs: re-unwrapping an authored
         # layout would silently destroy an artist's work.
@@ -353,6 +377,11 @@ def main():
         # largest component is 1.
         "objectsWithNonUnitWorldScale": scaled_objects,
         "objectsWeldSkippedThresholdUnrepresentable": weld_skipped,
+        # Reported separately from the weld counter, which named only welding
+        # and called a threshold "unrepresentable" when the caller had simply
+        # asked for zero. A caller cannot act on a repair it is not told was
+        # skipped.
+        "objectsDissolveSkippedThresholdUnrepresentable": dissolve_skipped,
         "largestThresholdDivisor": largest_divisor,
         "mergeDistanceRequestedSceneUnits": requested_merge,
         "outputBytes": exported_bytes,

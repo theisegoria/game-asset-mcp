@@ -879,3 +879,52 @@ describe.skipIf(!haveBlender)('splitting scale between node and vertices changes
     expect(nodeScaled.trianglesAfter).toBe(nodeScaled.trianglesBefore);
   }, 600_000);
 });
+
+/**
+ * `mergeDistance: 0` means "merge nothing", NOT "repair nothing".
+ *
+ * The weld gate and the dissolve gate were one flag, folding together two
+ * different questions: "the caller asked for zero welding" and "the threshold
+ * cannot be expressed". Only the second is a reason to skip the dissolve — a
+ * zero-area face is degenerate at ANY threshold, including Blender's 1e-6 floor,
+ * so skipping it there protects against nothing. Meanwhile the receipt still
+ * counted the object as cleaned.
+ *
+ * The caller most likely to pass 0 is the one protecting small parts — screws,
+ * gems, PCB detail — which is exactly who most needs the repair.
+ */
+describe.skipIf(!haveBlender)('merging nothing still repairs degenerate faces', () => {
+  const fixture = fileURLToPath(new URL('./fixtures/real/degenerate_faces.glb', import.meta.url));
+
+  const run = async (mergeDistance: number): Promise<Record<string, number>> => {
+    const dir = await tmpDir();
+    const result = await runBlenderScript(
+      packagedScript('blender_normalize.py'),
+      {
+        input: fixture,
+        output: path.join(dir, `deg_${mergeDistance}.glb`),
+        unwrapMissingUVs: false,
+        cleanGeometry: true,
+        mergeDistance,
+        normalizeMaterials: true,
+        angleLimitDegrees: 66,
+        islandMargin: 0.002,
+      },
+      { timeoutMs: 300_000 },
+    );
+    return result.receipt as Record<string, number>;
+  };
+
+  it('removes zero-area faces at mergeDistance 0, as it does at the default', async () => {
+    const [atDefault, atZero] = await Promise.all([run(0.0001), run(0)]);
+
+    // 7 triangles in, 5 of them zero-area. Measured before the fix: 7 -> 2 at
+    // the default and 7 -> 7 at zero, BOTH reporting objectsCleaned 1.
+    expect(atDefault.trianglesAfter).toBe(2);
+    expect(atZero.trianglesAfter).toBe(2);
+    // The weld genuinely is skipped at 0 — that half was always right, and this
+    // pins that the fix did not simply turn the guard off.
+    expect(atZero.objectsWeldSkippedThresholdUnrepresentable).toBe(1);
+    expect(atZero.objectsDissolveSkippedThresholdUnrepresentable).toBe(0);
+  }, 600_000);
+});
