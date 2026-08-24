@@ -83,6 +83,34 @@ def select_only(obj):
     bpy.context.view_layer.objects.active = obj
 
 
+def apply_object_scale(obj):
+    """Bake the object's scale into its vertices, returning the factor applied.
+
+    mergeDistance is documented as "scene units" and was applied to LOCAL vertex
+    coordinates, while every size this pipeline reports — boundingBox.sizeMeters
+    and the min/max dimension policies — is world space, measured after node
+    transforms. On an asset whose node carries a scale, those are different
+    units by exactly that factor.
+
+    This is not exotic: the reference mesh committed to this repository has a
+    node scale of 100, so the default 0.0001 acted as 1 CENTIMETRE on a 2.2 m
+    weapon. Assets authored in centimetres or millimetres and scaled at the node
+    are the ordinary output of Blender, Maya and FBX round-trips. Measured at
+    defaults, a 0.69 m prop lost 96% of its triangles and was still reported
+    ready to texture.
+
+    Baking the scale makes local and world the same units, so the documented
+    meaning of mergeDistance becomes the true one. World-space geometry is
+    unchanged by this: it moves the same factor from the node to the vertices.
+    """
+    scale = tuple(obj.scale)
+    if abs(scale[0] - 1.0) < 1e-9 and abs(scale[1] - 1.0) < 1e-9 and abs(scale[2] - 1.0) < 1e-9:
+        return 1.0
+    select_only(obj)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    return max(abs(scale[0]), abs(scale[1]), abs(scale[2]))
+
+
 def clean_geometry(obj, merge_distance):
     """Weld coincident vertices and dissolve zero-area faces."""
     select_only(obj)
@@ -172,8 +200,17 @@ def main():
     renamed_total = 0
     opaque_total = 0
 
+    scales_applied = 0
+    largest_scale_applied = 1.0
     for obj in objects:
         if options.get("cleanGeometry", True):
+            # Bake the node scale FIRST, so mergeDistance means what the tool
+            # documents it to mean — scene units — rather than local units that
+            # differ from world by the node's scale factor.
+            factor = apply_object_scale(obj)
+            if factor != 1.0:
+                scales_applied += 1
+                largest_scale_applied = max(largest_scale_applied, factor)
             clean_geometry(obj, float(options.get("mergeDistance", 0.0001)))
             cleaned += 1
         # Only unwrap what is actually missing UVs: re-unwrapping an authored
@@ -240,6 +277,8 @@ def main():
         "objectsDecimated": decimated,
         "materialsRenamed": renamed_total,
         "materialsForcedOpaque": opaque_total,
+        "objectScalesApplied": scales_applied,
+        "largestScaleApplied": largest_scale_applied,
         "outputBytes": exported_bytes,
         "blenderVersion": bpy.app.version_string,
     }

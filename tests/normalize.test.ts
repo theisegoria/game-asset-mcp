@@ -628,3 +628,93 @@ describe('an explicit destination never builds directories', () => {
     expect(created).not.toContain('~');
   }, 120_000);
 });
+
+describe('the verdict comes from the file, not the receipt', () => {
+  async function normalizeWith(stubBody: string, extra: Record<string, unknown> = {}) {
+    const dir = await tmpDir();
+    const source = path.join(dir, 'src.glb');
+    await fs.copyFile(uvlessMesh, source);
+    const stub = path.join(dir, 'blender.sh');
+    await fs.writeFile(stub, `#!/bin/sh\n${stubBody}\n`);
+    await fs.chmod(stub, 0o755);
+
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
+      env: {
+        ...process.env,
+        ASSET_LOG_LEVEL: 'error',
+        ASSET_OUTPUT_DIR: path.join(dir, 'ws'),
+        BLENDER_PATH: stub,
+      },
+    });
+    const client = new Client({ name: 'verdict', version: '1.0.0' });
+    await client.connect(transport);
+    try {
+      return await client.callTool({
+        name: 'normalize_mesh',
+        arguments: { modelPath: source, ...extra },
+      });
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  // Copies the SOURCE through, so the staged file parses and has UVs... except
+  // the receipt lies about them. The verdict must follow the file.
+  const COPY_SOURCE =
+    `in=$(printf '%s' "$*" | sed -n 's/.*"input": *"\\([^"]*\\)".*/\\1/p')\n` +
+    `out=$(printf '%s' "$*" | sed -n 's/.*"output": *"\\([^"]*\\)".*/\\1/p')\n` +
+    `cp "$in" "$out"`;
+
+  it('does not report ready when the receipt merely omits the UV count', async () => {
+    // `Number(receipt.objectsMissingUVsAfter ?? 0) === 0` turned UNKNOWN into
+    // zero into "ready" — a silent fallback on the most load-bearing field.
+    // The fixture genuinely has no UVs, so a measured verdict must say so.
+    const result = await normalizeWith(
+      `${COPY_SOURCE}\necho 'NORMALIZE_RECEIPT={"input":"x","output":"y","meshObjects":2,` +
+      `"trianglesBefore":2816,"objectsUnwrapped":2,"blenderVersion":"stub"}'`,
+    );
+
+    // isError is UNDEFINED on success, not false.
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse((result.content as { text: string }[])[0]!.text);
+    expect(parsed.hasUVsMeasured).toBe(false);
+    expect(parsed.readyToTexture).toBe(false);
+  }, 120_000);
+
+  it('reports the MEASURED triangle count beside the claimed one', async () => {
+    const result = await normalizeWith(
+      `${COPY_SOURCE}\necho 'NORMALIZE_RECEIPT={"input":"x","output":"y","meshObjects":2,` +
+      `"trianglesAfter":999999,"objectsMissingUVsAfter":0,"blenderVersion":"stub"}'`,
+    );
+
+    const parsed = JSON.parse((result.content as { text: string }[])[0]!.text);
+    expect(parsed.trianglesAfter).toBe(999999);
+    expect(parsed.trianglesMeasured).toBe(2816);
+  }, 120_000);
+
+  it('refuses a result with no drawable geometry, however the receipt reads', async () => {
+    // 94,208 bytes welded down to 500 reported trianglesAfter:0 AND
+    // readyToTexture:true in the same object, and replaced the destination
+    // atomically. An empty container is not a normalized mesh.
+    const emptyGltf = JSON.stringify({
+      asset: { version: '2.0' }, scenes: [{ nodes: [] }], scene: 0, nodes: [],
+    });
+    const result = await normalizeWith(
+      `out=$(printf '%s' "$*" | sed -n 's/.*"output": *"\\([^"]*\\)".*/\\1/p')\n` +
+      `node -e 'const j=${JSON.stringify(emptyGltf)};` +
+      `const b=Buffer.from(j);const p=(4-b.length%4)%4;const json=Buffer.concat([b,Buffer.alloc(p,32)]);` +
+      `const h=Buffer.alloc(12);h.write("glTF",0);h.writeUInt32LE(2,4);h.writeUInt32LE(12+8+json.length,8);` +
+      `const ch=Buffer.alloc(8);ch.writeUInt32LE(json.length,0);ch.write("JSON",4);` +
+      `require("fs").writeFileSync(process.argv[1],Buffer.concat([h,ch,json]))' "$out"\n` +
+      `echo 'NORMALIZE_RECEIPT={"input":"x","output":"y","meshObjects":2,"trianglesAfter":0,` +
+      `"objectsMissingUVsAfter":0,"blenderVersion":"stub"}'`,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toMatch(/no drawable geometry/);
+  }, 120_000);
+});

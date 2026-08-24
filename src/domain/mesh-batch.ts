@@ -220,7 +220,12 @@ async function prepareOne(
   // observed to have no UVs at all. Where they disagree, the measurement wins
   // and the disagreement is surfaced rather than averaged away.
   item.trianglesAfterMeasured = inspection.triangleCount;
-  if (receipt.trianglesAfter !== undefined && receipt.trianglesAfter !== inspection.triangleCount) {
+  // Tests the value REPORTED, not the raw receipt. The `?? 0` above fabricates
+  // a claim when the normalizer says nothing, and the guard used to exempt
+  // exactly that fabrication — so an item could report trianglesAfter 0 beside
+  // trianglesAfterMeasured 2050 and leave the flag whose whole job is to notice
+  // that silent, under "All 1 mesh(es) are game-ready."
+  if (item.trianglesAfter !== inspection.triangleCount) {
     item.receiptDisagreed = true;
   }
   if ((receipt.objectsUnwrapped ?? 0) > 0 && !inspection.hasUVs) {

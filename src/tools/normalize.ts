@@ -212,6 +212,16 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         if (!reservationHeld) return true;
         reservationHeld = false;
         try {
+          // Only remove what is still OUR placeholder. The reservation is a
+          // zero-byte file; a Blender run takes minutes, and in that window
+          // another call holding overwrite:true can legitimately rename a real
+          // mesh onto this path. Unconditional rm deleted that call's verified
+          // output — leaving it holding a receipt with a byte count and SHA-256
+          // for bytes that no longer existed anywhere. The exclusive create
+          // fixed the race to CLAIM the name; this is the race to RELEASE it.
+          const standing = await fs.stat(output).catch(() => null);
+          if (standing === null) return true;
+          if (standing.size !== 0) return true;
           await fs.rm(output, { force: true });
           return true;
         } catch {
@@ -297,8 +307,15 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
       // came back readyToTexture:true — staging made that WORSE, because the
       // replacement is now atomic. The repository already owns the real check
       // and batch_prepare_meshes already uses it: parse the thing.
+      // The RESULT is bound. It used to be `await inspectGltf(staging);` with no
+      // assignment — a try/catch masquerading as a verification, while every
+      // geometry fact reported still came from Blender's receipt. A run that
+      // welded a 94,208-byte mesh down to 500 bytes reported trianglesAfter: 0
+      // and readyToTexture: true in the same object, and the reviewed
+      // destination was replaced atomically.
+      let produced;
       try {
-        await inspectGltf(staging);
+        produced = await inspectGltf(staging);
       } catch (err) {
         await discardStaging();
         await releaseReservation();
@@ -325,7 +342,18 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
 
       const receipt = result.receipt as Record<string, number | string>;
       const uvsBefore = Number(receipt.objectsMissingUVsBefore ?? 0);
-      const uvsAfter = Number(receipt.objectsMissingUVsAfter ?? 0);
+
+      // A mesh that normalized down to nothing is not a normalized mesh. This
+      // is measured, not claimed: the receipt can say whatever it likes.
+      if (produced.triangleCount === 0) {
+        await discardStaging();
+        await releaseReservation();
+        throw invalidState(
+          `normalization produced a file with no drawable geometry (0 triangles). ` +
+          `This usually means mergeDistance was too large for the mesh's coordinate space. ` +
+          `The destination ${output} is unchanged.`,
+        );
+      }
 
       // The receipt is spread FIRST so measured values win. It used to come
       // last, so Blender's claim overrode the bytes actually read back — a stub
@@ -348,14 +376,21 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         outputPath: output,
         outputBytes: bytes.byteLength,
         outputSHA256: sha256(bytes),
-        /** True only when nothing is left that would block texturing. */
-        readyToTexture: uvsAfter === 0,
-        nextStep:
-          uvsAfter === 0
-            ? uvsBefore > 0
-              ? `Generated UVs for ${uvsBefore} object(s); the mesh can now be textured.`
-              : 'Mesh already had UVs; geometry and materials were normalized.'
-            : `${uvsAfter} object(s) still have no UVs and cannot be textured.`,
+        /**
+         * MEASURED from the produced file, never taken from the receipt.
+         * It was `Number(receipt.objectsMissingUVsAfter ?? 0) === 0`, so a
+         * receipt that simply omitted the field turned UNKNOWN into zero into
+         * "ready" — a silent fallback on the most load-bearing field in the
+         * response.
+         */
+        readyToTexture: produced.hasUVs && produced.triangleCount > 0,
+        trianglesMeasured: produced.triangleCount,
+        hasUVsMeasured: produced.hasUVs,
+        nextStep: produced.hasUVs
+          ? uvsBefore > 0
+            ? `Generated UVs for ${uvsBefore} object(s); the mesh can now be textured.`
+            : 'Mesh already had UVs; geometry and materials were normalized.'
+          : 'The result still has no UVs and cannot be textured.',
       });
     }),
   );

@@ -29,6 +29,8 @@ import { guard, ok, type ToolContext } from './context.js';
 export function createMeshBatchDeps(options: {
   blenderAvailable: boolean;
   timeoutMs: number;
+  /** Passed through to the repair step so the budget can actually be met. */
+  targetTriangles?: number | undefined;
 }): MeshBatchDeps {
   return {
     access: (file) => fs.access(file),
@@ -59,6 +61,12 @@ export function createMeshBatchDeps(options: {
           normalizeMaterials: true,
           angleLimitDegrees: 66,
           islandMargin: 0.002,
+          // The one budget this tool exposes was never passed to the step that
+          // could satisfy it, so a mesh over the limit was normalized, measured,
+          // and failed for a policy its own repair had no chance of meeting.
+          ...(options.targetTriangles !== undefined
+            ? { targetTriangles: options.targetTriangles }
+            : {}),
         },
         { timeoutMs: options.timeoutMs },
       );
@@ -128,6 +136,7 @@ export function registerBatchTools(server: McpServer, ctx: ToolContext): void {
       const deps = createMeshBatchDeps({
         blenderAvailable,
         timeoutMs: args.timeoutSecondsPerItem * 1000,
+        ...(args.maxTriangles !== undefined ? { targetTriangles: args.maxTriangles } : {}),
       });
 
       const batch = await runMeshBatch(
