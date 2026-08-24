@@ -417,3 +417,131 @@ describe('the tool cleans up after itself', () => {
     }
   }, 120_000);
 });
+
+// The write is STAGED, so the destination is only ever touched by a verified
+// result. These use stub Blenders rather than a real install: each defect
+// depends on how Blender FAILS, not on it being present.
+describe('the destination is only replaced by a verified write', () => {
+  async function callNormalize(dir: string, stub: string, args: Record<string, unknown>) {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
+      env: {
+        ...process.env,
+        ASSET_LOG_LEVEL: 'error',
+        ASSET_OUTPUT_DIR: path.join(dir, 'ws'),
+        BLENDER_PATH: stub,
+      },
+    });
+    const client = new Client({ name: 'staging-test', version: '1.0.0' });
+    await client.connect(transport);
+    try {
+      return await client.callTool({ name: 'normalize_mesh', arguments: args });
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  async function stubBlender(dir: string, body: string): Promise<string> {
+    const stub = path.join(dir, 'blender-stub.sh');
+    await fs.writeFile(stub, `#!/bin/sh\n${body}\n`);
+    await fs.chmod(stub, 0o755);
+    return stub;
+  }
+
+  const HEALTHY_RECEIPT =
+    'echo \'NORMALIZE_RECEIPT={"input":"x","output":"y","meshObjects":3,' +
+    '"trianglesBefore":100,"trianglesAfter":80,"objectsMissingUVsBefore":3,' +
+    '"objectsMissingUVsAfter":0,"objectsUnwrapped":3,"objectsCleaned":0,' +
+    '"objectsDecimated":0,"materialsRenamed":0,"materialsForcedOpaque":0,' +
+    '"blenderVersion":"stub"}\'\nexit 0';
+
+  it('refuses when Blender claims success but writes nothing', async () => {
+    const dir = await tmpDir();
+    const source = path.join(dir, 'src.glb');
+    await fs.copyFile(uvlessMesh, source);
+    // A REAL GLB, deliberately. If the victim were arbitrary bytes the
+    // magic-number check would catch this and the staging guard would never be
+    // exercised — the test would pass for the wrong reason.
+    const victim = path.join(dir, 'victim.glb');
+    await fs.copyFile(uvlessMesh, victim);
+    const victimBefore = await fs.readFile(victim);
+
+    // Writing straight to the destination made the read-back hash the file that
+    // was ALREADY there, returning readyToTexture:true for an unrepaired mesh.
+    const result = await callNormalize(dir, await stubBlender(dir, HEALTHY_RECEIPT), {
+      modelPath: source,
+      outputPath: victim,
+      overwrite: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(await fs.readFile(victim)).toEqual(victimBefore);
+    // "wrote nothing" and "wrote garbage" are different diagnoses pointing at
+    // different causes, so the message is pinned, not just the refusal.
+    expect(JSON.stringify(result.content)).toMatch(/produced an empty file/);
+  }, 120_000);
+
+  it('leaves the destination untouched when a permitted overwrite then fails', async () => {
+    const dir = await tmpDir();
+    const source = path.join(dir, 'src.glb');
+    await fs.copyFile(uvlessMesh, source);
+    const victim = path.join(dir, 'victim.glb');
+    await fs.writeFile(victim, 'REVIEWED-ORIGINAL');
+
+    const result = await callNormalize(dir, await stubBlender(dir, 'echo boom >&2\nexit 1'), {
+      modelPath: source,
+      outputPath: victim,
+      overwrite: true,
+    });
+
+    // The file used to be replaced and the caller told the call had FAILED.
+    expect(result.isError).toBe(true);
+    expect(await fs.readFile(victim, 'utf8')).toBe('REVIEWED-ORIGINAL');
+  }, 120_000);
+
+  it('leaves no staging file behind on failure', async () => {
+    const dir = await tmpDir();
+    const source = path.join(dir, 'src.glb');
+    await fs.copyFile(uvlessMesh, source);
+
+    await callNormalize(dir, await stubBlender(dir, 'echo boom >&2\nexit 1'), {
+      modelPath: source,
+      outputPath: path.join(dir, 'out.glb'),
+    });
+
+    const leftovers = (await fs.readdir(dir)).filter((name) => name.includes('staging'));
+    expect(leftovers).toEqual([]);
+  }, 120_000);
+
+  it('refuses a staged file that is not a GLB', async () => {
+    const dir = await tmpDir();
+    const source = path.join(dir, 'src.glb');
+    await fs.copyFile(uvlessMesh, source);
+    const victim = path.join(dir, 'victim.glb');
+    await fs.copyFile(uvlessMesh, victim);
+    const victimBefore = await fs.readFile(victim);
+
+    // Writes a non-empty, non-GLB file to whatever path it was told to write,
+    // so neither the missing-file nor the empty-file check can fire. Only the
+    // magic number distinguishes a mesh from a plausible-looking artefact.
+    const liar = await stubBlender(
+      dir,
+      `out=$(printf '%s' "$*" | sed -n 's/.*"output": *"\\([^"]*\\)".*/\\1/p')
+` +
+      `printf 'THIS IS NOT A GLB AT ALL' > "$out"
+` +
+      HEALTHY_RECEIPT,
+    );
+    const result = await callNormalize(dir, liar, {
+      modelPath: source,
+      outputPath: victim,
+      overwrite: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(await fs.readFile(victim)).toEqual(victimBefore);
+  }, 120_000);
+});

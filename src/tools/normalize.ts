@@ -185,13 +185,38 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         }
       };
 
+      // Blender writes to a STAGING path, never to the destination.
+      //
+      // Writing straight to the destination made the read-back — this module's
+      // whole evidence primitive, "the bytes on disk are the evidence" — unable
+      // to tell "Blender wrote this" from "the file that was already there".
+      // With overwrite:true onto an existing file, a Blender that wrote nothing
+      // produced a SUCCESS carrying the old file's size and hash, readyToTexture
+      // true, and "Generated UVs for 3 object(s)" — handing a downstream texture
+      // step the unrepaired mesh with an affirmative go-ahead. It is reachable
+      // with real Blender: blender_normalize.py discards the export operator's
+      // result, and a CANCELLED operator does not raise.
+      //
+      // Staging also means a failed run cannot damage the destination at all,
+      // which previously happened whenever overwrite:true was granted and the
+      // run then failed: the file was replaced and the caller was told the call
+      // had FAILED.
+      const staging = await uniqueFilePath(outputDir, `.${path.basename(output)}.staging.glb`);
+      const discardStaging = async (): Promise<void> => {
+        try {
+          await fs.rm(staging, { force: true });
+        } catch {
+          // Never displaces the cause.
+        }
+      };
+
       let result;
       try {
         result = await runBlenderScript(
         packagedScript('blender_normalize.py'),
         {
           input: source,
-          output,
+          output: staging,
           unwrapMissingUVs: args.unwrapMissingUVs,
           cleanGeometry: args.cleanGeometry,
           mergeDistance: args.mergeDistance,
@@ -203,6 +228,7 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         { timeoutMs: args.timeoutSeconds * 1000 },
         );
       } catch (err) {
+        await discardStaging();
         const cleaned = await releaseReservation();
         if (!cleaned) {
           throw invalidState(
@@ -213,18 +239,45 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         throw err;
       }
 
-      // Confirm the file exists and hash it: a receipt printed by a subprocess
-      // is a claim, and the bytes on disk are the evidence.
+      // The bytes on disk are the evidence — and because they are at a path
+      // only this run could have written, they are evidence about THIS run.
       let bytes: Uint8Array;
       try {
-        bytes = new Uint8Array(await fs.readFile(output));
+        bytes = new Uint8Array(await fs.readFile(staging));
       } catch {
+        await discardStaging();
         await releaseReservation();
-        throw invalidState(`Blender reported success but ${output} was not written`);
+        throw invalidState(
+          `Blender reported success but wrote nothing. The destination ${output} is unchanged.`,
+        );
       }
       if (bytes.byteLength === 0) {
+        await discardStaging();
         await releaseReservation();
-        throw invalidState(`Blender reported success but ${output} is empty`);
+        throw invalidState(
+          `Blender reported success but produced an empty file. The destination ${output} is unchanged.`,
+        );
+      }
+      if (Buffer.from(bytes.subarray(0, 4)).toString('utf8') !== 'glTF') {
+        await discardStaging();
+        await releaseReservation();
+        throw invalidState(
+          `Blender produced a file that is not a GLB. The destination ${output} is unchanged.`,
+        );
+      }
+
+      // Verified, so it may now replace the destination. rename is atomic
+      // within a filesystem: a reader sees the old file or the new one, never a
+      // half-written one, and a crash here cannot leave a truncated mesh.
+      try {
+        await fs.rename(staging, output);
+      } catch (err) {
+        await discardStaging();
+        await releaseReservation();
+        throw invalidState(
+          `normalization succeeded but the result could not be moved into place at ${output}: ` +
+          `${err instanceof Error ? err.message : String(err)}. The destination is unchanged.`,
+        );
       }
       reservationHeld = false;
 

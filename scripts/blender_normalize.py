@@ -204,7 +204,12 @@ def main():
     after_missing_uvs = sum(0 if has_uvs(obj) else 1 for obj in mesh_objects())
 
     log(f"exporting {target}")
-    bpy.ops.export_scene.gltf(
+    # The operator's result was discarded, and a bpy.ops operator returning
+    # {'CANCELLED'} does NOT raise — so a failed export printed a healthy
+    # receipt and exited 0. Downstream, that became a success carrying the
+    # previous file's size and hash. Both the result and the file are checked
+    # here, because neither alone is proof.
+    export_result = bpy.ops.export_scene.gltf(
         filepath=target,
         export_format="GLB",
         export_apply=True,
@@ -212,6 +217,15 @@ def main():
         export_texcoords=True,
         export_materials="EXPORT",
     )
+    if "FINISHED" not in set(export_result):
+        raise RuntimeError(
+            f"glTF export did not finish: operator returned {sorted(export_result)}"
+        )
+    if not os.path.exists(target):
+        raise RuntimeError(f"glTF export reported success but {target} does not exist")
+    exported_bytes = os.path.getsize(target)
+    if exported_bytes == 0:
+        raise RuntimeError(f"glTF export reported success but {target} is empty")
 
     receipt = {
         "input": source,
@@ -226,6 +240,7 @@ def main():
         "objectsDecimated": decimated,
         "materialsRenamed": renamed_total,
         "materialsForcedOpaque": opaque_total,
+        "outputBytes": exported_bytes,
         "blenderVersion": bpy.app.version_string,
     }
     print("NORMALIZE_RECEIPT=" + json.dumps(receipt))
