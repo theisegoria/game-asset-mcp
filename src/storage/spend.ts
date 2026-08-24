@@ -86,6 +86,42 @@ export class SpendLedger {
    *
    * Returns the entry id so the caller can reconcile or release it.
    */
+  /**
+   * Enforce the ceiling WITHOUT recording an entry.
+   *
+   * `reserve` both checks and charges, and it can only run once the job exists
+   * — which is after the mesh has already been uploaded. So a caller at their
+   * ceiling used to upload up to 256 MiB to the provider and only then be
+   * refused, while the documentation promised the ceiling was enforced "before
+   * contacting the provider". This is the check that makes that true; the
+   * charge still happens once, later, at the billable call.
+   */
+  assertHeadroom(tool: string, units?: number): void {
+    if (this.limitCents === undefined) return;
+    const estimate = estimateCost(tool, units ?? 1);
+    const spent = this.spentCents();
+    if (spent + estimate.cents > this.limitCents) {
+      throw new AssetPipelineError(
+        'SPEND_LIMIT_EXCEEDED',
+        `refusing ${tool} before contacting the provider: it would cost about ` +
+          `${formatCents(estimate.cents)} and only ` +
+          `${formatCents(Math.max(0, this.limitCents - spent))} of the ` +
+          `${formatCents(this.limitCents)} session limit remains. ` +
+          'Raise ASSET_SPEND_LIMIT_CENTS or start a new workspace.',
+        {
+          details: {
+            tool,
+            estimatedCents: estimate.cents,
+            spentCents: spent,
+            limitCents: this.limitCents,
+            confidence: estimate.confidence,
+            basis: estimate.basis,
+          },
+        },
+      );
+    }
+  }
+
   async reserve(params: {
     tool: string;
     units?: number;

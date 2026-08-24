@@ -49,7 +49,7 @@ The server speaks MCP over **stdio**. Started directly in a terminal it will sim
 
 ## Configuration
 
-Copy `.env.example` to `.env`, or set the variables in your MCP client's `env` block (which is usually the better option — see the snippets below).
+Set these in your MCP client's `env` block — see the snippets below. **There is no `.env` loading**: the server reads `process.env` and nothing else, so a `.env` file on disk does nothing unless your shell or client exports it first.
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
@@ -68,7 +68,7 @@ This catches almost everyone. **A Tripo Studio web subscription does not fund AP
 
 ### Capping what can be spent
 
-Set `ASSET_SPEND_LIMIT_CENTS` and every credit-consuming tool checks it **before** contacting the provider, refusing with the remaining balance named rather than overspending. The ceiling is in US cents because the two providers bill in different units — Tripo in $0.01 credits, Leonardo in USD — and a limit mixing them would mean nothing.
+Set `ASSET_SPEND_LIMIT_CENTS` and every credit-consuming tool checks it **before** contacting the provider at all — including before a mesh or reference image is uploaded — refusing with the remaining balance named rather than overspending. The ceiling is in US cents because the two providers bill in different units — Tripo in $0.01 credits, Leonardo in USD — and a limit mixing them would mean nothing.
 
 Where a provider publishes a per-call price we use it. Where it does not, the guard uses a deliberately pessimistic placeholder and `get_spend_report` says which figures are which. It is a guard, not an invoice: real charges should come in at or under the estimate, never above it.
 
@@ -154,7 +154,7 @@ Only nine tools can cost you money, and each one says so in its description befo
 
 ## The free local half (no API keys, no network)
 
-Eleven of the twenty tools never contact a provider, never spend a credit, and never touch the network. If you already have meshes, this is the whole product and you can stop reading at the end of this section.
+Eleven of the twenty tools never spend a credit. **Five of those never touch the network at all** — the ones below. (The other six are free but still talk to the provider or the filesystem: polling a job and downloading its result cost nothing, but they are network calls.) If you already have meshes, these five are the whole product and you can stop reading at the end of this section.
 
 | Tool | What it answers |
 | --- | --- |
@@ -257,7 +257,7 @@ assets/generated/
 
 ## Troubleshooting
 
-Every error carries a machine-readable `code` and a `retryable` flag, so an agent can decide what to do next without parsing prose.
+Every error carries a machine-readable `error` field naming the class, plus a `retryable` flag, so an agent can decide what to do next without parsing prose. The names below are the values of that `error` field.
 
 **The server starts and immediately exits — the client says only "connection closed".**
 Three known causes, and the server now names the first two itself rather than dying silently.
@@ -275,7 +275,7 @@ The tool you called needs a provider you have not configured. The message names 
 The key is wrong, revoked, or the wrong provider's. Two specific traps: Leonardo keys need API access enabled on the account (a web login alone does not grant it), and a Tripo key with no **API** credit balance can fail on the first paid call even though the key itself is valid. See the credits warning above.
 
 **`RATE_LIMITED` — HTTP 429.**
-Marked retryable. Polls and downloads back off and retry automatically (400 ms, 800 ms, 1600 ms, capped at 8 s). Generation requests do not — retry those yourself once the window clears, deliberately, because they cost money.
+Marked retryable. **Polls** back off and retry automatically (400 ms, 800 ms, 1600 ms, capped at 8 s). **Downloads do not retry** — `download_asset` streams in one attempt, so re-issue it yourself; because provider URLs expire, re-poll with `get_asset_job` first rather than retrying a stale URL. Generation requests do not retry either, deliberately, because they cost money. A 429 during a download surfaces as `PROVIDER_HTTP` with status 429, not as `RATE_LIMITED`.
 
 **`PROVIDER_TASK_FAILED` — the task failed provider-side.**
 The HTTP call succeeded and the generation did not. The provider's own message is preserved in the error details. A moderation refusal also lands here: rewrite the prompt rather than retrying it unchanged. Note that a Tripo response can carry HTTP 200 with a non-zero envelope `code`; that is a failure, and this server treats it as one instead of reporting a phantom success.
@@ -301,7 +301,7 @@ A provider-supplied filename tried to resolve outside your workspace. The write 
 
 This is early software, and the parts most likely to drift are marked as such rather than quietly assumed.
 
-**Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. The paths are the **first** thing the live smoke test checks, because a wrong path returns a 404 that looks exactly like a bad API key.
+**Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. If they are wrong you will see a 404 that looks exactly like a bad API key, so check the path before the key.
 
 **No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 279 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
 

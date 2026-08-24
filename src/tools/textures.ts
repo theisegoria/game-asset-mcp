@@ -75,6 +75,10 @@ export function registerTextureTools(server: McpServer, ctx: ToolContext): void 
       }
 
       const provider = ctx.model3dProvider();
+      // Before ANY provider contact, including the mesh upload. reserve() can
+      // only run once the job exists, which is after that upload — so a caller
+      // at their ceiling used to ship the whole mesh and be refused afterwards.
+      ctx.assertHeadroom('texture_existing_asset');
       let job: AssetJob;
       let modelToken: string | undefined;
       let originalModelTaskId: string | undefined;

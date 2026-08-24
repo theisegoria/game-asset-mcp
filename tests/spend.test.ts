@@ -152,3 +152,41 @@ describe('reporting', () => {
     expect(formatCents(1234)).toBe('$12.34');
   });
 });
+
+describe('the ceiling is enforced before the provider is contacted at all', () => {
+  it('refuses without recording an entry', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'headroom-'));
+    try {
+      const ledger = await SpendLedger.open(dir, 10);
+      // reserve() both checks AND charges, and cannot run until the job exists
+      // — which is after the mesh upload. assertHeadroom is what makes the
+      // documented "before contacting the provider" promise true.
+      expect(() => ledger.assertHeadroom('create_3d_asset')).toThrow(/before contacting the provider/);
+      expect(ledger.spentCents()).toBe(0);
+      expect(ledger.summary().callCount).toBe(0);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows the call when there is headroom, still recording nothing', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'headroom-'));
+    try {
+      const ledger = await SpendLedger.open(dir, 10_000);
+      expect(() => ledger.assertHeadroom('create_3d_asset')).not.toThrow();
+      expect(ledger.spentCents()).toBe(0);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does nothing at all when no ceiling is configured', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'headroom-'));
+    try {
+      const ledger = await SpendLedger.open(dir);
+      expect(() => ledger.assertHeadroom('create_3d_asset')).not.toThrow();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

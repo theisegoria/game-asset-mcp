@@ -63,6 +63,8 @@ export function registerAsset3DTools(server: McpServer, ctx: ToolContext): void 
       }
 
       const provider = ctx.model3dProvider();
+      // Before ANY provider contact, including the reference-image upload.
+      ctx.assertHeadroom('create_3d_asset');
       let job: AssetJob;
       let imageToken: string | undefined;
       let imageUrl: string | undefined;

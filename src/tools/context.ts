@@ -40,6 +40,8 @@ export interface ToolContext {
     tool: string,
     options?: { units?: number; assetJobId?: string },
   ): Promise<{ entryId: string; estimatedCents: number }>;
+  /** Enforce the ceiling before any provider contact, recording nothing. */
+  assertHeadroom(tool: string, units?: number): void;
 }
 
 export function createToolContext(params: {
@@ -61,6 +63,9 @@ export function createToolContext(params: {
     logger,
     store,
     spend,
+    assertHeadroom(tool, units) {
+      spend.assertHeadroom(tool, units);
+    },
     async charge(tool, options) {
       const reservation = await spend.reserve({
         tool,
