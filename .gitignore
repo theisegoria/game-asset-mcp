@@ -16,3 +16,8 @@ assets/generated/
 *.log
 .vscode/
 .idea/
+
+# Python bytecode from running the shipped Blender script locally.
+# Never source, always host- and version-specific, and `files` sweeps scripts/.
+__pycache__/
+*.pyc
