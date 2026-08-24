@@ -14,7 +14,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -25,9 +25,15 @@ let workspace: string | undefined;
 
 beforeAll(() => {
   if (!existsSync(built)) return;
-  workspace = mkdtempSync(path.join(tmpdir(), 'asset-mcp-bin-'));
-  // Exactly what `npm install` creates in node_modules/.bin.
-  symlinkSync(built, path.join(workspace, 'game-asset-mcp'));
+  // realpathSync matters: on macOS tmpdir() is /var/folders/…, and /var is
+  // itself a symlink to /private/var. A relative link target computed from the
+  // shallower logical path resolves from the deeper real one and dangles.
+  workspace = realpathSync(mkdtempSync(path.join(tmpdir(), 'asset-mcp-bin-')));
+  // npm writes a RELATIVE link into node_modules/.bin
+  // (game-asset-mcp -> ../@theisegoria/game-asset-mcp/dist/server.js), so the
+  // link target is relative here too. An absolute link also reproduces the
+  // defect, but only the relative form is what an install actually creates.
+  symlinkSync(path.relative(workspace, built), path.join(workspace, 'game-asset-mcp'));
 });
 
 afterAll(() => {
