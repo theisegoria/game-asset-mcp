@@ -34,6 +34,7 @@ const EXPECTED_TOOLS = [
   'generate_sound_effect',
   'normalize_mesh',
   'get_spend_report',
+  'validate_game_asset',
 ];
 
 async function main() {

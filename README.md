@@ -141,6 +141,7 @@ The same server, described generically — a stdio child process:
 | `generate_sound_effect` | **Yes** | Generates a short game sound effect from a description — impacts, weapon reports, UI blips, or a seamless ambience loop. Polls and downloads inline. |
 | `create_game_prop` | **Yes — images only** | The intention-shaped entry point: plain-language request in, asset spec plus reference candidates out. Deliberately stops before the 3D spend so a human or agent picks the reference first. |
 | `list_asset_jobs` | No | Lists known jobs, newest first, as compact summaries. |
+| `validate_game_asset` | No | Judges a mesh against a shipping policy and returns pass/fail with per-check reasons — UVs, normals, tangents, triangle budget, materials, texture resolution, bounding-box sanity. Every threshold overridable. |
 | `get_spend_report` | No | What this workspace has spent, by tool, with remaining headroom — and whether each figure is a published price or a pessimistic placeholder. |
 
 Only six tools can cost you money, and each one says so in its description before it is called.
@@ -182,7 +183,7 @@ One paid call instead of two, and the geometry you already approved comes back u
 
 **Calls that spend provider credits:** `generate_asset_reference`, `generate_reference_variations`, `create_3d_asset`, `texture_existing_asset`, `generate_sound_effect`, and the image-generation step inside `create_game_prop`. Nothing else in this server can be charged for.
 
-**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`, `normalize_mesh`, `get_spend_report`. Poll, inspect, split and download as often as you like.
+**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset`, `get_spend_report`. Poll, inspect, split and download as often as you like.
 
 **A credit-consuming POST is never retried automatically.** This is a deliberate, load-bearing rule and it lives in the HTTP layer, not in each call site. When a request that creates a generation task fails — timeout, socket reset, 502 — the client *cannot tell* whether the provider accepted it before the connection broke. Retrying might be free; it might also double-charge you for a mesh you never receive. So it does not retry, the error comes straight back, and the decision to try again is yours. Idempotent reads — status polls, file downloads — retry freely with backoff, because they cost nothing to repeat.
 

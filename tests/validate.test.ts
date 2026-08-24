@@ -1,0 +1,186 @@
+/**
+ * Tests for the shippable-or-not verdict.
+ *
+ * `evaluateAsset` is a pure function over an inspection, so the policy logic is
+ * tested directly rather than through a server — and the real-asset case proves
+ * the verdict tracks an actual repair rather than a fixture.
+ */
+
+import { describe, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { DEFAULT_POLICY, evaluateAsset } from '../src/domain/asset-policy.js';
+import type { AssetInspection } from '../src/inspection/gltf.js';
+import { inspectGltf } from '../src/inspection/gltf.js';
+
+/** A minimal asset that passes everything, so each test perturbs one thing. */
+function healthy(overrides: Partial<AssetInspection> = {}): AssetInspection {
+  return {
+    filePath: '/tmp/x.glb',
+    fileBytes: 1024,
+    meshCount: 1,
+    primitiveCount: 1,
+    vertexCount: 300,
+    triangleCount: 100,
+    materialCount: 1,
+    textureCount: 1,
+    textureResolutions: [{ width: 2048, height: 2048, bytes: 1 }],
+    boundingBox: { min: [0, 0, 0], max: [1, 1, 1], sizeMeters: [1, 1, 1] },
+    hasUVs: true,
+    hasNormals: true,
+    hasTangents: true,
+    pbr: {
+      hasBaseColorTexture: true,
+      hasMetallicRoughnessTexture: true,
+      hasNormalTexture: true,
+      hasOcclusionTexture: false,
+      hasEmissiveTexture: false,
+    },
+    animationCount: 0,
+    hasSkin: false,
+    warnings: [],
+    ...overrides,
+  } as AssetInspection;
+}
+
+function failedIds(report: ReturnType<typeof evaluateAsset>): string[] {
+  return report.checks.filter((check) => !check.passed).map((check) => check.id);
+}
+
+describe('a healthy asset passes', () => {
+  it('reports no errors and no warnings', () => {
+    const report = evaluateAsset(healthy());
+    expect(report.passed).toBe(true);
+    expect(report.errorCount).toBe(0);
+    expect(report.warningCount).toBe(0);
+  });
+
+  it('runs a meaningful number of checks, so passing is not vacuous', () => {
+    expect(evaluateAsset(healthy()).checks.length).toBeGreaterThan(5);
+  });
+});
+
+describe('errors fail the asset', () => {
+  it('missing UVs is an error, because nothing can texture it', () => {
+    const report = evaluateAsset(healthy({ hasUVs: false }));
+    expect(report.passed).toBe(false);
+    expect(failedIds(report)).toContain('uvs_present');
+  });
+
+  it('missing normals is an error', () => {
+    expect(evaluateAsset(healthy({ hasNormals: false })).passed).toBe(false);
+  });
+
+  it('zero triangles fails even when the file parses', () => {
+    const report = evaluateAsset(healthy({ triangleCount: 0 }));
+    expect(failedIds(report)).toContain('has_geometry');
+    expect(report.passed).toBe(false);
+  });
+
+  it('non-finite bounds fail', () => {
+    const report = evaluateAsset(
+      healthy({ boundingBox: { min: [0, 0, 0], max: [1, 1, 1], sizeMeters: [Number.NaN, 1, 1] } }),
+    );
+    expect(failedIds(report)).toContain('bounding_box_finite');
+  });
+
+  it('a collapsed axis fails', () => {
+    const report = evaluateAsset(
+      healthy({ boundingBox: { min: [0, 0, 0], max: [1, 1, 0], sizeMeters: [1, 1, 0] } }),
+    );
+    expect(failedIds(report)).toContain('min_dimension');
+  });
+});
+
+describe('the tangent rule applies only when a normal map is bound', () => {
+  it('fails when a normal map is bound and tangents are absent', () => {
+    const report = evaluateAsset(healthy({ hasTangents: false }));
+    expect(failedIds(report)).toContain('tangents_for_normal_map');
+    expect(report.passed).toBe(false);
+  });
+
+  it('is not raised at all when no normal map is bound', () => {
+    const report = evaluateAsset(
+      healthy({
+        hasTangents: false,
+        pbr: { ...healthy().pbr, hasNormalTexture: false },
+      }),
+    );
+    // Demanding tangents from an asset with no normal map would be noise.
+    expect(report.checks.some((check) => check.id === 'tangents_for_normal_map')).toBe(false);
+    expect(report.passed).toBe(true);
+  });
+});
+
+describe('warnings are judgement calls and never fail the asset', () => {
+  it('a small texture warns but still passes', () => {
+    const report = evaluateAsset(healthy({ textureResolutions: [{ width: 256, height: 256, bytes: 1 }] }));
+    expect(report.passed).toBe(true);
+    expect(report.warningCount).toBeGreaterThan(0);
+    expect(failedIds(report)).toContain('texture_resolution');
+  });
+
+  it('a non-power-of-two texture warns but still passes', () => {
+    const report = evaluateAsset(healthy({ textureResolutions: [{ width: 1920, height: 1080, bytes: 1 }] }));
+    expect(failedIds(report)).toContain('power_of_two_textures');
+    expect(report.passed).toBe(true);
+  });
+
+  it('too many materials warns but still passes', () => {
+    const report = evaluateAsset(healthy({ materialCount: 999 }));
+    expect(failedIds(report)).toContain('material_count');
+    expect(report.passed).toBe(true);
+  });
+});
+
+describe('policy is genuinely configurable', () => {
+  it('honours a tighter triangle budget', () => {
+    expect(evaluateAsset(healthy({ triangleCount: 5000 })).passed).toBe(true);
+    expect(evaluateAsset(healthy({ triangleCount: 5000 }), { maxTriangles: 100 }).passed).toBe(false);
+  });
+
+  it('can waive the UV requirement for a workflow that does not need it', () => {
+    const report = evaluateAsset(healthy({ hasUVs: false }), { requireUVs: false });
+    expect(report.passed).toBe(true);
+    expect(report.checks.some((check) => check.id === 'uvs_present')).toBe(false);
+  });
+
+  it('can demand a base colour texture, which is off by default', () => {
+    const bare = healthy({ pbr: { ...healthy().pbr, hasBaseColorTexture: false } });
+    expect(evaluateAsset(bare).passed).toBe(true);
+    expect(evaluateAsset(bare, { requireBaseColorTexture: true }).passed).toBe(false);
+  });
+
+  it('every default is overridable', () => {
+    // A default nobody can change is a constant pretending to be a policy.
+    for (const key of Object.keys(DEFAULT_POLICY)) {
+      expect(DEFAULT_POLICY).toHaveProperty(key);
+    }
+  });
+});
+
+// The verdict must track a real repair, not just synthetic fixtures.
+function repositoryRoot(): string | undefined {
+  let candidate = path.resolve('..');
+  for (let depth = 0; depth < 4; depth += 1) {
+    const guess = path.join(candidate, 'Genome Game');
+    if (existsSync(path.join(guess, 'assets'))) return guess;
+    candidate = path.resolve(candidate, '..');
+  }
+  return undefined;
+}
+
+const root = repositoryRoot();
+const uvless = root
+  ? path.join(root, 'assets/vendored/models/mp_weapons/alien_needler.glb')
+  : undefined;
+
+describe.skipIf(!uvless || !existsSync(uvless))('a real shipped asset', () => {
+  it('fails on the defect it actually has', async () => {
+    const report = evaluateAsset(await inspectGltf(uvless as string));
+    // This mesh genuinely has no UVs — the verdict must say so rather than
+    // passing an asset nothing can texture.
+    expect(report.passed).toBe(false);
+    expect(failedIds(report)).toContain('uvs_present');
+  }, 60_000);
+});

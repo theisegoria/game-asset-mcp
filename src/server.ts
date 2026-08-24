@@ -27,6 +27,7 @@ import { registerPbrTools } from './tools/pbr.js';
 import { registerAudioTools } from './tools/audio.js';
 import { registerNormalizeTools } from './tools/normalize.js';
 import { registerSpendTools } from './tools/spend.js';
+import { registerValidateTools } from './tools/validate.js';
 import { registerWorkflowTools } from './tools/workflows.js';
 
 const SERVER_NAME = 'game-asset-mcp';
@@ -52,6 +53,7 @@ export async function main(): Promise<void> {
   registerAudioTools(server, ctx);
   registerNormalizeTools(server, ctx);
   registerSpendTools(server, ctx);
+  registerValidateTools(server, ctx);
 
   const providers = configuredProviders(config);
   logger.info('game-asset-mcp starting', {
