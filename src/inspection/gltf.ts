@@ -68,7 +68,29 @@ export interface AssetInspection {
    * once per primitive, because that is the unit a renderer draws.
    */
   vertexCount: number;
+  /** Triangles a renderer actually draws: the default scene, instances counted. */
   triangleCount: number;
+
+  /**
+   * Geometry present in the file but never drawn — orphan meshes, and meshes
+   * living only in a NON-default scene (LOD variants, collision proxies).
+   *
+   * These are on the OUTPUT interface, which is the whole point. The previous
+   * release computed them, documented them as "reported", named them in its
+   * release note, and left them off this interface — so every response omitted
+   * them and `tsc` had nothing to complain about, because a field that exists
+   * nowhere cannot be a type error. That is the third time a value has been
+   * computed correctly here and dropped on its way to a caller.
+   */
+  undrawnMeshCount: number;
+  undrawnPrimitiveCount: number;
+  undrawnTriangleCount: number;
+  /**
+   * True when the file has meshes but no scene graph referencing them, so each
+   * was counted once instead of being reported as zero geometry. Valid glTF —
+   * some exporters emit a mesh library this way.
+   */
+  sceneGraphFallback: boolean;
 
   materialCount: number;
   textureCount: number;
@@ -254,6 +276,10 @@ export async function inspectGltf(filePath: string): Promise<AssetInspection> {
     primitiveCount: geometry.primitiveCount,
     vertexCount: geometry.vertexCount,
     triangleCount: geometry.triangleCount,
+    undrawnMeshCount: geometry.undrawnMeshCount,
+    undrawnPrimitiveCount: geometry.undrawnPrimitiveCount,
+    undrawnTriangleCount: geometry.undrawnTriangleCount,
+    sceneGraphFallback: geometry.sceneGraphFallback,
     materialCount: materials.length,
     textureCount: root.listTextures().length,
     textureResolutions: textures.resolutions,
@@ -295,6 +321,12 @@ interface GeometrySummary {
    */
   undrawnMeshCount: number;
   undrawnTriangleCount: number;
+  undrawnPrimitiveCount: number;
+  /**
+   * True when the file has meshes but no scene graph drawing any of them, so
+   * every mesh was counted once rather than reported as zero geometry.
+   */
+  sceneGraphFallback: boolean;
   missingUv: number;
   missingNormal: number;
   missingTangent: number;
@@ -342,6 +374,8 @@ function summarizeGeometry(root: Root): GeometrySummary {
     missingNormal: 0,
     undrawnMeshCount: 0,
     undrawnTriangleCount: 0,
+    undrawnPrimitiveCount: 0,
+    sceneGraphFallback: false,
     missingTangent: 0,
     nonTriangleCount: 0,
   };
@@ -369,25 +403,50 @@ function summarizeGeometry(root: Root): GeometrySummary {
     for (const node of scene.listChildren()) visit(node);
   }
 
+  // A file with meshes but NO drawn geometry is a mesh library, not an empty
+  // asset. Some exporters emit one: meshes present, no scene graph referencing
+  // them. Scoping strictly to the drawn scene turned that valid file into
+  // "0 triangles", which validate_game_asset refuses at severity `error` — a
+  // REGRESSION introduced by the drawn-scene narrowing, and a self-contradicting
+  // report ("nothing renders as a solid surface" beside a real bounding box).
+  //
+  // computeBoundingBox already carries exactly this fallback and its comment
+  // already calls the shape valid. The two readers disagreeing is what produced
+  // the contradiction, so the fallback is mirrored here rather than invented.
+  const nothingDrawn = instancesPerMesh.size === 0;
+  summary.sceneGraphFallback = nothingDrawn && meshes.length > 0;
+
   for (const mesh of meshes) {
     const key = String(mesh.getName() ?? '') + ':' + String(meshes.indexOf(mesh));
-    // Zero means "not in the drawn scene" — either an orphan or a mesh that
-    // lives only in a non-default scene. Both used to be forced to 1 by a
-    // Math.max, which made an undrawn LOD variant indistinguishable from drawn
-    // geometry and inflated the budget a renderer is checked against.
-    const instances = instancesPerMesh.get(key) ?? 0;
+    // Zero means "not in the drawn scene" — an orphan, or a mesh living only in
+    // a non-default scene. Forcing both to 1 made an undrawn LOD variant
+    // indistinguishable from drawn geometry and inflated the budget a renderer
+    // is checked against; forcing both to 0 erased mesh-library files entirely.
+    // Neither is right, because they are two different questions.
+    const instances = summary.sceneGraphFallback ? 1 : (instancesPerMesh.get(key) ?? 0);
     const drawn = instances > 0;
     if (!drawn) summary.undrawnMeshCount += 1;
     for (const primitive of mesh.listPrimitives()) {
-      summary.primitiveCount += 1;
       if (!drawn) {
-        // Reported, not discarded: it is still bytes in the file, and silently
-        // dropping it would understate as badly as counting it drawn.
+        // Counted separately, and now actually REPORTED — see AssetInspection.
+        // The previous release computed these two fields, wrote "Reported, not
+        // discarded" here, headlined them in its release note, and put them in
+        // no response at all: they were never added to the output interface, so
+        // the compiler had nothing to object to. Third instance of this class.
+        summary.undrawnPrimitiveCount += 1;
         summary.undrawnTriangleCount += trianglesInPrimitive(primitive);
+        continue;
       }
+      summary.primitiveCount += 1;
       summary.vertexCount += (primitive.getAttribute('POSITION')?.getCount() ?? 0) * instances;
       summary.triangleCount += trianglesInPrimitive(primitive) * instances;
 
+      // Attribute defects are scoped to DRAWN primitives, deliberately.
+      // hasUVs derives from missingUv, and uvs_present has severity `error`, so
+      // counting every primitive meant a never-drawn, unwrapped collision proxy
+      // in a second scene FAILED a model whose drawn mesh is perfectly unwrapped
+      // — the exact mirror of the bounding-box defect fixed alongside it, in the
+      // same function, left half-done.
       const mode = primitive.getMode();
       if (mode !== MODE_TRIANGLES && mode !== MODE_TRIANGLE_STRIP && mode !== MODE_TRIANGLE_FAN) {
         summary.nonTriangleCount += 1;

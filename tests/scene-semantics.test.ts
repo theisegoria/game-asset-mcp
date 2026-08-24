@@ -88,3 +88,100 @@ describe('an undrawn scene cannot change what the drawn one measures', () => {
     expect(withVariant.meshCount).toBe(2);
   });
 });
+
+/** A mesh with no node referencing it — a "mesh library", which is valid glTF. */
+async function writeOrphanLibrary(file: string): Promise<string> {
+  const doc = new Document();
+  doc.createBuffer();
+  const position = doc
+    .createAccessor()
+    .setType('VEC3')
+    .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]));
+  const uv = doc.createAccessor().setType('VEC2').setArray(new Float32Array([0, 0, 1, 0, 0, 1]));
+  const normal = doc
+    .createAccessor()
+    .setType('VEC3')
+    .setArray(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]));
+  const prim = doc
+    .createPrimitive()
+    .setAttribute('POSITION', position)
+    .setAttribute('TEXCOORD_0', uv)
+    .setAttribute('NORMAL', normal);
+  doc.createMesh('library_part').addPrimitive(prim);
+  // Deliberately NO scene and NO node.
+  await new NodeIO().write(file, doc);
+  return file;
+}
+
+describe('a mesh library is geometry, not an empty file', () => {
+  it('counts meshes that no node draws, rather than reporting zero', async () => {
+    // REGRESSION GUARD. Narrowing every count to the drawn scene turned this
+    // valid file into "0 triangles", which validate_game_asset refuses at
+    // severity error — and the report contradicted itself, claiming nothing
+    // renders while carrying a real bounding box, because computeBoundingBox
+    // has this fallback and the triangle counter did not.
+    const inspected = await inspectGltf(await writeOrphanLibrary(path.join(work, 'library.glb')));
+
+    expect(inspected.triangleCount).toBe(1);
+    expect(inspected.vertexCount).toBe(3);
+    expect(inspected.sceneGraphFallback).toBe(true);
+    // And it must not ALSO be counted as undrawn: one mesh, one answer.
+    expect(inspected.undrawnMeshCount).toBe(0);
+    expect(inspected.warnings.join(' ')).not.toContain('zero triangles');
+  });
+
+  it('reports the undrawn counts it claims to report', async () => {
+    // The fields existed, were computed, were documented as "reported", and
+    // appeared in NO response — they were never added to the output interface,
+    // so the compiler had nothing to object to. Asserting they are PRESENT is
+    // the only thing that catches that.
+    const inspected = await inspectGltf(await writePlate(path.join(work, 'counts.glb'), true));
+
+    expect(inspected.undrawnMeshCount).toBe(1);
+    expect(inspected.undrawnPrimitiveCount).toBe(1);
+    expect(inspected.undrawnTriangleCount).toBe(1);
+    expect(inspected.sceneGraphFallback).toBe(false);
+  });
+});
+
+describe('an undrawn scene cannot fail a model that is fine', () => {
+  it('does not let an unwrapped proxy in a second scene flip uvs_present', async () => {
+    // The mirror image of the bounding-box defect, in the same function, left
+    // half-done: triangleCount and the bbox were narrowed to the drawn scene
+    // while primitiveCount and missingUv still counted EVERY primitive — and
+    // hasUVs derives from missingUv, at severity `error`.
+    const doc = new Document();
+    doc.createBuffer();
+    const position = doc
+      .createAccessor()
+      .setType('VEC3')
+      .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]));
+    const uv = doc.createAccessor().setType('VEC2').setArray(new Float32Array([0, 0, 1, 0, 0, 1]));
+    const normal = doc
+      .createAccessor()
+      .setType('VEC3')
+      .setArray(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]));
+    // Drawn mesh: fully unwrapped.
+    const good = doc
+      .createPrimitive()
+      .setAttribute('POSITION', position)
+      .setAttribute('TEXCOORD_0', uv)
+      .setAttribute('NORMAL', normal);
+    const drawn = doc.createScene('drawn').addChild(
+      doc.createNode('good').setMesh(doc.createMesh('good').addPrimitive(good)),
+    );
+    // Never drawn: a collision proxy with no UVs at all.
+    const proxy = doc.createPrimitive().setAttribute('POSITION', position);
+    doc.createScene('proxy').addChild(
+      doc.createNode('proxy').setMesh(doc.createMesh('proxy').addPrimitive(proxy)),
+    );
+    doc.getRoot().setDefaultScene(drawn);
+    const file = path.join(work, 'proxy.glb');
+    await new NodeIO().write(file, doc);
+
+    const inspected = await inspectGltf(file);
+    // hasUVs is what uvs_present reads, and uvs_present is severity `error`.
+    expect(inspected.hasUVs).toBe(true);
+    expect(inspected.undrawnPrimitiveCount).toBe(1);
+  });
+});

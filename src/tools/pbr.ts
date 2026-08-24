@@ -450,8 +450,41 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
         trioComplete: measured.length === trio.length,
         measuredPlanes: measured,
       };
-      const receiptPath = await uniqueFilePath(outputRoot, `${stem}_pbr_trio.json`);
-      await writeJsonAtomic(receiptPath, receipt);
+      // Inside the guard too. The cleanup added one round earlier wrapped only
+      // the PLANE loop and stopped one statement short of here, so a failure
+      // writing the RECEIPT — uniqueFilePath exhausting its candidates, or
+      // ENOSPC after five PNGs have landed — threw straight past it. Measured:
+      // four fully-written planes left holding the canonical names while the
+      // caller was told the call had failed. Not zero-byte husks; real output
+      // from a call that reported failure, which a pipeline globbing
+      // `*_albedo.png` picks up.
+      let receiptPath: string;
+      try {
+        receiptPath = await uniqueFilePath(outputRoot, `${stem}_pbr_trio.json`);
+        // Recorded before the bytes land, exactly as the planes are.
+        try {
+          const reserved = await fs.stat(receiptPath);
+          created.push({ path: receiptPath, dev: reserved.dev, ino: reserved.ino });
+        } catch {
+          // Unstattable immediately after creation; record nothing rather than
+          // risk removing a path we cannot prove is ours.
+        }
+        await writeJsonAtomic(receiptPath, receipt);
+        try {
+          const settled = await fs.stat(receiptPath);
+          const entry = created.find((candidate) => candidate.path === receiptPath);
+          if (entry) {
+            entry.dev = settled.dev;
+            entry.ino = settled.ino;
+          }
+        } catch {
+          // See the plane write: the atomic rename changes the inode, and a
+          // stale identity would make this file un-cleanable.
+        }
+      } catch (err) {
+        await discardCreated();
+        throw err;
+      }
 
       if (!(receipt.trioComplete as boolean)) {
         ctx.logger.warn('PBR trio is incomplete', {

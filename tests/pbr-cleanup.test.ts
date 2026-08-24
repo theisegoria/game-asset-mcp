@@ -120,3 +120,31 @@ describe('a failed plane extraction cleans up after itself', () => {
     expect(await fs.readFile(path.join(out, 'leak_metallic_1000.png'), 'utf8')).toBe('blocker');
   }, 60_000);
 });
+
+describe('a failure writing the RECEIPT cleans up the planes too', () => {
+  it('leaves nothing behind when the receipt name cannot be claimed', async () => {
+    // The previous round's cleanup wrapped only the plane loop and stopped one
+    // statement short of the receipt write. Both of the tests above fail INSIDE
+    // the loop, so neither could see it — the fix looked complete and the leak
+    // was worse: four FULLY WRITTEN planes holding the canonical names, from a
+    // call the caller was told had failed.
+    const source = await model(path.join(work, 'leak.glb'));
+
+    // Every plane name is free; only the RECEIPT name is exhausted.
+    const blockers: string[] = [];
+    for (let n = 1; n <= 1000; n += 1) {
+      const name = n === 1 ? 'leak_pbr_trio.json' : `leak_pbr_trio_${n}.json`;
+      blockers.push(name);
+      await fs.writeFile(path.join(out, name), 'blocker');
+    }
+
+    const { isError } = await tools.call('extract_pbr_trio', {
+      modelPath: source,
+      destination: out,
+    });
+    expect(isError).toBe(true);
+
+    const remaining = (await fs.readdir(out)).sort();
+    expect(remaining).toEqual(blockers.sort());
+  }, 60_000);
+});
