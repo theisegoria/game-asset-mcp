@@ -39,8 +39,35 @@ const SERVER_VERSION = '0.2.0';
 export async function main(): Promise<void> {
   const config = loadConfig();
   const logger = new Logger(config.logLevel);
-  const store = await JobStore.open(config.jobsDir);
-  const spend = await SpendLedger.open(config.jobsDir, config.spendLimitCents);
+
+  // A relative ASSET_OUTPUT_DIR resolves against the SERVER's working
+  // directory, and an MCP client picks that directory, not the user. Claude
+  // Desktop and others spawn from `/`, where "assets/generated" becomes
+  // "/assets" and mkdir fails with EACCES or ENOENT. The raw errno reaches the
+  // client as nothing at all — the process exits and the client reports only
+  // "connection closed" — so the one configuration mistake everybody makes is
+  // also the one with no diagnosis. Name it here instead.
+  let store: JobStore;
+  let spend: SpendLedger;
+  try {
+    store = await JobStore.open(config.jobsDir);
+    spend = await SpendLedger.open(config.jobsDir, config.spendLimitCents);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'EACCES' || code === 'EPERM' || code === 'EROFS') {
+      const supplied = process.env.ASSET_OUTPUT_DIR?.trim();
+      throw new Error(
+        `cannot create the asset workspace at ${config.outputDir} (${code}). ` +
+        (supplied && !path.isAbsolute(supplied)
+          ? `ASSET_OUTPUT_DIR is "${supplied}", a RELATIVE path, resolved against this server's ` +
+            `working directory "${process.cwd()}" — which the MCP client chose, not you. ` +
+            `Set ASSET_OUTPUT_DIR to an absolute path.`
+          : `Set ASSET_OUTPUT_DIR to an absolute path this process may write to.`),
+        { cause: err },
+      );
+    }
+    throw err;
+  }
   const ctx = createToolContext({ config, logger, store, spend });
 
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });

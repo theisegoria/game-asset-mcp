@@ -11,6 +11,7 @@ import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { inspectGltf } from '../inspection/gltf.js';
+import { uniqueFilePath } from '../storage/filesystem.js';
 import type { GameAssetPolicy } from '../domain/asset-policy.js';
 import { runMeshBatch, type MeshBatchDeps } from '../domain/mesh-batch.js';
 import { packagedScript, runBlenderScript, findBlender } from '../util/blender.js';
@@ -36,8 +37,13 @@ export function registerBatchTools(server: McpServer, ctx: ToolContext): void {
           .describe('Absolute paths to .glb/.gltf meshes.'),
         outputDir: z
           .string()
+          .min(1)
           .optional()
-          .describe('Where normalized copies go. Defaults to beside each source.'),
+          .describe(
+            'Where normalized copies go, resolved against the SERVER\'s working directory. ' +
+            'Omit to write beside each source; an empty string is rejected rather than silently ' +
+            'meaning "beside the source".',
+          ),
         normalize: z
           .boolean()
           .default(true)
@@ -70,6 +76,7 @@ export function registerBatchTools(server: McpServer, ctx: ToolContext): void {
           await fs.mkdir(dir, { recursive: true });
         },
         inspect: (file) => inspectGltf(file),
+        reserveOutputPath: (dir, fileName) => uniqueFilePath(dir, fileName),
         normalize: async (source, target) => {
           const result = await runBlenderScript(
             packagedScript('blender_normalize.py'),

@@ -1,16 +1,26 @@
 /**
  * Tests for the batch preparation loop.
  *
- * The pipeline itself is already covered by the single-asset tests. What is
- * only true of a batch is its behaviour under partial failure: an unattended
- * forty-item run must not be stopped by item three, must not silently skip the
- * rest, and must not pay to rewrite meshes that were already fine.
+ * Two halves, deliberately.
  *
- * The dependencies are fakes that COUNT their calls, because "did not
- * normalize" is a claim about work not done, and only a counter can prove it.
+ * The FAKE half covers behaviour under partial failure — an unattended
+ * forty-item run must not stop at item three, must not skip the rest, and must
+ * not rewrite meshes that were already fine. Those fakes count their calls,
+ * because "did not normalize" is a claim about work NOT done.
+ *
+ * The REAL-FILESYSTEM half exists because the fake half was not enough. An
+ * adversarial mutation run put five mutants past it, including one that wrote
+ * every normalized mesh OVER ITS OWN SOURCE FILE and one that redirected all
+ * output to /tmp. Both passed, because a fake normalizer that writes nothing
+ * leaves no destination to assert on: the tests checked the bookkeeping and
+ * never checked where a byte landed. So these use real files in a real temp
+ * directory and assert on what is actually on disk.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { AssetInspection } from '../src/inspection/gltf.js';
 import { runMeshBatch, type MeshBatchDeps, type MeshBatchOptions } from '../src/domain/mesh-batch.js';
 
@@ -47,13 +57,9 @@ interface Harness {
   deps: MeshBatchDeps;
   normalizeCalls: string[];
   inspectCalls: string[];
+  mkdirCalls: string[];
 }
 
-/**
- * `broken` names sources that fail validation until normalized; `missing` names
- * sources whose `access` rejects. Normalized output always inspects clean
- * unless `repairFails` says otherwise.
- */
 function harness(opts: {
   broken?: string[];
   missing?: string[];
@@ -65,23 +71,38 @@ function harness(opts: {
   const missing = new Set(opts.missing ?? []);
   const throws = new Set(opts.normalizeThrows ?? []);
   const normalized = new Set<string>();
+  const reserved = new Set<string>();
   const normalizeCalls: string[] = [];
   const inspectCalls: string[] = [];
+  const mkdirCalls: string[] = [];
 
   return {
     normalizeCalls,
     inspectCalls,
+    mkdirCalls,
     deps: {
       blenderAvailable: opts.blenderAvailable ?? true,
       async access(file) {
         if (missing.has(file)) throw new Error(`ENOENT: no such file, access '${file}'`);
       },
-      async mkdir() {},
+      async mkdir(dir) {
+        mkdirCalls.push(dir);
+      },
+      async reserveOutputPath(dir, fileName) {
+        const ext = path.extname(fileName);
+        const stem = path.basename(fileName, ext);
+        for (let attempt = 1; attempt <= 100; attempt += 1) {
+          const candidate = path.join(dir, attempt === 1 ? fileName : `${stem}_${attempt}${ext}`);
+          if (!reserved.has(candidate)) {
+            reserved.add(candidate);
+            return candidate;
+          }
+        }
+        throw new Error('no free name');
+      },
       async inspect(file) {
         inspectCalls.push(file);
-        if (normalized.has(file)) {
-          return inspection({ hasUVs: !opts.repairFails });
-        }
+        if (normalized.has(file)) return inspection({ hasUVs: !opts.repairFails });
         return inspection({ hasUVs: !broken.has(file) });
       },
       async normalize(source, target) {
@@ -103,7 +124,6 @@ describe('a batch survives its bad items', () => {
 
     expect(result.total).toBe(3);
     expect(result.failed).toBe(1);
-    // The item AFTER the failure is what proves the loop did not stop.
     expect(result.items[2]?.status).toBe('already_valid');
     expect(result.items[1]?.error).toContain('ENOENT');
   });
@@ -125,6 +145,22 @@ describe('a batch survives its bad items', () => {
     expect(result.items[1]?.status).toBe('prepared');
   });
 
+  it('survives a non-string element without discarding the verdicts before it', async () => {
+    const h = harness();
+    // The MCP schema rejects this, but losing forty results to one bad element
+    // is wrong no matter who calls the function.
+    const result = await runMeshBatch(
+      ['/a/one.glb', 42 as unknown as string, '/a/three.glb'],
+      OPTIONS,
+      h.deps,
+    );
+
+    expect(result.total).toBe(3);
+    expect(result.items[0]?.status).toBe('already_valid');
+    expect(result.items[1]?.status).toBe('failed');
+    expect(result.items[2]?.status).toBe('already_valid');
+  });
+
   it('counts every item exactly once across the three outcomes', async () => {
     const h = harness({ broken: ['/a/two.glb'], missing: ['/a/three.glb'] });
     const result = await runMeshBatch(['/a/one.glb', '/a/two.glb', '/a/three.glb'], OPTIONS, h.deps);
@@ -141,6 +177,16 @@ describe('work not done is proven by a counter', () => {
     expect(h.normalizeCalls).toEqual(['/a/two.glb']);
   });
 
+  it('inspects a repaired mesh a second time, and a passing one only once', async () => {
+    const h = harness({ broken: ['/a/two.glb'] });
+    await runMeshBatch(['/a/one.glb', '/a/two.glb'], OPTIONS, h.deps);
+
+    // The re-inspection is what makes "prepared" mean repaired rather than attempted.
+    expect(h.inspectCalls.filter((f) => f === '/a/one.glb')).toHaveLength(1);
+    expect(h.inspectCalls.filter((f) => f === '/a/two.glb')).toHaveLength(1);
+    expect(h.inspectCalls.some((f) => f.endsWith('two_normalized.glb'))).toBe(true);
+  });
+
   it('normalizes nothing at all when normalize is false', async () => {
     const h = harness({ broken: ['/a/one.glb', '/a/two.glb'] });
     const result = await runMeshBatch(
@@ -151,7 +197,6 @@ describe('work not done is proven by a counter', () => {
 
     expect(h.normalizeCalls).toHaveLength(0);
     expect(result.failed).toBe(2);
-    // Report-only still has to say WHAT is wrong, or it is not a report.
     expect(result.items[0]?.failures).toContain('uvs_present');
   });
 
@@ -192,10 +237,131 @@ describe('the verdict tracks the repair, not the attempt', () => {
     const h = harness({ broken: ['/a/one.glb'], repairFails: true });
     const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
 
-    // A normalizer that returned a receipt is not the same as a repaired mesh.
     expect(h.normalizeCalls).toEqual(['/a/one.glb']);
     expect(result.items[0]?.status).toBe('failed');
     expect(result.items[0]?.failures).toContain('uvs_present');
     expect(result.prepared).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Real files, real directories. These assert on bytes, not bookkeeping.
+// ---------------------------------------------------------------------------
+
+describe('where the bytes actually land', () => {
+  let work: string;
+  let outDir: string;
+
+  const SOURCE_MARKER = 'ORIGINAL-SOURCE-CONTENT';
+
+  /** Deps whose normalizer really writes, so a destination can be observed. */
+  function realDeps(broken: Set<string>): MeshBatchDeps {
+    const normalized = new Set<string>();
+    return {
+      blenderAvailable: true,
+      access: async (file) => {
+        if (!existsSync(file)) throw new Error(`ENOENT: ${file}`);
+      },
+      mkdir: async (dir) => {
+        mkdirSync(dir, { recursive: true });
+      },
+      reserveOutputPath: async (dir, fileName) => {
+        const ext = path.extname(fileName);
+        const stem = path.basename(fileName, ext);
+        for (let attempt = 1; attempt <= 100; attempt += 1) {
+          const candidate = path.join(dir, attempt === 1 ? fileName : `${stem}_${attempt}${ext}`);
+          if (!existsSync(candidate)) {
+            writeFileSync(candidate, ''); // exclusive-create stand-in
+            return candidate;
+          }
+        }
+        throw new Error('no free name');
+      },
+      inspect: async (file) => inspection({ hasUVs: normalized.has(file) || !broken.has(file) }),
+      normalize: async (source, target) => {
+        writeFileSync(target, `NORMALIZED from ${source}`);
+        normalized.add(target);
+        return { objectsUnwrapped: 1, trianglesBefore: 10, trianglesAfter: 8 };
+      },
+    };
+  }
+
+  function makeMesh(dir: string, name: string): string {
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, name);
+    writeFileSync(file, SOURCE_MARKER);
+    return file;
+  }
+
+  beforeEach(() => {
+    work = mkdtempSync(path.join(tmpdir(), 'mesh-batch-'));
+    outDir = path.join(work, 'out');
+  });
+
+  afterEach(() => {
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  it('writes into the requested outputDir and nowhere else', async () => {
+    const a = makeMesh(path.join(work, 'src'), 'crate.glb');
+    const result = await runMeshBatch([a], { ...OPTIONS, outputDir: outDir }, realDeps(new Set([a])));
+
+    expect(result.items[0]?.status).toBe('prepared');
+    expect(result.items[0]?.normalizedPath).toBeDefined();
+    // The output is IN the requested directory — not beside the source, not /tmp.
+    expect(path.dirname(result.items[0]!.normalizedPath as string)).toBe(outDir);
+    expect(readdirSync(outDir)).toHaveLength(1);
+    expect(readdirSync(path.join(work, 'src'))).toEqual(['crate.glb']);
+  });
+
+  it('never modifies the source mesh', async () => {
+    const a = makeMesh(path.join(work, 'src'), 'crate.glb');
+    await runMeshBatch([a], { ...OPTIONS, outputDir: outDir }, realDeps(new Set([a])));
+
+    // A normalizer that writes over its own input destroys the user's asset
+    // while reporting success. Bookkeeping assertions cannot see that.
+    expect(readFileSync(a, 'utf8')).toBe(SOURCE_MARKER);
+  });
+
+  it('gives two sources that share a basename two distinct outputs', async () => {
+    const a = makeMesh(path.join(work, 'a'), 'crate.glb');
+    const b = makeMesh(path.join(work, 'b'), 'crate.glb');
+    const result = await runMeshBatch([a, b], { ...OPTIONS, outputDir: outDir }, realDeps(new Set([a, b])));
+
+    expect(result.prepared).toBe(2);
+    const paths = result.items.map((item) => item.normalizedPath);
+    expect(paths[0]).not.toBe(paths[1]);
+    // prepared must equal files on disk, or a success describes bytes that a
+    // later item already overwrote.
+    expect(readdirSync(outDir)).toHaveLength(result.prepared);
+    expect(readFileSync(paths[0] as string, 'utf8')).toContain(path.join('a', 'crate.glb'));
+    expect(readFileSync(paths[1] as string, 'utf8')).toContain(path.join('b', 'crate.glb'));
+  });
+
+  it('does not collide a .glb and .gltf pair emitted side by side', async () => {
+    const dir = path.join(work, 'pair');
+    const a = makeMesh(dir, 'hydrant.glb');
+    const b = makeMesh(dir, 'hydrant.gltf');
+    const result = await runMeshBatch([a, b], { ...OPTIONS, outputDir: outDir }, realDeps(new Set([a, b])));
+
+    expect(result.prepared).toBe(2);
+    expect(new Set(result.items.map((i) => i.normalizedPath)).size).toBe(2);
+    expect(readdirSync(outDir)).toHaveLength(2);
+  });
+
+  it('strips an uppercase extension instead of embedding it in the name', async () => {
+    const a = makeMesh(path.join(work, 'src'), 'BARREL.GLB');
+    const result = await runMeshBatch([a], { ...OPTIONS, outputDir: outDir }, realDeps(new Set([a])));
+
+    expect(path.basename(result.items[0]!.normalizedPath as string)).toBe('BARREL_normalized.glb');
+  });
+
+  it('writes beside the source when no outputDir is given', async () => {
+    const srcDir = path.join(work, 'src');
+    const a = makeMesh(srcDir, 'crate.glb');
+    const result = await runMeshBatch([a], OPTIONS, realDeps(new Set([a])));
+
+    expect(path.dirname(result.items[0]!.normalizedPath as string)).toBe(srcDir);
+    expect(readdirSync(srcDir).sort()).toEqual(['crate.glb', 'crate_normalized.glb']);
   });
 });

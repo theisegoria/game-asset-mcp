@@ -197,8 +197,9 @@ One paid call instead of two, and the geometry you already approved comes back u
 
 Other side effects worth knowing:
 
-- **Files are written to disk.** Everything lands under `ASSET_OUTPUT_DIR`. Nothing is written outside it: paths are resolved and any that escapes the workspace root is refused.
-- **Nothing is silently overwritten.** A colliding asset name gets a numeric suffix (`crate`, `crate_2`, …) rather than destroying a result you may already have reviewed.
+- **Files are written to disk.** *Downloaded* assets land under `ASSET_OUTPUT_DIR`, and a download path that escapes the workspace root is refused. Three tools are different and deliberately so: `extract_pbr_trio`, `normalize_mesh` and `batch_prepare_meshes` write where **you** tell them to, including outside the workspace, because they operate on meshes you already own and those do not live in an asset-generation directory. Give them a destination you meant.
+- **`ASSET_OUTPUT_DIR` should be absolute.** A relative value resolves against the *server's* working directory, which your MCP client chooses — several spawn from `/`. The server refuses to start with a message naming the resolved path rather than a bare `ENOENT`.
+- **Nothing is silently overwritten.** A colliding output name gets a numeric suffix (`crate`, `crate_2`, …) rather than destroying a result you may already have reviewed. The name is claimed by exclusive create, so two items in one batch cannot race for it — a batch is exactly where two sources share a basename.
 - **Downloads are capped** at `ASSET_MAX_DOWNLOAD_BYTES` and the cap is enforced while streaming, not from the `Content-Length` header — a server that lies about the size cannot exhaust your memory.
 - **Only HTTPS.** Non-HTTPS URLs are refused outright, including ones that arrive inside a provider's response.
 - **API keys are redacted from logs** centrally, so no individual log call site can leak one.
@@ -284,9 +285,9 @@ If you are the first person to run this with real keys, expect to fix an endpoin
 
 **What *is* verified:** `npm run verify` builds the server, starts it over stdio with a real MCP client, completes the handshake and asserts all twenty tools register. That is a protocol round-trip, not a version string — a server that fails to register its tools still starts perfectly happily.
 
-The local half of the pipeline — `inspect_asset`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset`, `batch_prepare_meshes` — **is** verified against real shipped game assets rather than fixtures, because a synthetic fixture and the parser that reads it can share the same mistake and both look green. It has done: a wrong glTF magic constant survived a full synthetic suite and was caught only by a real file.
+Parts of the local pipeline — `inspect_asset`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset` — are additionally checked against real shipped game assets rather than fixtures, because a synthetic fixture and the parser that reads it can share the same mistake and both look green. It has happened here: a wrong glTF magic constant survived a full synthetic suite and was caught only by a real file. **Those four tests are environment-gated** and skip on any machine without the private asset checkout beside this one, so a stranger sees `250 passed | 4 skipped`, not 254. The skip is reported, never silently green.
 
-The test suite also installs the package the way a stranger would and speaks MCP to the result, which is how the symlinked-bin defect in the entry-point guard was found — the server had been exiting instantly on every install while passing every test.
+One test spawns the built server through a **symlinked bin** — what `node_modules/.bin` actually contains — and speaks MCP to it, because that is where the entry-point guard failed: the server exited instantly on every install while passing every other test. It symlinks rather than installing, so it cannot catch a packaging regression in `files` or `prepare`; a real `npm install` from GitHub is still a manual check.
 
 ---
 

@@ -54,6 +54,18 @@ export interface MeshBatchDeps {
   inspect(file: string): Promise<AssetInspection>;
   /** Repairs `source` into `target` and returns the normalizer's receipt. */
   normalize(source: string, target: string): Promise<Record<string, number>>;
+  /**
+   * Atomically claims an unused path in `dir` for `fileName` and returns it.
+   *
+   * A batch is the one place where output names collide: forty meshes into one
+   * directory, and any two sources sharing a basename — `crate.glb` from two
+   * folders, or the `.glb`/`.gltf` pair a generator emits side by side — derive
+   * the SAME target. Computing the name inline let the second write silently
+   * destroy the first while both items still reported success, describing bytes
+   * that no longer existed. The reservation must be exclusive-create, not a
+   * existence check, or two items still race.
+   */
+  reserveOutputPath(dir: string, fileName: string): Promise<string>;
   blenderAvailable: boolean;
 }
 
@@ -70,9 +82,14 @@ async function prepareOne(
 ): Promise<MeshBatchItem> {
   const item: MeshBatchItem = { input: source, status: 'failed' };
 
-  const ext = path.extname(source).toLowerCase();
+  // Two different extensions: the lowercased one decides acceptance, the
+  // verbatim one strips the stem. Using the lowercased form to strip left
+  // "BARREL.GLB" as "BARREL.GLB_normalized.glb", because basename's suffix
+  // removal is case-sensitive even where the filesystem is not.
+  const actualExt = path.extname(source);
+  const ext = actualExt.toLowerCase();
   if (ext !== '.glb' && ext !== '.gltf') {
-    throw invalidInput(`batch_prepare_meshes reads .glb or .gltf; received "${ext}"`);
+    throw invalidInput(`batch_prepare_meshes reads .glb or .gltf; received "${actualExt}"`);
   }
   await deps.access(source);
 
@@ -97,9 +114,9 @@ async function prepareOne(
     return item;
   }
 
-  const dir = options.outputDir ? path.resolve(options.outputDir) : path.dirname(source);
+  const dir = options.outputDir === undefined ? path.dirname(source) : path.resolve(options.outputDir);
   await deps.mkdir(dir);
-  const target = path.join(dir, `${path.basename(source, ext)}_normalized.glb`);
+  const target = await deps.reserveOutputPath(dir, `${path.basename(source, actualExt)}_normalized.glb`);
 
   const receipt = await deps.normalize(source, target);
   item.normalizedPath = target;
@@ -122,8 +139,14 @@ export async function runMeshBatch(
   const items: MeshBatchItem[] = [];
 
   for (const raw of modelPaths) {
-    const source = path.resolve(raw);
+    // Inside the try, deliberately. path.resolve throws on a non-string, and
+    // outside it that TypeError escaped the loop and discarded every verdict
+    // already computed — the precise failure this function exists to prevent.
+    // The MCP schema rejects non-strings, but a batch runner that loses forty
+    // results to one bad element is wrong regardless of who calls it.
+    let source = typeof raw === 'string' ? raw : String(raw);
     try {
+      source = path.resolve(raw);
       items.push(await prepareOne(source, options, deps));
     } catch (err) {
       // One bad file must not stall a forty-item run. The error is reported
