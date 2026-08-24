@@ -375,19 +375,32 @@ describe('choosing the output path', () => {
 // CREATES the file and the tool believed it held nothing, so a failure left an
 // orphan. The domain tests cannot see this — the two disagreeing tests are on
 // opposite sides of the call.
-describe.skipIf(!haveBlender)('the tool cleans up after itself', () => {
+describe('the tool cleans up after itself', () => {
   it('leaves no orphan when an explicit outputPath fails', async () => {
     const dir = await tmpDir();
     const broken = path.join(dir, 'broken.glb');
     await fs.writeFile(broken, 'not a glb at all');
     const output = path.join(dir, 'explicit.glb');
 
+    // A STUB Blender that always fails, rather than skipping without a real
+    // one. The leak happens when Blender fails, so the test needs a failure,
+    // not an installation — and gating it on real Blender meant CI, which has
+    // none, never exercised a guard against a file leak.
+    const stub = path.join(dir, 'blender-stub.sh');
+    await fs.writeFile(stub, '#!/bin/sh\necho "stub blender failing on purpose" >&2\nexit 1\n');
+    await fs.chmod(stub, 0o755);
+
     const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
     const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
-      env: { ...process.env, ASSET_LOG_LEVEL: 'error', ASSET_OUTPUT_DIR: path.join(dir, 'ws') },
+      env: {
+        ...process.env,
+        ASSET_LOG_LEVEL: 'error',
+        ASSET_OUTPUT_DIR: path.join(dir, 'ws'),
+        BLENDER_PATH: stub,
+      },
     });
     const client = new Client({ name: 'orphan-test', version: '1.0.0' });
     try {
