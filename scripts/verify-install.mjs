@@ -33,6 +33,7 @@ const EXPECTED_TOOLS = [
   'extract_pbr_trio',
   'generate_sound_effect',
   'normalize_mesh',
+  'get_spend_report',
 ];
 
 async function main() {

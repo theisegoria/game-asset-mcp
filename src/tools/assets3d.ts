@@ -115,6 +115,8 @@ export function registerAsset3DTools(server: McpServer, ctx: ToolContext): void 
       job.status = 'generating_3d';
       await ctx.store.save(job);
 
+      await ctx.charge('create_3d_asset', { assetJobId: job.id });
+
       const handle = textPrompt
         ? await provider.generateFromText({
             prompt: textPrompt,

@@ -15,6 +15,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { configuredProviders, loadConfig } from './config.js';
 import { Logger } from './util/logging.js';
 import { JobStore } from './storage/jobs.js';
+import { SpendLedger } from './storage/spend.js';
 import { createToolContext } from './tools/context.js';
 import { registerReferenceTools } from './tools/references.js';
 import { registerAsset3DTools } from './tools/assets3d.js';
@@ -25,6 +26,7 @@ import { registerInspectionTools } from './tools/inspection.js';
 import { registerPbrTools } from './tools/pbr.js';
 import { registerAudioTools } from './tools/audio.js';
 import { registerNormalizeTools } from './tools/normalize.js';
+import { registerSpendTools } from './tools/spend.js';
 import { registerWorkflowTools } from './tools/workflows.js';
 
 const SERVER_NAME = 'game-asset-mcp';
@@ -34,7 +36,8 @@ export async function main(): Promise<void> {
   const config = loadConfig();
   const logger = new Logger(config.logLevel);
   const store = await JobStore.open(config.jobsDir);
-  const ctx = createToolContext({ config, logger, store });
+  const spend = await SpendLedger.open(config.jobsDir, config.spendLimitCents);
+  const ctx = createToolContext({ config, logger, store, spend });
 
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
@@ -48,6 +51,7 @@ export async function main(): Promise<void> {
   registerPbrTools(server, ctx);
   registerAudioTools(server, ctx);
   registerNormalizeTools(server, ctx);
+  registerSpendTools(server, ctx);
 
   const providers = configuredProviders(config);
   logger.info('game-asset-mcp starting', {

@@ -110,6 +110,11 @@ export function registerAudioTools(server: McpServer, ctx: ToolContext): void {
       // money was spent rather than an orphaned charge.
       await ctx.store.save(job);
 
+      await ctx.charge('generate_sound_effect', {
+        units: args.quantity ?? 1,
+        assetJobId: job.id,
+      });
+
       const handle = await provider.generateSoundEffect({
         prompt: args.prompt,
         ...(args.durationSeconds !== undefined ? { durationSeconds: args.durationSeconds } : {}),

@@ -16,6 +16,14 @@ export interface Config {
   jobsDir: string;
   maxDownloadBytes: number;
   httpTimeoutMs: number;
+  /**
+   * Session spend ceiling in US cents, or undefined for no limit.
+   *
+   * Cents rather than "credits" because two providers bill in two different
+   * units — Tripo in $0.01 credits, Leonardo in USD — and a ceiling mixing them
+   * would be meaningless.
+   */
+  spendLimitCents?: number;
   logLevel: LogLevel;
   tripoApiKey?: string;
   leonardoApiKey?: string;
@@ -60,6 +68,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       'ASSET_MAX_DOWNLOAD_BYTES',
     ),
     httpTimeoutMs: positiveIntFromEnv(env.ASSET_HTTP_TIMEOUT_MS, 60_000, 'ASSET_HTTP_TIMEOUT_MS'),
+    ...(env.ASSET_SPEND_LIMIT_CENTS?.trim()
+      ? {
+          spendLimitCents: positiveIntFromEnv(
+            env.ASSET_SPEND_LIMIT_CENTS,
+            0,
+            'ASSET_SPEND_LIMIT_CENTS',
+          ),
+        }
+      : {}),
     logLevel: parseLogLevel(env.ASSET_LOG_LEVEL),
     ...(env.TRIPO_API_KEY?.trim() ? { tripoApiKey: env.TRIPO_API_KEY.trim() } : {}),
     ...(env.LEONARDO_API_KEY?.trim() ? { leonardoApiKey: env.LEONARDO_API_KEY.trim() } : {}),

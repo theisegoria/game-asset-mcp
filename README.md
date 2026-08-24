@@ -60,10 +60,17 @@ Copy `.env.example` to `.env`, or set the variables in your MCP client's `env` b
 | `ASSET_HTTP_TIMEOUT_MS` | no | `60000` | Per-request HTTP timeout. |
 | `ASSET_LOG_LEVEL` | no | `info` | `silent` \| `error` \| `warn` \| `info` \| `debug`. |
 | `BLENDER_PATH` | no | auto-detected | Blender executable for `normalize_mesh`. Overrides discovery. |
+| `ASSET_SPEND_LIMIT_CENTS` | no | unlimited | Session spend ceiling in **US cents**. Credit-consuming tools refuse once it is reached, before contacting the provider. |
 
 ### ⚠️ Tripo API credits are billed separately from a Tripo Studio subscription
 
 This catches almost everyone. **A Tripo Studio web subscription does not fund API calls.** They are two different products with two different balances. If you have been happily generating models in the Studio web app and your very first `create_3d_asset` call comes back rejected for insufficient credits, you have not misconfigured anything — you need API credits on the developer platform. Buy them at [platform.tripo3d.ai](https://platform.tripo3d.ai), not in the Studio app.
+
+### Capping what can be spent
+
+Set `ASSET_SPEND_LIMIT_CENTS` and every credit-consuming tool checks it **before** contacting the provider, refusing with the remaining balance named rather than overspending. The ceiling is in US cents because the two providers bill in different units — Tripo in $0.01 credits, Leonardo in USD — and a limit mixing them would mean nothing.
+
+Where a provider publishes a per-call price we use it. Where it does not, the guard uses a deliberately pessimistic placeholder and `get_spend_report` says which figures are which. It is a guard, not an invoice: real charges should come in at or under the estimate, never above it.
 
 ### One provider is enough
 
@@ -134,6 +141,7 @@ The same server, described generically — a stdio child process:
 | `generate_sound_effect` | **Yes** | Generates a short game sound effect from a description — impacts, weapon reports, UI blips, or a seamless ambience loop. Polls and downloads inline. |
 | `create_game_prop` | **Yes — images only** | The intention-shaped entry point: plain-language request in, asset spec plus reference candidates out. Deliberately stops before the 3D spend so a human or agent picks the reference first. |
 | `list_asset_jobs` | No | Lists known jobs, newest first, as compact summaries. |
+| `get_spend_report` | No | What this workspace has spent, by tool, with remaining headroom — and whether each figure is a published price or a pessimistic placeholder. |
 
 Only six tools can cost you money, and each one says so in its description before it is called.
 
@@ -174,7 +182,7 @@ One paid call instead of two, and the geometry you already approved comes back u
 
 **Calls that spend provider credits:** `generate_asset_reference`, `generate_reference_variations`, `create_3d_asset`, `texture_existing_asset`, `generate_sound_effect`, and the image-generation step inside `create_game_prop`. Nothing else in this server can be charged for.
 
-**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`, `normalize_mesh`. Poll, inspect, split and download as often as you like.
+**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`, `normalize_mesh`, `get_spend_report`. Poll, inspect, split and download as often as you like.
 
 **A credit-consuming POST is never retried automatically.** This is a deliberate, load-bearing rule and it lives in the HTTP layer, not in each call site. When a request that creates a generation task fails — timeout, socket reset, 502 — the client *cannot tell* whether the provider accepted it before the connection broke. Retrying might be free; it might also double-charge you for a mesh you never receive. So it does not retry, the error comes straight back, and the decision to try again is yours. Idempotent reads — status polls, file downloads — retry freely with backoff, because they cost nothing to repeat.
 

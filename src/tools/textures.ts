@@ -128,6 +128,8 @@ export function registerTextureTools(server: McpServer, ctx: ToolContext): void 
       job.status = 'generating_3d';
       await ctx.store.save(job);
 
+      await ctx.charge('texture_existing_asset', { assetJobId: job.id });
+
       const handle = await provider.textureExisting({
         ...(originalModelTaskId !== undefined ? { originalModelTaskId } : {}),
         ...(modelToken !== undefined ? { modelToken } : {}),

@@ -83,6 +83,7 @@ export function registerWorkflowTools(server: McpServer, ctx: ToolContext): void
       // that quietly drifts from it.
       const built = buildReconstructionPrompt(spec);
       return runImageGeneration(ctx, {
+        toolName: 'create_game_prop',
         spec,
         prompt: built.prompt,
         negativePrompt: built.negativePrompt,

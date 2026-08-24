@@ -12,6 +12,7 @@ import type { Config } from '../config.js';
 import { requireLeonardoKey, requireTripoKey } from '../config.js';
 import type { Logger } from '../util/logging.js';
 import type { JobStore } from '../storage/jobs.js';
+import type { SpendLedger } from '../storage/spend.js';
 import type { ImageProvider } from '../providers/image/types.js';
 import type { Model3DProvider } from '../providers/model3d/types.js';
 import type { AudioProvider } from '../providers/audio/types.js';
@@ -27,14 +28,27 @@ export interface ToolContext {
   imageProvider(): ImageProvider;
   model3dProvider(): Model3DProvider;
   audioProvider(): AudioProvider;
+  spend: SpendLedger;
+  /**
+   * Charge the session ceiling for one upcoming provider call, or refuse.
+   *
+   * MUST be awaited immediately before the request is sent. Charging after the
+   * fact would let a crash or a concurrent call slip past the limit, which is
+   * precisely the situation the ceiling exists to prevent.
+   */
+  charge(
+    tool: string,
+    options?: { units?: number; assetJobId?: string },
+  ): Promise<{ entryId: string; estimatedCents: number }>;
 }
 
 export function createToolContext(params: {
   config: Config;
   logger: Logger;
   store: JobStore;
+  spend: SpendLedger;
 }): ToolContext {
-  const { config, logger, store } = params;
+  const { config, logger, store, spend } = params;
 
   // Memoised so repeated tool calls reuse one client, but still constructed on
   // first use rather than at startup.
@@ -46,6 +60,21 @@ export function createToolContext(params: {
     config,
     logger,
     store,
+    spend,
+    async charge(tool, options) {
+      const reservation = await spend.reserve({
+        tool,
+        ...(options?.units !== undefined ? { units: options.units } : {}),
+        ...(options?.assetJobId !== undefined ? { assetJobId: options.assetJobId } : {}),
+      });
+      logger.info('charged session spend ceiling', {
+        tool,
+        estimatedCents: reservation.estimatedCents,
+        spentCents: spend.spentCents(),
+        limitCents: spend.limit,
+      });
+      return reservation;
+    },
     imageProvider(): ImageProvider {
       if (!image) {
         image = new LeonardoProvider({

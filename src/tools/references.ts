@@ -56,6 +56,8 @@ const sharedImageArgs = {
 export async function runImageGeneration(
   ctx: ToolContext,
   params: {
+    /** Which tool is paying, so the spend report attributes it correctly. */
+    toolName: string;
     spec: GameAssetSpec;
     prompt: string;
     negativePrompt: string;
@@ -90,6 +92,9 @@ export async function runImageGeneration(
   // crash, the job record already exists and the spend is traceable; the
   // reverse order would lose the evidence that money was spent at all.
   await ctx.store.save(job);
+
+  // Charge the ceiling immediately before the paid call — never after.
+  await ctx.charge(params.toolName, { units: params.numImages, assetJobId: job.id });
 
   const handle = await provider.generate({
     prompt: params.prompt,
@@ -147,6 +152,7 @@ export function registerReferenceTools(server: McpServer, ctx: ToolContext): voi
       const spec = args.spec as GameAssetSpec;
       const built = buildReconstructionPrompt(spec);
       return runImageGeneration(ctx, {
+        toolName: 'generate_asset_reference',
         spec,
         prompt: built.prompt,
         negativePrompt: built.negativePrompt,
@@ -179,6 +185,7 @@ export function registerReferenceTools(server: McpServer, ctx: ToolContext): voi
       const parent = await ctx.store.get(args.assetJobId);
       const built = buildVariationPrompt(parent.spec, args.axis as VariationAxis);
       return runImageGeneration(ctx, {
+        toolName: 'generate_reference_variations',
         spec: parent.spec,
         prompt: built.prompt,
         negativePrompt: built.negativePrompt,

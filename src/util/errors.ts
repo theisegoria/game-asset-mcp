@@ -19,7 +19,8 @@ export type ErrorCode =
   | 'UNSUPPORTED_PROTOCOL'
   | 'PATH_ESCAPE'
   | 'TIMEOUT'
-  | 'INSPECTION_FAILED';
+  | 'INSPECTION_FAILED'
+  | 'SPEND_LIMIT_EXCEEDED';
 
 export class AssetPipelineError extends Error {
   readonly code: ErrorCode;
