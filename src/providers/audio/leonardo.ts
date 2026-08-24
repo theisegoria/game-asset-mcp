@@ -18,7 +18,7 @@
  * ───────────────────────────────────────────────────────────────────────────
  */
 
-import { requestJson } from '../../util/http.js';
+import { assertHttps, requestJson } from '../../util/http.js';
 import { AssetPipelineError, invalidInput } from '../../util/errors.js';
 import type {
   AudioGenerationHandle,
@@ -144,10 +144,16 @@ export class LeonardoAudioProvider implements AudioProvider {
   private readonly baseUrl: string;
 
   constructor(private readonly options: LeonardoAudioOptions) {
-    this.baseUrl = (options.baseUrl ?? process.env.LEONARDO_BASE_URL ?? DEFAULT_BASE_URL).replace(
+    const configuredBase = (options.baseUrl ?? process.env.LEONARDO_BASE_URL ?? DEFAULT_BASE_URL).replace(
       /\/$/,
       '',
     );
+    // Validated at construction, matching the Tripo client: a misconfigured
+    // base must not be able to reach a request carrying the API key. The
+    // shared HTTP layer would refuse it later anyway; failing here makes the
+    // reason obvious instead of surfacing at the first call.
+    assertHttps(configuredBase);
+    this.baseUrl = configuredBase;
   }
 
   private headers(): Record<string, string> {

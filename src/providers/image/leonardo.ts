@@ -19,7 +19,7 @@
  * ───────────────────────────────────────────────────────────────────────────
  */
 
-import { requestJson } from '../../util/http.js';
+import { assertHttps, requestJson } from '../../util/http.js';
 import { AssetPipelineError, invalidInput } from '../../util/errors.js';
 import { fromLeonardoStatus } from '../../domain/status.js';
 import type {
@@ -133,7 +133,13 @@ export class LeonardoProvider implements ImageProvider {
   private readonly baseUrl: string;
 
   constructor(private readonly options: LeonardoClientOptions) {
-    this.baseUrl = (options.baseUrl ?? process.env.LEONARDO_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    const configuredBase = (options.baseUrl ?? process.env.LEONARDO_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    // Validated at construction, matching the Tripo client: a misconfigured
+    // base must not be able to reach a request carrying the API key. The
+    // shared HTTP layer would refuse it later anyway; failing here makes the
+    // reason obvious instead of surfacing at the first call.
+    assertHttps(configuredBase);
+    this.baseUrl = configuredBase;
     // Env override exists so a retired model id can be worked around without a
     // release, since model ids churn faster than this package will.
     this.defaultModelId = process.env.LEONARDO_MODEL_ID?.trim() || LEONARDO_DEFAULT_MODEL_ID;

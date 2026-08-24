@@ -59,7 +59,9 @@ Set these in your MCP client's `env` block — see the snippets below. **There i
 | `ASSET_MAX_DOWNLOAD_BYTES` | no | `268435456` (256 MiB) | Hard ceiling on any single download, enforced while streaming. |
 | `ASSET_HTTP_TIMEOUT_MS` | no | `60000` | Per-request HTTP timeout. |
 | `ASSET_LOG_LEVEL` | no | `info` | `silent` \| `error` \| `warn` \| `info` \| `debug`. |
-| `BLENDER_PATH` | no | auto-detected | Blender executable for `normalize_mesh`. Overrides discovery. |
+| `BLENDER_PATH` | no | auto-detected | Blender executable for `normalize_mesh` and `batch_prepare_meshes`. Overrides discovery. |
+| `TRIPO_BASE_URL` | no | Tripo v3 endpoint | Retarget the 3D provider. Must be `https://` — refused at startup otherwise, because the upload carries your API key. |
+| `LEONARDO_BASE_URL` | no | Leonardo endpoint | Retarget the image/audio provider. Must be `https://`, same reason. |
 | `ASSET_SPEND_LIMIT_CENTS` | no | unlimited | Session spend ceiling in **US cents**. Credit-consuming tools refuse once it is reached, before contacting the provider. |
 
 ### ⚠️ Tripo API credits are billed separately from a Tripo Studio subscription
@@ -145,7 +147,7 @@ The same server, described generically — a stdio child process:
 | `animate_asset` | **Yes** | Retargets a preset animation onto an asset that has already been rigged. Refuses an unrigged source rather than billing for nothing. |
 | `retopologize_asset` | **Yes** | Rebuilds topology, quads by default — quads survive downstream editing and mesh qualification far better than generator triangle soup. |
 | `validate_game_asset` | No | Judges a mesh against a shipping policy and returns pass/fail with per-check reasons — UVs, normals, tangents, triangle budget, materials, texture resolution, bounding-box sanity. Every threshold overridable. |
-| `batch_prepare_meshes` | No | Runs validate → normalize → validate across a whole folder of meshes and returns a per-item verdict. Meshes that already pass are left untouched; one bad file is reported against its own item and never stops the run. |
+| `batch_prepare_meshes` | No | Runs validate → normalize → validate across a **list** of `.glb`/`.gltf` paths (up to 500) and returns a per-item verdict. Meshes that already pass are left untouched; one bad file is reported against its own item and never stops the run. |
 | `get_spend_report` | No | What this workspace has spent, by tool, with remaining headroom — and whether each figure is a published price or a pessimistic placeholder. |
 
 Only nine tools can cost you money, and each one says so in its description before it is called.
@@ -161,7 +163,7 @@ Eleven of the twenty tools never spend a credit. **Five of those never touch the
 | `inspect_asset` | What is actually inside this glTF? Meshes, materials, texture channels, sizes, bounds. |
 | `validate_game_asset` | Is this shippable? Pass/fail with per-check reasons and every threshold overridable. |
 | `normalize_mesh` | Repair it: generate UVs for objects that have none, weld coincident vertices, dissolve degenerate triangles, name materials. |
-| `batch_prepare_meshes` | The same, across a whole folder, with a per-item verdict. |
+| `batch_prepare_meshes` | The same, across a list of `.glb`/`.gltf` paths, with a per-item verdict. |
 | `extract_pbr_trio` | Split a material into albedo / normal / roughness images, de-packing metallicRoughness correctly. |
 
 The usual loop is **validate → normalize → validate again**, so the repair is proven rather than assumed:
@@ -225,7 +227,8 @@ One paid call instead of two, and the geometry you already approved comes back u
 Other side effects worth knowing:
 
 - **Files are written to disk.** *Downloaded* assets land under `ASSET_OUTPUT_DIR`, and a download path that escapes the workspace root is refused. Three tools are different and deliberately so: `extract_pbr_trio`, `normalize_mesh` and `batch_prepare_meshes` write where **you** tell them to, including outside the workspace, because they operate on meshes you already own and those do not live in an asset-generation directory. Give them a destination you meant.
-- **`ASSET_OUTPUT_DIR` should be absolute.** A relative value resolves against the *server's* working directory, which your MCP client chooses — several spawn from `/`. The server refuses to start with a message naming the resolved path and the working directory it came from, for every errno this can produce — including ASSET_OUTPUT_DIR pointing at a file rather than a directory.
+- **`download_asset` and `generate_sound_effect` accept a `destination`** that overrides `ASSET_OUTPUT_DIR` for that one call. It is still contained: a path escaping the given root is refused.
+- **`ASSET_OUTPUT_DIR` should be absolute.** A relative value resolves against the *server's* working directory, which your MCP client chooses — several spawn from `/`. The server refuses to start with a message naming the resolved path and the working directory it came from. That diagnosis covers the eight errnos this can realistically produce — ENOENT, EACCES, EPERM, EROFS, ENOTDIR, ELOOP, ENAMETOOLONG and ENOSPC, including ASSET_OUTPUT_DIR pointing at a file rather than a directory. Anything else still propagates raw.
 - **Nothing is silently overwritten.** A colliding output name gets a numeric suffix (`crate`, `crate_2`, …) rather than destroying a result you may already have reviewed. The name is claimed by exclusive create, so two items in one batch cannot race for it — a batch is exactly where two sources share a basename.
 - **Downloads are capped** at `ASSET_MAX_DOWNLOAD_BYTES` and the cap is enforced while streaming, not from the `Content-Length` header — a server that lies about the size cannot exhaust your memory.
 - **Only HTTPS.** Non-HTTPS URLs are refused outright, including ones that arrive inside a provider's response.
