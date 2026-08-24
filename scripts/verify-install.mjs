@@ -32,6 +32,7 @@ const EXPECTED_TOOLS = [
   'inspect_asset',
   'extract_pbr_trio',
   'generate_sound_effect',
+  'normalize_mesh',
 ];
 
 async function main() {

@@ -1,0 +1,195 @@
+/**
+ * Locating and driving a local Blender install.
+ *
+ * Blender is an OPTIONAL dependency. A published npm package cannot assume it
+ * exists, so every path here either finds a real executable or refuses by name
+ * with instructions — never a silent no-op that leaves a mesh unchanged while
+ * reporting success.
+ */
+
+import { spawn } from 'node:child_process';
+import { accessSync, constants, existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { AssetPipelineError } from './errors.js';
+
+/** Where Blender actually lives on each platform, in preference order. */
+const CANDIDATE_PATHS: readonly string[] = [
+  // macOS ships an .app bundle whose binary is NOT on PATH by default, which
+  // is why PATH-only discovery reports "not installed" on a machine that has it.
+  '/Applications/Blender.app/Contents/MacOS/Blender',
+  '/usr/local/bin/blender',
+  '/usr/bin/blender',
+  '/snap/bin/blender',
+  'C:\\Program Files\\Blender Foundation\\Blender\\blender.exe',
+];
+
+function isExecutable(candidate: string): boolean {
+  try {
+    accessSync(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Scan PATH for a bare `blender` executable. */
+function fromSearchPath(): string | undefined {
+  const raw = process.env.PATH;
+  if (!raw) return undefined;
+  const exeNames = process.platform === 'win32' ? ['blender.exe'] : ['blender'];
+  for (const dir of raw.split(path.delimiter)) {
+    if (!dir) continue;
+    for (const name of exeNames) {
+      const candidate = path.join(dir, name);
+      if (isExecutable(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Find Blender, honouring an explicit override first.
+ *
+ * `BLENDER_PATH` wins because a user with several installs (or a portable
+ * build) must be able to say which one, and guessing wrong is worse than asking.
+ */
+export function findBlender(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const override = env.BLENDER_PATH?.trim();
+  if (override) return isExecutable(override) ? override : undefined;
+  const onPath = fromSearchPath();
+  if (onPath) return onPath;
+  return CANDIDATE_PATHS.find((candidate) => isExecutable(candidate));
+}
+
+export function requireBlender(env: NodeJS.ProcessEnv = process.env): string {
+  const found = findBlender(env);
+  if (found) return found;
+  throw new AssetPipelineError(
+    'CONFIG_MISSING',
+    'Blender was not found. This tool needs a local Blender install (4.x or newer). ' +
+      'Install it from https://www.blender.org/download/, or set BLENDER_PATH to the executable — ' +
+      'on macOS that is /Applications/Blender.app/Contents/MacOS/Blender, which is deliberately ' +
+      'not on PATH. Every other tool in this server works without Blender.',
+    { details: { checked: ['BLENDER_PATH', 'PATH', ...CANDIDATE_PATHS] } },
+  );
+}
+
+/** Absolute path to a script shipped inside this package. */
+export function packagedScript(name: string): string {
+  // dist/util/blender.js -> package root is two levels up.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(here, '..', '..', 'scripts', name),
+    path.resolve(here, '..', '..', '..', 'scripts', name),
+  ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    throw new AssetPipelineError('INVALID_STATE', `packaged script ${name} is missing`, {
+      details: { candidates },
+    });
+  }
+  return found;
+}
+
+export interface BlenderRunResult {
+  receipt: Record<string, unknown>;
+  stderrTail: string;
+  exitCode: number;
+}
+
+const RECEIPT_PREFIX = 'NORMALIZE_RECEIPT=';
+const MAX_CAPTURE_BYTES = 4 << 20;
+
+/**
+ * Run a packaged Blender script with a JSON option blob.
+ *
+ * Arguments go through argv, never a shell, so nothing in `options` can be
+ * interpreted as a command. `--factory-startup` keeps a user's add-ons and
+ * preferences from changing the result.
+ */
+export async function runBlenderScript(
+  scriptPath: string,
+  options: Record<string, unknown>,
+  settings: { timeoutMs: number; blenderPath?: string },
+): Promise<BlenderRunResult> {
+  const executable = settings.blenderPath ?? requireBlender();
+
+  return new Promise<BlenderRunResult>((resolve, reject) => {
+    const child = spawn(
+      executable,
+      ['--background', '--factory-startup', '--python', scriptPath, '--', JSON.stringify(options)],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+
+    let stdout = '';
+    let stderr = '';
+    let killedForTimeout = false;
+
+    const timer = setTimeout(() => {
+      killedForTimeout = true;
+      child.kill('SIGKILL');
+    }, settings.timeoutMs);
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (stdout.length < MAX_CAPTURE_BYTES) stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (stderr.length < MAX_CAPTURE_BYTES) stderr += chunk.toString('utf8');
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(
+        new AssetPipelineError('INVALID_STATE', `could not start Blender: ${err.message}`, {
+          cause: err,
+        }),
+      );
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const stderrTail = stderr.split('\n').slice(-40).join('\n');
+
+      if (killedForTimeout) {
+        reject(
+          new AssetPipelineError(
+            'TIMEOUT',
+            `Blender exceeded ${settings.timeoutMs}ms and was terminated`,
+            { retryable: true, details: { stderrTail } },
+          ),
+        );
+        return;
+      }
+
+      const line = stdout.split('\n').find((entry) => entry.startsWith(RECEIPT_PREFIX));
+      if (!line) {
+        // A zero exit without a receipt means the script did not reach its end.
+        // Reporting success here would claim a normalisation that never ran.
+        reject(
+          new AssetPipelineError(
+            'INSPECTION_FAILED',
+            `Blender exited ${code ?? 'unknown'} without emitting a normalisation receipt`,
+            { details: { exitCode: code, stderrTail } },
+          ),
+        );
+        return;
+      }
+
+      try {
+        resolve({
+          receipt: JSON.parse(line.slice(RECEIPT_PREFIX.length)) as Record<string, unknown>,
+          stderrTail,
+          exitCode: code ?? 0,
+        });
+      } catch (err) {
+        reject(
+          new AssetPipelineError('INSPECTION_FAILED', 'Blender emitted an unparseable receipt', {
+            cause: err,
+            details: { stderrTail },
+          }),
+        );
+      }
+    });
+  });
+}

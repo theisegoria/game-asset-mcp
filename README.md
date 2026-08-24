@@ -14,6 +14,7 @@ The server is provider-agnostic by construction. Today it drives [Tripo](https:/
 
 - **Node.js >= 18.17** — the server uses global `fetch`, `FormData`, `Blob` and `AbortController`.
 - No native modules, no build toolchain, no database. It runs anywhere Node runs.
+- **Optional:** a local [Blender](https://www.blender.org/download/) 4.x+ install enables `normalize_mesh`. Every other tool works without it; the tool refuses with instructions when it is absent. On macOS Blender is not on `PATH`, so set `BLENDER_PATH` or rely on the bundled `/Applications/Blender.app` default.
 - At least one provider API key (see [Configuration](#configuration)). One is enough — they are validated lazily.
 
 ---
@@ -58,6 +59,7 @@ Copy `.env.example` to `.env`, or set the variables in your MCP client's `env` b
 | `ASSET_MAX_DOWNLOAD_BYTES` | no | `268435456` (256 MiB) | Hard ceiling on any single download, enforced while streaming. |
 | `ASSET_HTTP_TIMEOUT_MS` | no | `60000` | Per-request HTTP timeout. |
 | `ASSET_LOG_LEVEL` | no | `info` | `silent` \| `error` \| `warn` \| `info` \| `debug`. |
+| `BLENDER_PATH` | no | auto-detected | Blender executable for `normalize_mesh`. Overrides discovery. |
 
 ### ⚠️ Tripo API credits are billed separately from a Tripo Studio subscription
 
@@ -128,6 +130,7 @@ The same server, described generically — a stdio child process:
 | `download_asset` | No | Fetches the provider's model, textures and preview renders into your workspace, hashing and recording each file. |
 | `inspect_asset` | No | Reads a downloaded glTF/GLB and reports what is actually in it — meshes, materials, texture channels, sizes. |
 | `extract_pbr_trio` | No | Splits a glTF material into independent albedo, normal and roughness images, de-packing metallicRoughness (roughness = green, metallic = blue). Resamples to an exact size, averaging colour in linear light and data channels directly. |
+| `normalize_mesh` | No | Repairs a mesh so it can be used: generates UVs for objects that have **none** (the usual reason a mesh cannot be textured), welds coincident vertices, dissolves degenerate triangles, names every material and forces opaque blending. Optional Blender dependency. |
 | `generate_sound_effect` | **Yes** | Generates a short game sound effect from a description — impacts, weapon reports, UI blips, or a seamless ambience loop. Polls and downloads inline. |
 | `create_game_prop` | **Yes — images only** | The intention-shaped entry point: plain-language request in, asset spec plus reference candidates out. Deliberately stops before the 3D spend so a human or agent picks the reference first. |
 | `list_asset_jobs` | No | Lists known jobs, newest first, as compact summaries. |
@@ -171,7 +174,7 @@ One paid call instead of two, and the geometry you already approved comes back u
 
 **Calls that spend provider credits:** `generate_asset_reference`, `generate_reference_variations`, `create_3d_asset`, `texture_existing_asset`, `generate_sound_effect`, and the image-generation step inside `create_game_prop`. Nothing else in this server can be charged for.
 
-**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`. Poll, inspect, split and download as often as you like.
+**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`, `normalize_mesh`. Poll, inspect, split and download as often as you like.
 
 **A credit-consuming POST is never retried automatically.** This is a deliberate, load-bearing rule and it lives in the HTTP layer, not in each call site. When a request that creates a generation task fails — timeout, socket reset, 502 — the client *cannot tell* whether the provider accepted it before the connection broke. Retrying might be free; it might also double-charge you for a mesh you never receive. So it does not retry, the error comes straight back, and the decision to try again is yours. Idempotent reads — status polls, file downloads — retry freely with backoff, because they cost nothing to repeat.
 
