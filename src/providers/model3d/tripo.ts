@@ -23,6 +23,9 @@
 import { requestJson } from '../../util/http.js';
 import { AssetPipelineError } from '../../util/errors.js';
 import type {
+  RigOptions,
+  RetargetOptions,
+  RetopologyOptions,
   GenerateFromImageOptions,
   GenerateFromTextOptions,
   Model3DProvider,
@@ -264,6 +267,55 @@ export class TripoProvider implements Model3DProvider {
       ...(options.textureAlignment ? { texture_alignment: options.textureAlignment } : {}),
       ...(options.textureSeed !== undefined ? { texture_seed: options.textureSeed } : {}),
       ...(options.bake !== undefined ? { bake: options.bake } : {}),
+    });
+  }
+
+
+  /**
+   * Rig an existing mesh.
+   *
+   * ⚠ Like every task type in this client, the exact `type` string is taken
+   * from published documentation and is UNVERIFIED against the live API.
+   */
+  async rig(options: RigOptions): Promise<Model3DTaskHandle> {
+    if (!options.originalModelTaskId && !options.modelToken) {
+      throw new AssetPipelineError('INVALID_INPUT', 'rig needs originalModelTaskId or modelToken');
+    }
+    return this.createTask({
+      type: 'animate_rig',
+      ...(options.originalModelTaskId
+        ? { original_model_task_id: options.originalModelTaskId }
+        : { file: { file_token: options.modelToken } }),
+      ...(options.spec ? { spec: options.spec } : {}),
+      out_format: options.outFormat ?? 'glb',
+    });
+  }
+
+  async retarget(options: RetargetOptions): Promise<Model3DTaskHandle> {
+    if (!options.animation.trim()) {
+      throw new AssetPipelineError('INVALID_INPUT', 'retarget needs an animation name');
+    }
+    // Retargeting onto an unrigged model produces nothing useful, and the
+    // provider bills for the attempt either way.
+    return this.createTask({
+      type: 'animate_retarget',
+      original_model_task_id: options.originalModelTaskId,
+      animation: options.animation,
+      out_format: options.outFormat ?? 'glb',
+    });
+  }
+
+  async retopologize(options: RetopologyOptions): Promise<Model3DTaskHandle> {
+    if (!options.originalModelTaskId && !options.modelToken) {
+      throw new AssetPipelineError('INVALID_INPUT', 'retopologize needs originalModelTaskId or modelToken');
+    }
+    return this.createTask({
+      type: 'refine_model',
+      ...(options.originalModelTaskId
+        ? { original_model_task_id: options.originalModelTaskId }
+        : { file: { file_token: options.modelToken } }),
+      ...(options.faceLimit !== undefined ? { face_limit: options.faceLimit } : {}),
+      quad: options.quad ?? true,
     });
   }
 

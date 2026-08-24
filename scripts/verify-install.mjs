@@ -35,6 +35,9 @@ const EXPECTED_TOOLS = [
   'normalize_mesh',
   'get_spend_report',
   'validate_game_asset',
+  'rig_asset',
+  'animate_asset',
+  'retopologize_asset',
 ];
 
 async function main() {
@@ -63,6 +66,9 @@ async function main() {
     'texture_existing_asset',
     'create_game_prop',
     'generate_sound_effect',
+    'rig_asset',
+    'animate_asset',
+    'retopologize_asset',
   ]);
 
   console.log(`connected. ${found.length} tools advertised:\n`);

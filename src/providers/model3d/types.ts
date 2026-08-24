@@ -76,6 +76,36 @@ export interface TextureExistingOptions {
   bake?: boolean;
 }
 
+
+/** Skeleton conventions a rigging service can target. */
+export type RigSpec = 'humanoid' | 'quadruped' | 'generic';
+
+export interface RigOptions {
+  /** A prior provider task whose model should be rigged. */
+  originalModelTaskId?: string;
+  /** A file token from `uploadModel`, for a mesh the user already owns. */
+  modelToken?: string;
+  spec?: RigSpec;
+  outFormat?: 'glb' | 'fbx';
+}
+
+export interface RetargetOptions {
+  /** The rigged task to animate. Rigging must have happened first. */
+  originalModelTaskId: string;
+  /** Provider preset animation name, e.g. a walk or idle clip. */
+  animation: string;
+  outFormat?: 'glb' | 'fbx';
+}
+
+export interface RetopologyOptions {
+  originalModelTaskId?: string;
+  modelToken?: string;
+  /** Target face count after retopology. */
+  faceLimit?: number;
+  /** Quads rather than triangles — far kinder to downstream editing. */
+  quad?: boolean;
+}
+
 export interface Model3DProvider {
   readonly name: string;
 
@@ -90,6 +120,15 @@ export interface Model3DProvider {
 
   /** Apply new textures to an existing mesh. */
   textureExisting(options: TextureExistingOptions): Promise<Model3DTaskHandle>;
+
+  /** Generate a skeleton and skin weights for an existing mesh. */
+  rig(options: RigOptions): Promise<Model3DTaskHandle>;
+
+  /** Retarget a preset animation onto an already-rigged model. */
+  retarget(options: RetargetOptions): Promise<Model3DTaskHandle>;
+
+  /** Rebuild topology, optionally as quads. */
+  retopologize(options: RetopologyOptions): Promise<Model3DTaskHandle>;
 
   getTask(providerTaskId: string): Promise<Model3DTaskResult>;
 }
