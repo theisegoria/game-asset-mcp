@@ -32,9 +32,13 @@ jobs:
         run: npm run lint
 
       - name: Test
-        # No API keys are provided, so integration tests are skipped and
-        # reported as skipped. A green run here never implies a live provider
-        # call was made.
+        # Skipped on 18.17 ONLY because vitest 4 imports `styleText` from
+        # node:util, which arrived in Node 20.12 — a limit of the test runner,
+        # not of this package. The 18.17 job still typechecks, lints, builds and
+        # completes a real MCP handshake below, which is what actually proves
+        # the declared engines floor.
+        if: matrix.node != '18.17'
+        # No API keys are provided, so nothing here contacts a live provider.
         run: npm test
 
       - name: Build
@@ -42,5 +46,7 @@ jobs:
 
       - name: Verify the server registers its tools
         # A protocol round-trip, not a version string: a server that fails to
-        # register its tools still starts perfectly happily.
+        # register its tools still starts perfectly happily. This runs on EVERY
+        # Node in the matrix, including 18.17, so the engines floor is backed by
+        # the server actually starting there rather than by assertion.
         run: node scripts/verify-install.mjs
