@@ -1,5 +1,5 @@
 {
-  "name": "game-asset-mcp",
+  "name": "@theisegoria/game-asset-mcp",
   "version": "0.2.0",
   "description": "MCP server for an agentic game-asset generation pipeline: reference images to 3D models with PBR textures, plus retexturing meshes you already own.",
   "keywords": [
@@ -32,6 +32,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "lint": "eslint src tests scripts",
     "verify": "npm run build && node scripts/verify-install.mjs",
@@ -55,5 +56,16 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",
     "vitest": "^4.1.11"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theisegoria/game-asset-mcp.git"
+  },
+  "homepage": "https://github.com/theisegoria/game-asset-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/theisegoria/game-asset-mcp/issues"
   }
 }
