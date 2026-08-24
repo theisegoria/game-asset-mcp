@@ -203,3 +203,81 @@ describe('audio collection', () => {
     expect(result.errorMessage).toBeUndefined();
   });
 });
+
+describe('URL recognition without relying on file extensions', () => {
+  it('accepts a signed CDN URL with no extension when the KEY names audio', async () => {
+    mockFetch(() =>
+      new Response(
+        JSON.stringify({ status: 'COMPLETE', audioUrl: 'https://cdn.test/abc123?sig=xyz' }),
+        { status: 200 },
+      ),
+    );
+    // Extension-only matching would reject this and look like an eternal pending.
+    const result = await provider().getGeneration('gen-1');
+    expect(result.audio).toHaveLength(1);
+    expect(result.audio[0]?.url).toBe('https://cdn.test/abc123?sig=xyz');
+  });
+
+  it('accepts a bare url nested inside an audio container', async () => {
+    mockFetch(() =>
+      new Response(
+        JSON.stringify({ status: 'COMPLETE', generated_audio: [{ url: 'https://cdn.test/x9' }] }),
+        { status: 200 },
+      ),
+    );
+    const result = await provider().getGeneration('gen-1');
+    expect(result.audio).toHaveLength(1);
+  });
+
+  it('still rejects an image even under an audio-named key', async () => {
+    mockFetch(() =>
+      new Response(
+        JSON.stringify({ status: 'COMPLETE', audioUrl: 'https://cdn.test/preview.png' }),
+        { status: 200 },
+      ),
+    );
+    const result = await provider().getGeneration('gen-1');
+    expect(result.audio).toHaveLength(0);
+  });
+
+  it('rejects a bare url in a non-audio container', async () => {
+    mockFetch(() =>
+      new Response(
+        JSON.stringify({ status: 'COMPLETE', generated_images: [{ url: 'https://cdn.test/z1' }] }),
+        { status: 200 },
+      ),
+    );
+    const result = await provider().getGeneration('gen-1');
+    expect(result.audio).toHaveLength(0);
+  });
+});
+
+describe('retrieval endpoint discovery', () => {
+  it('prefers v2 and falls back to v1 on 404', async () => {
+    const seen: string[] = [];
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.includes('/v2/generations/')) return new Response('nope', { status: 404 });
+      return new Response(
+        JSON.stringify({ generations_by_pk: { status: 'COMPLETE', generated_audio: [{ url: 'https://cdn.test/a.wav' }] } }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await provider().getGeneration('gen-1');
+    expect(seen.some((u) => u.includes('/v2/generations/'))).toBe(true);
+    expect(seen.some((u) => u.includes('/v1/generations/'))).toBe(true);
+    expect(result.audio).toHaveLength(1);
+  });
+
+  it('reports the payload shape when COMPLETE yields no recognisable audio', async () => {
+    mockFetch(() =>
+      new Response(JSON.stringify({ status: 'COMPLETE', somethingNew: { blob: 'x' } }), { status: 200 }),
+    );
+    const result = await provider().getGeneration('gen-1');
+    // Silence here would read as an eternal pending; the caller must be told.
+    expect(result.errorMessage).toContain('no audio URL was recognised');
+    expect(result.errorMessage).toContain('somethingNew');
+  });
+});

@@ -61,39 +61,80 @@ function pick(payload: unknown, paths: string[]): string | undefined {
   return undefined;
 }
 
-/** Collect audio URLs from whichever array shape the provider used. */
+const AUDIO_EXTENSION = /\.(wav|mp3|ogg|flac|m4a|aac)(\?|$)/i;
+const IMAGE_EXTENSION = /\.(png|jpe?g|webp|gif|svg)(\?|$)/i;
+/** Keys whose very name says the value is audio, whatever the URL looks like. */
+const AUDIO_KEYS = new Set([
+  'audiourl',
+  'audio_url',
+  'generated_audio_url',
+  'generatedaudiourl',
+  'soundurl',
+  'sound_url',
+  'sfxurl',
+]);
+/** Containers that hold audio, so a bare `url` inside one is audio too. */
+const AUDIO_CONTAINERS = new Set([
+  'audio',
+  'audios',
+  'generated_audio',
+  'generatedaudio',
+  'sound',
+  'sounds',
+  'soundeffects',
+  'sound_effects',
+]);
+
+/**
+ * Collect audio URLs from whichever shape the provider used.
+ *
+ * Two rules, because either alone is wrong. Extension-only would REJECT a valid
+ * signed CDN URL that carries no extension — common, and it would look exactly
+ * like an eternal pending. Key-name-only would ACCEPT a preview image sitting
+ * under a generic `url`. So a URL qualifies if its key or its container names
+ * audio, or if it simply ends in an audio extension — and an image extension
+ * disqualifies it either way.
+ */
 function collectAudio(payload: unknown): GeneratedAudio[] {
   const found: GeneratedAudio[] = [];
   const seen = new Set<string>();
 
-  const visit = (node: unknown, depth: number): void => {
-    if (depth > 6 || node === null || typeof node !== 'object') return;
+  const consider = (value: unknown, key: string, container: string, record: Record<string, unknown>): void => {
+    if (typeof value !== 'string' || value.length === 0) return;
+    if (!/^https?:\/\//i.test(value)) return;
+    if (IMAGE_EXTENSION.test(value)) return;
+
+    const named = AUDIO_KEYS.has(key.toLowerCase());
+    const contained = AUDIO_CONTAINERS.has(container.toLowerCase()) && key.toLowerCase() === 'url';
+    if (!named && !contained && !AUDIO_EXTENSION.test(value)) return;
+    if (seen.has(value)) return;
+
+    seen.add(value);
+    const id = record.id;
+    const duration = record.duration ?? record.durationSeconds ?? record.duration_seconds;
+    found.push({
+      url: value,
+      ...(typeof id === 'string' ? { providerAudioId: id } : {}),
+      ...(typeof duration === 'number' ? { durationSeconds: duration } : {}),
+    });
+  };
+
+  const visit = (node: unknown, depth: number, container: string): void => {
+    if (depth > 8 || node === null || typeof node !== 'object') return;
     if (Array.isArray(node)) {
-      for (const item of node) visit(item, depth + 1);
+      for (const item of node) visit(item, depth + 1, container);
       return;
     }
     const record = node as Record<string, unknown>;
-    for (const key of ['url', 'audioUrl', 'audio_url', 'generated_audio_url', 'motionMP4URL']) {
-      const value = record[key];
-      // Only accept things that actually look like audio, so a preview image
-      // URL cannot be mistaken for the asset.
-      if (typeof value === 'string' && /\.(wav|mp3|ogg|flac|m4a|aac)(\?|$)/i.test(value)) {
-        if (!seen.has(value)) {
-          seen.add(value);
-          const id = record.id;
-          const duration = record.duration ?? record.durationSeconds;
-          found.push({
-            url: value,
-            ...(typeof id === 'string' ? { providerAudioId: id } : {}),
-            ...(typeof duration === 'number' ? { durationSeconds: duration } : {}),
-          });
-        }
-      }
+    for (const [key, value] of Object.entries(record)) {
+      consider(value, key, container, record);
+      // Descend with this key as the container name, so a bare `url` nested in
+      // `generated_audio` is recognised by where it lives.
+      visit(value, depth + 1, key);
     }
-    for (const value of Object.values(record)) visit(value, depth + 1);
   };
 
-  visit(payload, 0);
+  visit(payload, 0, '');
   return found;
 }
 
@@ -178,20 +219,41 @@ export class LeonardoAudioProvider implements AudioProvider {
     return { providerGenerationId: generationId };
   }
 
-  /** Poll. Idempotent, so transient failures may retry. */
+  /**
+   * Poll. Idempotent, so transient failures may retry.
+   *
+   * The generation was created on v2, so v2 is tried first; but the only
+   * retrieval endpoint Leonardo actually documents is v1, so a 404 falls back
+   * rather than failing. Whichever answered is reported, so the first live run
+   * tells us which is correct instead of leaving it a guess forever.
+   */
   async getGeneration(providerGenerationId: string): Promise<AudioGenerationResult> {
-    const response = await requestJson<unknown>(
-      `${this.baseUrl}/v1/generations/${encodeURIComponent(providerGenerationId)}`,
-      { headers: this.headers(), timeoutMs: this.options.timeoutMs, retries: 3 },
-    );
+    const id = encodeURIComponent(providerGenerationId);
+    let data: unknown;
+    let servedBy = 'v2';
+    try {
+      const response = await requestJson<unknown>(`${this.baseUrl}/v2/generations/${id}`, {
+        headers: this.headers(),
+        timeoutMs: this.options.timeoutMs,
+        retries: 3,
+      });
+      data = response.data;
+    } catch (err) {
+      const status = (err as AssetPipelineError).details?.status;
+      if (status !== 404 && status !== 405) throw err;
+      const response = await requestJson<unknown>(`${this.baseUrl}/v1/generations/${id}`, {
+        headers: this.headers(),
+        timeoutMs: this.options.timeoutMs,
+        retries: 3,
+      });
+      data = response.data;
+      servedBy = 'v1';
+    }
 
-    const rawStatus = pick(response.data, [
-      'generations_by_pk.status',
-      'status',
-      'generation.status',
-    ]) ?? 'PENDING';
-
-    const audio = collectAudio(response.data);
+    const rawStatus =
+      pick(data, ['generations_by_pk.status', 'status', 'generation.status', 'data.status']) ??
+      'PENDING';
+    const audio = collectAudio(data);
     const failed = rawStatus.toUpperCase() === 'FAILED';
 
     return {
@@ -203,7 +265,17 @@ export class LeonardoAudioProvider implements AudioProvider {
       ...(failed
         ? { errorMessage: `Leonardo reported status ${rawStatus} for ${providerGenerationId}` }
         : {}),
-      raw: response.data,
+      // When the provider says COMPLETE but nothing parsed, surface the shape so
+      // a user can report it — silence here reads as an eternal pending.
+      ...(!failed && audio.length === 0 && rawStatus.toUpperCase() === 'COMPLETE'
+        ? {
+            errorMessage:
+              `Leonardo reported COMPLETE but no audio URL was recognised (served by ${servedBy}). ` +
+              `Top-level keys: ${shallowKeys(data).join(', ') || '(none)'}. ` +
+              'Please report this payload shape so the client can be corrected.',
+          }
+        : {}),
+      raw: data,
     };
   }
 }
