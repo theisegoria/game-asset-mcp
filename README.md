@@ -21,17 +21,21 @@ The server is provider-agnostic by construction. Today it drives [Tripo](https:/
 
 ## Installation
 
+> **Not on npm yet.** Install straight from GitHub — the commands below are the ones that work today. Once the package is published, `npx @theisegoria/game-asset-mcp` will work too; until then it would only give you a 404.
+
 Run it without installing anything permanently:
 
 ```bash
-npx game-asset-mcp
+npx github:theisegoria/game-asset-mcp
 ```
 
 Or install it into a project:
 
 ```bash
-npm install game-asset-mcp
+npm install github:theisegoria/game-asset-mcp
 ```
+
+Both build the TypeScript on install, so you get a runnable `game-asset-mcp` binary either way.
 
 Or build from source:
 
@@ -112,7 +116,7 @@ The same server, described generically — a stdio child process:
   "name": "game-asset",
   "transport": "stdio",
   "command": "npx",
-  "args": ["-y", "game-asset-mcp"],
+  "args": ["-y", "github:theisegoria/game-asset-mcp"],
   "env": {
     "TRIPO_API_KEY": "tsk_...",
     "LEONARDO_API_KEY": "...",
@@ -145,6 +149,7 @@ The same server, described generically — a stdio child process:
 | `animate_asset` | **Yes** | Retargets a preset animation onto an asset that has already been rigged. Refuses an unrigged source rather than billing for nothing. |
 | `retopologize_asset` | **Yes** | Rebuilds topology, quads by default — quads survive downstream editing and mesh qualification far better than generator triangle soup. |
 | `validate_game_asset` | No | Judges a mesh against a shipping policy and returns pass/fail with per-check reasons — UVs, normals, tangents, triangle budget, materials, texture resolution, bounding-box sanity. Every threshold overridable. |
+| `batch_prepare_meshes` | No | Runs validate → normalize → validate across a whole folder of meshes and returns a per-item verdict. Meshes that already pass are left untouched; one bad file is reported against its own item and never stops the run. |
 | `get_spend_report` | No | What this workspace has spent, by tool, with remaining headroom — and whether each figure is a published price or a pessimistic placeholder. |
 
 Only nine tools can cost you money, and each one says so in its description before it is called.
@@ -186,7 +191,7 @@ One paid call instead of two, and the geometry you already approved comes back u
 
 **Calls that spend provider credits:** `generate_asset_reference`, `generate_reference_variations`, `create_3d_asset`, `texture_existing_asset`, `generate_sound_effect`, `rig_asset`, `animate_asset`, `retopologize_asset`, and the image-generation step inside `create_game_prop`. Nothing else in this server can be charged for.
 
-**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset`, `get_spend_report`. Poll, inspect, split and download as often as you like.
+**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset`, `batch_prepare_meshes`, `get_spend_report`. Poll, inspect, split and download as often as you like.
 
 **A credit-consuming POST is never retried automatically.** This is a deliberate, load-bearing rule and it lives in the HTTP layer, not in each call site. When a request that creates a generation task fails — timeout, socket reset, 502 — the client *cannot tell* whether the provider accepted it before the connection broke. Retrying might be free; it might also double-charge you for a mesh you never receive. So it does not retry, the error comes straight back, and the decision to try again is yours. Idempotent reads — status polls, file downloads — retry freely with backoff, because they cost nothing to repeat.
 
@@ -261,7 +266,7 @@ This is early software, and the parts most likely to drift are marked as such ra
 
 **Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. The paths are the **first** thing the live smoke test checks, because a wrong path returns a 404 that looks exactly like a bad API key.
 
-**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 165 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
+**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 254 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
 
 Concretely, these remain **unverified**:
 
@@ -277,7 +282,11 @@ Concretely, these remain **unverified**:
 
 If you are the first person to run this with real keys, expect to fix an endpoint path, and please open an issue with what you found.
 
-**What *is* verified:** `npm run verify` builds the server, starts it over stdio with a real MCP client, completes the handshake and asserts all eleven tools register. That is a protocol round-trip, not a version string — a server that fails to register its tools still starts perfectly happily.
+**What *is* verified:** `npm run verify` builds the server, starts it over stdio with a real MCP client, completes the handshake and asserts all twenty tools register. That is a protocol round-trip, not a version string — a server that fails to register its tools still starts perfectly happily.
+
+The local half of the pipeline — `inspect_asset`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset`, `batch_prepare_meshes` — **is** verified against real shipped game assets rather than fixtures, because a synthetic fixture and the parser that reads it can share the same mistake and both look green. It has done: a wrong glTF magic constant survived a full synthetic suite and was caught only by a real file.
+
+The test suite also installs the package the way a stranger would and speaks MCP to the result, which is how the symlinked-bin defect in the entry-point guard was found — the server had been exiting instantly on every install while passing every test.
 
 ---
 

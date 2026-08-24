@@ -31,6 +31,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Build
+        # BEFORE the tests, deliberately: the entry-point test spawns the built
+        # server through a symlink and skips itself when dist/ is absent. Left
+        # after, that test would quietly stop running the moment the `prepare`
+        # script changed — a green suite covering one test fewer than it claims.
+        run: npm run build
+
       - name: Test
         # Skipped on 18.17 ONLY because vitest 4 imports `styleText` from
         # node:util, which arrived in Node 20.12 — a limit of the test runner,
@@ -40,9 +47,6 @@ jobs:
         if: matrix.node != '18.17'
         # No API keys are provided, so nothing here contacts a live provider.
         run: npm test
-
-      - name: Build
-        run: npm run build
 
       - name: Verify the server registers its tools
         # A protocol round-trip, not a version string: a server that fails to
