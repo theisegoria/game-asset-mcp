@@ -18,7 +18,7 @@ import { NodeIO } from '@gltf-transform/core';
 import type { Material } from '@gltf-transform/core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  constantImage,
+  constantColorImage, constantImage,
   decodeImage,
   encodePNG,
   extractChannel,
@@ -195,10 +195,14 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
         });
       } else {
         const factor = material.getBaseColorFactor();
-        await emit('albedo', constantImage(size, size, Math.round((factor[0] ?? 1) * 255)), {
-          srgb: true,
-          source: 'factor',
-        });
+        // All THREE channels, and sRGB-encoded. This used factor[0] for every
+        // channel, so a cyan [0, 0.6, 1] baseColorFactor came out BLACK, and it
+        // wrote the linear value raw while tagging the plane sRGB.
+        await emit(
+          'albedo',
+          constantColorImage(size, size, [factor[0] ?? 1, factor[1] ?? 1, factor[2] ?? 1]),
+          { srgb: true, source: 'factor' },
+        );
       }
 
       if (normal) {

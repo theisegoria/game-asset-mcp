@@ -331,11 +331,33 @@ function summarizeGeometry(root: Root): GeometrySummary {
     nonTriangleCount: 0,
   };
 
+  // How many NODES reference each mesh. Iterating meshes alone counts an
+  // instanced mesh once however many times it is drawn, so a 12-triangle mesh
+  // placed at 50 nodes reported 12 — and validate_game_asset passed it against
+  // a 100-triangle budget while a renderer draws 600. The doc comment calls
+  // this "the unit a renderer draws", which was false under instancing.
+  const instancesPerMesh = new Map<string, number>();
+  for (const scene of root.listScenes()) {
+    const visit = (node: ReturnType<typeof scene.listChildren>[number]): void => {
+      const mesh = node.getMesh();
+      if (mesh) {
+        const key = String(mesh.getName() ?? '') + ':' + String(meshes.indexOf(mesh));
+        instancesPerMesh.set(key, (instancesPerMesh.get(key) ?? 0) + 1);
+      }
+      for (const child of node.listChildren()) visit(child);
+    };
+    for (const node of scene.listChildren()) visit(node);
+  }
+
   for (const mesh of meshes) {
+    const key = String(mesh.getName() ?? '') + ':' + String(meshes.indexOf(mesh));
+    // A mesh referenced by no node is still counted once: it is in the file,
+    // and reporting zero for it would understate just as badly.
+    const instances = Math.max(1, instancesPerMesh.get(key) ?? 0);
     for (const primitive of mesh.listPrimitives()) {
       summary.primitiveCount += 1;
-      summary.vertexCount += primitive.getAttribute('POSITION')?.getCount() ?? 0;
-      summary.triangleCount += trianglesInPrimitive(primitive);
+      summary.vertexCount += (primitive.getAttribute('POSITION')?.getCount() ?? 0) * instances;
+      summary.triangleCount += trianglesInPrimitive(primitive) * instances;
 
       const mode = primitive.getMode();
       if (mode !== MODE_TRIANGLES && mode !== MODE_TRIANGLE_STRIP && mode !== MODE_TRIANGLE_FAN) {

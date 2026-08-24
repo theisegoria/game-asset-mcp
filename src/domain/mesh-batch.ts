@@ -76,6 +76,10 @@ export interface MeshBatchDeps {
   inspect(file: string): Promise<AssetInspection>;
   /** True when `dir` exists and is a directory. */
   isDirectory(dir: string): Promise<boolean>;
+  /** Opaque identity (device+inode) of a path, or null if absent. */
+  fileIdentity(target: string): Promise<unknown>;
+  /** True when `target` is still the same file the identity was taken from. */
+  isSameFile(target: string, identity: unknown): Promise<boolean>;
   /** Repairs `source` into `target` and returns the normalizer's receipt. */
   normalize(source: string, target: string): Promise<Record<string, number>>;
   /**
@@ -113,15 +117,24 @@ function errorIds(report: ReturnType<typeof evaluateAsset>): string[] {
 /**
  * Releases a reservation without letting the cleanup become the reported error.
  */
-async function release(deps: MeshBatchDeps, target: string): Promise<boolean> {
+async function release(
+  deps: MeshBatchDeps,
+  target: string,
+  reservationIdentity: unknown,
+): Promise<boolean> {
   try {
-    // Unconditional here, DELIBERATELY, unlike normalize_mesh. A review argued
-    // the guard should be shared, but the two tools own their targets
-    // differently: this one reserves by exclusive create and has no overwrite
-    // path, so a concurrent call always lands on a `_2` name and the bytes at
-    // this path are always our own. Deleting our own failed output is right;
-    // refusing to would leave garbage from every failed run. normalize_mesh
-    // needs the guard because it CAN target a file it did not create.
+    // I argued this could stay unconditional, on the grounds that the batch
+    // reserves by exclusive create and has no overwrite path, so the bytes here
+    // are always its own. That was WRONG, and a later review proved it:
+    // normalize_mesh DOES have an overwrite path and can legitimately rename a
+    // verified mesh onto this very name. The unconditional remove then deleted
+    // it, leaving that caller holding a receipt with a SHA-256 for bytes that
+    // existed nowhere — the mirror of the race normalize_mesh already guards.
+    //
+    // Identity, not size: our own Blender may legitimately have written bytes
+    // here, and those are ours to remove. What is not ours is a file whose
+    // inode changed, because only a rename from outside can do that.
+    if (!(await deps.isSameFile(target, reservationIdentity))) return true;
     await deps.discardReservation(target);
     return true;
   } catch {
@@ -190,6 +203,9 @@ async function prepareOne(
     );
   }
   const target = await deps.reserveOutputPath(dir, `${path.basename(source, actualExt)}_normalized.glb`);
+  // Captured at reservation time, so a later rename from another tool is
+  // detectable: only a rename changes the inode standing at this path.
+  const reservationIdentity = await deps.fileIdentity(target);
 
   let receipt: Record<string, number>;
   try {
@@ -199,7 +215,7 @@ async function prepareOne(
     // could: an EPERM from the cleanup threw first, so a caller whose Blender
     // had segfaulted was told only "EPERM_cleanup_failed" and the real cause
     // was gone.
-    if (!(await release(deps, target))) item.orphanedOutput = target;
+    if (!(await release(deps, target, reservationIdentity))) item.orphanedOutput = target;
     throw Object.assign(err instanceof Error ? err : new Error(String(err)), {
       meshBatchOrphan: item.orphanedOutput,
     });
@@ -215,7 +231,7 @@ async function prepareOne(
     inspection = await deps.inspect(target);
     after = evaluateAsset(inspection, options.policy);
   } catch (err) {
-    if (!(await release(deps, target))) item.orphanedOutput = target;
+    if (!(await release(deps, target, reservationIdentity))) item.orphanedOutput = target;
     delete item.normalizedPath;
     throw Object.assign(err instanceof Error ? err : new Error(String(err)), {
       meshBatchOrphan: item.orphanedOutput,

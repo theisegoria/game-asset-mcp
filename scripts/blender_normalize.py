@@ -16,6 +16,7 @@ the caller can parse it without guessing which of Blender's chatter is ours.
 """
 
 import json
+import math
 import os
 import sys
 
@@ -83,28 +84,34 @@ def select_only(obj):
     bpy.context.view_layer.objects.active = obj
 
 
+# Blender refuses a threshold below this and silently clamps UP, which would
+# over-weld by exactly the amount we were trying to avoid. Queried from
+# bpy.ops.mesh.remove_doubles' RNA, not assumed.
+BLENDER_MIN_THRESHOLD = 1e-6
+
+
 def world_threshold_divisor(obj):
     """How much to DIVIDE a world-space threshold by to express it locally.
 
-    mergeDistance is documented as scene units, and welding happens on LOCAL
-    vertex coordinates, so the two differ by the object's world scale. The first
-    attempt at this baked the scale into the vertices with transform_apply. That
-    was wrong three ways, all reproduced: it read obj.scale, so a scale on a
-    PARENT node was missed entirely and 92% of a mesh was still destroyed at
-    defaults; it raised "Cannot apply to a multi user" on instanced meshes,
-    turning a working input into a hard failure; and it mutated geometry to fix
-    a units problem.
+    mergeDistance is documented as scene units and welding happens on LOCAL
+    coordinates, so the two differ by the object's world scale.
 
-    Reading the WORLD scale and dividing the threshold fixes all three: parents
-    are included because matrix_world is the full chain, nothing is mutated, and
-    instancing is untouched. min() of the axes is deliberate — welding is
-    isotropic, so the smallest axis decides what is safe to merge; taking the
-    largest would over-weld a non-uniformly scaled mesh on its thin axis.
+    MAX, not min. A local separation v becomes world separation S·v, so a pair
+    merged at local threshold T can be as far apart in world as max(s)·T. To
+    guarantee nothing is merged that is further apart than M in world:
+    max(s)·T <= M, hence T = M / max(s). The previous version used min(s) with
+    the reasoning that "welding is isotropic, so the smallest axis decides what
+    is safe" — which is exactly inverted, and over-welded by up to max/min. On a
+    plate scaled [1,1,0.02] it destroyed 73% of the mesh at defaults and
+    reported it ready to texture.
+
+    An earlier version instead baked the scale with transform_apply. That missed
+    a scale on a PARENT node and crashed on instanced meshes; matrix_world
+    covers the whole chain and mutates nothing.
     """
     scale = obj.matrix_world.to_scale()
-    smallest = min(abs(scale[0]), abs(scale[1]), abs(scale[2]))
-    # A degenerate or zero scale cannot divide anything; leave the threshold be.
-    return smallest if smallest > 1e-12 else 1.0
+    largest = max(abs(scale[0]), abs(scale[1]), abs(scale[2]))
+    return largest if largest > 1e-12 else 1.0
 
 
 def clean_geometry(obj, merge_distance):
@@ -150,6 +157,13 @@ def unwrap(obj, angle_limit_degrees, island_margin):
 def decimate(obj, ratio):
     modifier = obj.modifiers.new(name="normalize_decimate", type="DECIMATE")
     modifier.ratio = ratio
+    # A modifier cannot be applied to multi-user mesh data, and an instanced
+    # glTF is ordinary. transform_apply hit the identical wall and was removed;
+    # decimate kept it, so targetTriangles turned a working input into
+    # "Blender exited 0 without emitting a normalisation receipt" — which names
+    # nothing actionable, since Blender exits 0.
+    if obj.data.users > 1:
+        obj.data = obj.data.copy()
     select_only(obj)
     bpy.ops.object.modifier_apply(modifier=modifier.name)
 
@@ -206,6 +220,7 @@ def main():
     opaque_total = 0
 
     scaled_objects = 0
+    weld_skipped = 0
     largest_divisor = 1.0
     requested_merge = float(options.get("mergeDistance", 0.0001))
     for obj in objects:
@@ -215,11 +230,23 @@ def main():
         divisor = world_threshold_divisor(obj)
         if divisor != 1.0:
             scaled_objects += 1
-            largest_divisor = max(largest_divisor, divisor)
+            # Report the EXTREME divisor in either direction; initialising to
+            # 1.0 and only taking max() could never report a divisor below 1,
+            # and it printed 1 on the very run that lost 73% of a mesh.
+            if abs(math.log(divisor)) > abs(math.log(largest_divisor)):
+                largest_divisor = divisor
         local_merge = requested_merge / divisor
         if options.get("cleanGeometry", True):
-            clean_geometry(obj, local_merge)
-            cleaned += 1
+            if requested_merge > 0.0 and local_merge < BLENDER_MIN_THRESHOLD:
+                # Blender would clamp this UP, applying a world threshold of
+                # BLENDER_MIN_THRESHOLD * divisor — larger than asked for, on an
+                # object whose scale is exactly what makes it fragile. Skipping
+                # destroys nothing; clamping destroyed 94% of an 800-triangle
+                # mesh and called it ready to texture.
+                weld_skipped += 1
+            else:
+                clean_geometry(obj, local_merge)
+                cleaned += 1
         # Only unwrap what is actually missing UVs: re-unwrapping an authored
         # layout would silently destroy an artist's work.
         if options.get("unwrapMissingUVs", True) and not has_uvs(obj):
@@ -289,6 +316,7 @@ def main():
         # counters were also provably false for a scale like [-1, 1, 1], whose
         # largest component is 1.
         "objectsWithNonUnitWorldScale": scaled_objects,
+        "objectsWeldSkippedThresholdUnrepresentable": weld_skipped,
         "largestThresholdDivisor": largest_divisor,
         "mergeDistanceRequestedSceneUnits": requested_merge,
         "outputBytes": exported_bytes,

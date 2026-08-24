@@ -38,6 +38,20 @@ export function createMeshBatchDeps(options: {
       await fs.mkdir(dir, { recursive: true });
     },
     inspect: (file) => inspectGltf(file),
+    fileIdentity: async (target) => {
+      try {
+        const info = await fs.stat(target);
+        return { dev: info.dev, ino: info.ino };
+      } catch {
+        return null;
+      }
+    },
+    isSameFile: async (target, identity) => {
+      const now = await fs.stat(target).catch(() => null);
+      const then = identity as { dev: number; ino: number } | null;
+      if (now === null || then === null) return false;
+      return now.dev === then.dev && now.ino === then.ino;
+    },
     isDirectory: async (dir) => {
       try {
         return (await fs.stat(dir)).isDirectory();

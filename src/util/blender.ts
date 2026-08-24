@@ -190,7 +190,26 @@ export async function runBlenderScript(
         return;
       }
 
-      const line = stdout.split('\n').find((entry) => entry.startsWith(RECEIPT_PREFIX));
+      // The LAST matching line, matching what the script promises: it prints the
+      // receipt as its final line. Taking the FIRST let the INPUT FILE forge it
+      // — Blender echoes mesh names to stdout, so a mesh named
+      // "MESH\nNORMALIZE_RECEIPT={...}" injected a complete receipt that was
+      // reported as fact. Every non-measured field became attacker-controlled.
+      const receiptLines = stdout.split('\n').filter((entry) => entry.startsWith(RECEIPT_PREFIX));
+      const line = receiptLines.length > 0 ? receiptLines[receiptLines.length - 1] : undefined;
+      // A non-zero exit is a failure even WITH a receipt. finish() checked only
+      // for the receipt's presence, so a Blender exiting 3 that had printed one
+      // was reported as a clean success.
+      if (code !== 0 && code !== null) {
+        reject(
+          new AssetPipelineError(
+            'INSPECTION_FAILED',
+            `Blender exited ${code}`,
+            { details: { exitCode: code, stderrTail } },
+          ),
+        );
+        return;
+      }
       if (!line) {
         // A zero exit without a receipt means the script did not reach its end.
         // Reporting success here would claim a normalisation that never ran.
@@ -205,8 +224,14 @@ export async function runBlenderScript(
       }
 
       try {
+        const parsed: unknown = JSON.parse(line.slice(RECEIPT_PREFIX.length));
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          // `NORMALIZE_RECEIPT=null` parsed fine and then threw a raw TypeError
+          // in the caller — AFTER the staged file had been renamed into place.
+          throw new Error('receipt is not a JSON object');
+        }
         resolve({
-          receipt: JSON.parse(line.slice(RECEIPT_PREFIX.length)) as Record<string, unknown>,
+          receipt: parsed as Record<string, unknown>,
           stderrTail,
           exitCode: code ?? 0,
         });

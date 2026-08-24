@@ -216,6 +216,35 @@ export function extractChannel(image: RasterImage, channel: ChannelName): Raster
 }
 
 /** A flat single-value image, for a plane a material declares as a constant. */
+/**
+ * A solid image from a glTF factor triple, encoded to sRGB.
+ *
+ * `constantImage` takes ONE value and paints it into R, G and B, and the caller
+ * passed only `factor[0]` — so a cyan baseColorFactor [0, 0.6, 1] became BLACK.
+ * The value was also written raw while the plane was tagged sRGB: linear 0.6
+ * must encode to ~199, not 153.
+ */
+export function constantColorImage(
+  width: number,
+  height: number,
+  linearRgb: readonly [number, number, number],
+): RasterImage {
+  assertPixelBudget(width, height);
+  const encoded = linearRgb.map((channel) => {
+    const clamped = Math.max(0, Math.min(1, channel));
+    return LINEAR_TO_SRGB[Math.round(clamped * 4095)] ?? 0;
+  }) as [number, number, number];
+  const data = new Uint8Array(width * height * 4);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const at = pixel * 4;
+    data[at] = encoded[0];
+    data[at + 1] = encoded[1];
+    data[at + 2] = encoded[2];
+    data[at + 3] = 255;
+  }
+  return { width, height, data };
+}
+
 export function constantImage(width: number, height: number, value: number): RasterImage {
   assertPixelBudget(width, height);
   const clamped = Math.max(0, Math.min(255, Math.round(value)));

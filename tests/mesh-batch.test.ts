@@ -99,6 +99,12 @@ function harness(opts: {
       async isDirectory() {
         return true;
       },
+      async fileIdentity() {
+        return { dev: 1, ino: 1 };
+      },
+      async isSameFile() {
+        return true;
+      },
       async discardReservation(target) {
         discarded.push(target);
         reserved.delete(target);
@@ -281,6 +287,8 @@ describe('where the bytes actually land', () => {
         mkdirSync(dir, { recursive: true });
       },
       isDirectory: async (dir) => existsSync(dir),
+      fileIdentity: async () => ({ dev: 1, ino: 1 }),
+      isSameFile: async () => true,
       discardReservation: async (target) => {
         rmSync(target, { force: true });
       },

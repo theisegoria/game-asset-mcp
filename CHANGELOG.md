@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.3.3
+
+A ninth review found nine defects. **0.3.0–0.3.2 should not be used.**
+
+- **The scale divisor was inverted.** 0.3.1 divided the weld threshold by
+  `min(|world scale|)` on the reasoning that "welding is isotropic, so the
+  smallest axis decides what is safe". That is exactly backwards: a pair merged
+  at local threshold T can be `max(s)·T` apart in world, so the divisor must be
+  `max`. A plate scaled `[1, 1, 0.02]` lost 73% of its triangles at defaults and
+  was reported ready to texture.
+- **Blender clamps a threshold below 1e-6 upwards**, so any divisor over 100
+  over-welded by exactly the amount the division was meant to prevent — 94% of a
+  mesh, reported ready. Welding is now skipped and reported when the requested
+  threshold cannot be expressed, rather than silently widened.
+- **The receipt could be forged by the input file.** The consumer took the FIRST
+  matching stdout line while the script emits it LAST, and Blender echoes mesh
+  names to stdout — so a mesh named `"MESH\nNORMALIZE_RECEIPT={...}"` supplied
+  every non-measured field, including the reported Blender version. It now takes
+  the last line, requires a JSON object, and treats a non-zero exit as a failure
+  even when a receipt was printed.
+- **A throw still ran after the rename.** An invalid receipt raised a TypeError
+  once the staged file was already in place, so a reviewed file was replaced and
+  the caller was told the call had failed.
+- **The batch deleted another tool's verified output.** I argued this was safe
+  because the batch owns its target; that was wrong — `normalize_mesh` has an
+  overwrite path and can land on that name. The release now compares the
+  reservation's device+inode, so only a file we still own is removed.
+- **`extract_pbr_trio` destroyed base colour.** It used `factor[0]` for all three
+  channels, so a cyan `baseColorFactor` produced a BLACK albedo, and wrote the
+  linear value raw while tagging the plane sRGB (0.5 became 128, not 188).
+- **`triangleCount` ignored instancing.** It iterated meshes, not the node graph,
+  so a 12-triangle mesh placed at 50 nodes reported 12 and passed a 100-triangle
+  budget while a renderer draws 600.
+- **`targetTriangles` hard-failed on any instanced mesh** — the same multi-user
+  restriction that removed `transform_apply`, still live in the decimate path.
+
 ## 0.3.2
 
 - **`extract_pbr_trio`, `download_asset` and `generate_sound_effect` built
