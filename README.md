@@ -31,10 +31,10 @@ npx github:theisegoria/game-asset-mcp
 npm install github:theisegoria/game-asset-mcp
 
 # pin a specific version — recommended for anything you depend on
-npm install github:theisegoria/game-asset-mcp#v0.3.6
+npm install github:theisegoria/game-asset-mcp#v0.3.7
 ```
 
-**Pin the version.** Without a `#vX.Y.Z` suffix both forms resolve to whatever `main` is at that moment, which is not a stable dependency. Every release is tagged, so `#v0.3.6` gets you exactly that tree. Releases are listed at [github.com/theisegoria/game-asset-mcp/releases](https://github.com/theisegoria/game-asset-mcp/releases), each carrying the defects that release fixed.
+**Pin the version.** Without a `#vX.Y.Z` suffix both forms resolve to whatever `main` is at that moment, which is not a stable dependency. Every release is tagged, so `#v0.3.7` gets you exactly that tree. Releases are listed at [github.com/theisegoria/game-asset-mcp/releases](https://github.com/theisegoria/game-asset-mcp/releases), each carrying the defects that release fixed.
 
 > ⛔ **Do not pin v0.3.0, v0.3.1 or v0.3.2.** Later review found live paths in those that destroy the mesh you pass them and report success. They are tagged only so the history is complete. Their release pages say so too.
 
@@ -313,7 +313,7 @@ This is early software, and the parts most likely to drift are marked as such ra
 
 **Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. If they are wrong you will see a 404 that looks exactly like a bad API key, so check the path before the key.
 
-**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 373 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
+**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 384 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
 
 Concretely, these remain **unverified**:
 

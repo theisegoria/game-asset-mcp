@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.3.7
+
+A thirteenth review, six findings. The worst is mine from 0.3.6, and it is the
+same defect that release's own comment quotes while introducing it.
+
+### Data destruction
+
+- **`mergeDistance: 0` destroyed geometry on a scaled object and reported
+  success.** 0.3.6 special-cased the zero branch as a `1e-6` constant in LOCAL
+  units with no divisor, while both other branches divided. The world radius was
+  therefore `1e-6 x divisor`, and the branch below *skips* whenever the request
+  is narrower than that — so **asking for zero merging applied a strictly wider
+  repair than asking for a small positive one.** Two files with byte-identical
+  world geometry went to 100 and 0 triangles; a partial case lost 98% (102
+  triangles to 2) with `readyToTexture: true` and the skip counter reading zero.
+
+  The test could not see it: hardcoded to one merge distance, against a fixture
+  at scale `[1,1,1]` — divisor 1 is the single value at which it is invisible.
+  Fixed by deleting the special case rather than patching it, so every path runs
+  the one divisor rule and is monotonic by construction.
+
+### Wrong verdicts, at severity `error`
+
+- **`sceneGraphFallback` asked "does the *default* scene draw nothing?"** rather
+  than "does any scene reference a mesh?". A Blender export whose default scene
+  holds only a camera, geometry in a second scene, is ordinary — and it took the
+  mesh-library fallback, counting undrawn meshes as drawn. That restored *both*
+  defects the narrowing exists to prevent. It worked only when the default scene
+  happened to be non-empty, which is exactly what its test covered.
+- **Materials, textures and the PBR summary stayed file-scoped** while geometry
+  was narrowed, so the two halves of one report described two different files.
+  A normal map bound only by an undrawn collision proxy failed
+  `tangents_for_normal_map` on a model that correctly needs no tangents; a
+  base-colour texture on an undrawn LOD satisfied `base_color_texture` for a
+  drawn mesh that has none. Textures now derive from the drawn materials.
+
+### Values that reached no caller
+
+- **The batch dropped the new dissolve-skip flag** — the fourth consecutive
+  release in which that seam lost a flag the layer below computed.
+- **`textureFailures` on the unreadable-container path was pinned by nothing**;
+  deleting it left the whole suite green. Now covered end-to-end through a real
+  HTTPS server, because the download layer refuses non-HTTPS URLs outright.
+- **The four inspection fields were pinned only at the helper.** `ok()` takes
+  `unknown`, so the compiler guards summarizer-to-interface and nothing guards
+  interface-to-client — the exact hop where four fields have now been lost. A
+  mutant destructuring them out on the way to the response **compiles cleanly**;
+  only a test through a real MCP client can see it.
+- A texture with no image data was silently skipped, vanishing from
+  `textureCount` with nothing said.
+
+### Verification
+
+Every fix reverted and observed to fail, each mutant confirmed to compile *and*
+to have actually applied. One near-miss worth recording: a field assignment
+landed while its interface declaration silently did not, and **the tests passed
+while `tsc` failed**, because vitest does not typecheck. The rule that keeps
+catching this remains: put the field on the output type first.
+
 ## 0.3.6
 
 A twelfth review. Two of these are mine from 0.3.5 — one a regression, one the
