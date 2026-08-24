@@ -40,12 +40,17 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         assetJobId: z.string().optional().describe('A downloaded job whose model should be normalized.'),
         outputPath: z
           .string()
+          .min(1)
           .optional()
           .describe(
             'Where to write the GLB. Must end in .glb, or have no extension (in which case .glb ' +
             'is appended) — the exporter rewrites the extension, so a .gltf path would silently ' +
             'become .glb and could land on a different file. Refused if it resolves onto the ' +
-            'input mesh. Defaults to <input>_normalized.glb beside the source.',
+            'input mesh, by filesystem identity, so symlinks, hardlinks and case-insensitive ' +
+            'volumes all count. Use an ABSOLUTE path: a relative one resolves against the ' +
+            'SERVER\'s working directory, which your MCP client chose, and a leading ~ is not ' +
+            'expanded. Naming an existing directory writes a sibling file beside it, not inside ' +
+            'it. Defaults to <input>_normalized.glb beside the source.',
           ),
         overwrite: z
           .boolean()
@@ -121,7 +126,7 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         : path.dirname(source);
       await fs.mkdir(outputDir, { recursive: true });
 
-      const output = await resolveNormalizeTarget(
+      const resolved = await resolveNormalizeTarget(
         {
           source,
           sourceExtension: actualExt,
@@ -141,8 +146,21 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
             }
           },
           reserve: (dir, fileName) => uniqueFilePath(dir, fileName),
+          // O_EXCL, so winning the create is atomic. A stat-then-write let two
+          // concurrent calls both believe the path was free.
+          claimExclusive: async (target) => {
+            try {
+              const handle = await fs.open(target, 'wx');
+              await handle.close();
+              return true;
+            } catch (err) {
+              if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+              throw err;
+            }
+          },
         },
       );
+      const output = resolved.target;
 
       // The reservation CREATED the file to claim the name, and nothing released
       // it when the work failed — so three failed calls left three zero-byte
@@ -150,7 +168,12 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
       // sorts first in any glob, and the caller never told a file was written.
       // mesh-batch.ts documents and fixes exactly this; the single-mesh tool
       // shares the same reservation primitive and did not.
-      let reservationHeld = args.outputPath === undefined;
+      // Taken from the resolver, not recomputed. Deriving it here as
+      // `args.outputPath === undefined` disagreed with the resolver's
+      // `!request.outputPath` for outputPath: "" — which took the reserve
+      // branch, created a file, and leaked it because the tool believed it held
+      // nothing. One fact, one place.
+      let reservationHeld = resolved.reserved;
       const releaseReservation = async (): Promise<boolean> => {
         if (!reservationHeld) return true;
         reservationHeld = false;

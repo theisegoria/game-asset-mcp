@@ -38,6 +38,17 @@ export interface NormalizeTargetDeps {
   fileIdentity(target: string): Promise<FileIdentity | null>;
   /** Atomically claims an unused path in `dir` for `fileName`. */
   reserve(dir: string, fileName: string): Promise<string>;
+  /**
+   * Exclusively creates `target`, returning false if it already exists.
+   *
+   * MUST be an atomic exclusive create (O_EXCL), never a stat-then-write. The
+   * explicit-outputPath branch used an existence CHECK, which is a decision
+   * taken at t=0 about a write that happens seconds later: two concurrent
+   * calls both passed it, and one caller's output was silently destroyed while
+   * its receipt reported a healthy byte count and hash for bytes that no
+   * longer existed. mesh-batch.ts already says this in as many words.
+   */
+  claimExclusive(target: string): Promise<boolean>;
 }
 
 export interface NormalizeTargetRequest {
@@ -57,13 +68,29 @@ function sameFile(a: FileIdentity | null, b: FileIdentity | null): boolean {
   return a !== null && b !== null && a.dev === b.dev && a.ino === b.ino;
 }
 
+/** The chosen path, and whether WE created the file standing at it. */
+export interface NormalizeTarget {
+  target: string;
+  /**
+   * True when this call created the file to claim the name, so the caller must
+   * remove it if the work then fails.
+   *
+   * Returned rather than re-derived. The tool used to compute it separately as
+   * `args.outputPath === undefined`, while this function branched on
+   * `!request.outputPath` — so `outputPath: ""` took the reserve branch, which
+   * creates a file, and the tool believed it held nothing and leaked it. One
+   * fact, two tests, different answers.
+   */
+  reserved: boolean;
+}
+
 export async function resolveNormalizeTarget(
   request: NormalizeTargetRequest,
   deps: NormalizeTargetDeps,
-): Promise<string> {
+): Promise<NormalizeTarget> {
   if (!request.outputPath) {
     const stem = path.basename(request.source, request.sourceExtension);
-    return deps.reserve(request.outputDir, `${stem}_normalized.glb`);
+    return { target: await deps.reserve(request.outputDir, `${stem}_normalized.glb`), reserved: true };
   }
 
   // Check the path Blender will WRITE, not the path we were handed.
@@ -110,7 +137,11 @@ export async function resolveNormalizeTarget(
     );
   }
 
-  if (targetIdentity !== null && !request.overwrite) {
+  // Exclusive create, not the earlier existence check. Winning the create is
+  // what makes "this file was not already there" true at the moment of the
+  // write rather than at the moment of the question.
+  const claimed = await deps.claimExclusive(target);
+  if (!claimed && !request.overwrite) {
     throw invalidInput(
       `refusing to overwrite an existing file at ${target}. Pass overwrite:true if you ` +
       'genuinely mean to replace it, or omit outputPath to get a numbered name instead.',
@@ -118,5 +149,8 @@ export async function resolveNormalizeTarget(
     );
   }
 
-  return target;
+  // `reserved` tracks whether WE created it: only then is removing it on
+  // failure ours to do. Losing the race under overwrite:true means the file was
+  // someone else's and we are deliberately replacing it.
+  return { target, reserved: claimed };
 }

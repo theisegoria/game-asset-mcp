@@ -167,7 +167,19 @@ describe('choosing the output path', () => {
         return null;
       }
     },
-    reserve: async (dir: string, fileName: string) => pathModule.join(dir, fileName),
+    reserve: async (dir: string, fileName: string) => {
+      const target = pathModule.join(dir, fileName);
+      writeFileSync(target, '');
+      return target;
+    },
+    claimExclusive: async (target: string) => {
+      try {
+        writeFileSync(target, '', { flag: 'wx' });
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
 
   beforeEach(() => {
@@ -180,8 +192,8 @@ describe('choosing the output path', () => {
     rmSync(work, { recursive: true, force: true });
   });
 
-  const resolve = (outputPath?: string, overwrite?: boolean) =>
-    resolveNormalizeTarget(
+  const resolve = async (outputPath?: string, overwrite?: boolean) =>
+    (await resolveNormalizeTarget(
       {
         source,
         sourceExtension: '.glb',
@@ -190,7 +202,7 @@ describe('choosing the output path', () => {
         ...(overwrite !== undefined ? { overwrite } : {}),
       },
       realDeps,
-    );
+    )).target;
 
   it('refuses the literal input path', async () => {
     await expect(resolve(source)).rejects.toThrow(/destroy the original/);
@@ -296,6 +308,51 @@ describe('choosing the output path', () => {
     await expect(resolve(free)).resolves.toBe(free);
   });
 
+  // The explicit branch used an existence CHECK, which decides at t=0 about a
+  // write that happens seconds later. Two concurrent calls both passed it and
+  // one caller's output was silently destroyed, its receipt reporting a healthy
+  // hash for bytes that no longer existed. These use a REAL exclusive create.
+  it('admits only the first of two claims on the same explicit path', async () => {
+    const free = pathModule.join(work, 'contested.glb');
+    await expect(resolve(free)).resolves.toBe(free);
+    // The first claim CREATED the file, so the second must lose.
+    await expect(resolve(free)).rejects.toThrow(/refusing to overwrite/);
+  });
+
+  it('reports the explicit branch as reserved when it created the file', async () => {
+    const free = pathModule.join(work, 'fresh-claim.glb');
+    const result = await resolveNormalizeTarget(
+      { source, sourceExtension: '.glb', outputDir: work, outputPath: free },
+      realDeps,
+    );
+    // reserved drives cleanup on failure. Reporting false here leaked the file.
+    expect(result.reserved).toBe(true);
+    expect(existsSyncFs(free)).toBe(true);
+  });
+
+  it('reports NOT reserved when overwrite replaces someone else\'s file', async () => {
+    const taken = pathModule.join(work, 'theirs.glb');
+    writeFileSync(taken, 'SOMEONE-ELSES');
+    const result = await resolveNormalizeTarget(
+      { source, sourceExtension: '.glb', outputDir: work, outputPath: taken, overwrite: true },
+      realDeps,
+    );
+    // We did not create it, so removing it on failure is not ours to do.
+    expect(result.reserved).toBe(false);
+  });
+
+  it('treats an empty outputPath as absent, and still reports the reservation', async () => {
+    // "" is falsy, so it takes the reserve branch and CREATES a file. The tool
+    // used to recompute this as `outputPath === undefined`, believe it held
+    // nothing, and leak it. One fact, one place.
+    const result = await resolveNormalizeTarget(
+      { source, sourceExtension: '.glb', outputDir: work, outputPath: '' },
+      realDeps,
+    );
+    expect(result.reserved).toBe(true);
+    expect(pathModule.basename(result.target)).toBe('crate_normalized.glb');
+  });
+
   it('reserves a derived name when no outputPath is given', async () => {
     await expect(resolve()).resolves.toBe(pathModule.join(work, 'crate_normalized.glb'));
   });
@@ -307,7 +364,43 @@ describe('choosing the output path', () => {
       resolveNormalizeTarget(
         { source: shouty, sourceExtension: '.GLB', outputDir: work },
         realDeps,
-      ),
+      ).then((r) => r.target),
     ).resolves.toBe(pathModule.join(work, 'BARREL_normalized.glb'));
   });
+});
+
+// Tool-level, because the defect lives in the tool: `reservationHeld` was
+// recomputed there as `args.outputPath === undefined` while the resolver
+// branched on `!request.outputPath`. For an explicit outputPath the resolver
+// CREATES the file and the tool believed it held nothing, so a failure left an
+// orphan. The domain tests cannot see this — the two disagreeing tests are on
+// opposite sides of the call.
+describe.skipIf(!haveBlender)('the tool cleans up after itself', () => {
+  it('leaves no orphan when an explicit outputPath fails', async () => {
+    const dir = await tmpDir();
+    const broken = path.join(dir, 'broken.glb');
+    await fs.writeFile(broken, 'not a glb at all');
+    const output = path.join(dir, 'explicit.glb');
+
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
+      env: { ...process.env, ASSET_LOG_LEVEL: 'error', ASSET_OUTPUT_DIR: path.join(dir, 'ws') },
+    });
+    const client = new Client({ name: 'orphan-test', version: '1.0.0' });
+    try {
+      await client.connect(transport);
+      await client.callTool({
+        name: 'normalize_mesh',
+        arguments: { modelPath: broken, outputPath: output },
+      });
+      // The reservation created explicit.glb to claim the name. Blender then
+      // fails on the corrupt input, so nothing may remain at that path.
+      await expect(fs.access(output)).rejects.toThrow();
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }, 120_000);
 });

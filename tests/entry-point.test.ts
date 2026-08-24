@@ -29,7 +29,13 @@ const built = fileURLToPath(new URL('../dist/server.js', import.meta.url));
 let workspace: string | undefined;
 
 beforeAll(() => {
-  if (!existsSync(built)) return;
+  if (!existsSync(built)) {
+    throw new Error(
+      `${built} is missing, so the entry-point guard cannot be verified. Run \`npm run build\` ` +
+      'first — `npm test` does this for you. This is a failure rather than a skip because the ' +
+      'defect it guards broke every install of this package.',
+    );
+  }
   // realpathSync matters: on macOS tmpdir() is /var/folders/…, and /var is
   // itself a symlink to /private/var. A relative link target computed from the
   // shallower logical path resolves from the deeper real one and dangles.
@@ -45,8 +51,16 @@ afterAll(() => {
   if (workspace) rmSync(workspace, { recursive: true, force: true });
 });
 
-// Needs a build; `npm run verify` and CI both build first.
-describe.skipIf(!existsSync(built))('launched through a symlinked bin', () => {
+// NOT skipIf. This test guards a defect that broke every install, and its own
+// header calls silent skipping the worst possible behaviour for it — yet it
+// skipped whenever dist/ was absent, exiting 0 with the guard unverified. That
+// is the same shape as the sibling-checkout defect fixed earlier: a silent
+// change in what runs, reported as success.
+//
+// `npm test` builds before running, and CI builds before testing, so dist/ is a
+// precondition the suite guarantees. A missing build is now a failure that says
+// what to do, not a test that disappears.
+describe('launched through a symlinked bin', () => {
   it('starts, stays up, and serves its tools', async () => {
     const link = path.join(workspace as string, 'game-asset-mcp');
     const transport = new StdioClientTransport({
