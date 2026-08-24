@@ -21,6 +21,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { copyFileSync } from 'node:fs';
+
+const FIXTURE_MESH = fileURLToPath(new URL('./fixtures/real/uvless_alien_needler.glb', import.meta.url));
 import type { AssetInspection } from '../src/inspection/gltf.js';
 import { runMeshBatch, type MeshBatchDeps, type MeshBatchOptions } from '../src/domain/mesh-batch.js';
 import { createMeshBatchDeps } from '../src/tools/batch.js';
@@ -528,4 +532,76 @@ describe('a cleanup that FAILS is still accounted for', () => {
     expect(result.items[0]?.orphanedOutput).toBeUndefined();
     expect(result.outputsWritten).toBe(0);
   });
+});
+
+// The rule that fixed normalize_mesh, applied here. batch_prepare_meshes runs
+// Blender with `output: <the reserved path>` — writing DIRECTLY to its target,
+// exactly what normalize_mesh had to stop doing because the read-back could not
+// tell a fresh write from the file that was already there.
+//
+// It is safe for a reason worth pinning rather than assuming: the batch has no
+// overwrite path, so its target is ALWAYS a freshly reserved empty file. There
+// is never a pre-existing valid mesh to mistake for output. If that ever
+// changes, these fail.
+describe('a lying Blender cannot make the batch report success', () => {
+  const RECEIPT =
+    'echo \'NORMALIZE_RECEIPT={"input":"x","output":"y","meshObjects":3,' +
+    '"trianglesBefore":100,"trianglesAfter":80,"objectsMissingUVsBefore":3,' +
+    '"objectsMissingUVsAfter":0,"objectsUnwrapped":3,"objectsCleaned":0,' +
+    '"objectsDecimated":0,"materialsRenamed":0,"materialsForcedOpaque":0,' +
+    '"blenderVersion":"stub"}\'\nexit 0';
+
+  async function runBatch(body: string) {
+    const work = mkdtempSync(path.join(tmpdir(), 'batch-liar-'));
+    const source = path.join(work, 'a.glb');
+    copyFileSync(FIXTURE_MESH, source);
+    const outDir = path.join(work, 'out');
+    mkdirSync(outDir, { recursive: true });
+    const stub = path.join(work, 'blender.sh');
+    writeFileSync(stub, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
+      env: {
+        ...process.env,
+        ASSET_LOG_LEVEL: 'error',
+        ASSET_OUTPUT_DIR: path.join(work, 'ws'),
+        BLENDER_PATH: stub,
+      },
+    });
+    const client = new Client({ name: 'batch-liar', version: '1.0.0' });
+    try {
+      await client.connect(transport);
+      const raw = await client.callTool({
+        name: 'batch_prepare_meshes',
+        arguments: { modelPaths: [source], outputDir: outDir },
+      });
+      const parsed = JSON.parse((raw.content as { text: string }[])[0]!.text);
+      return { batch: parsed, files: readdirSync(outDir), work };
+    } finally {
+      await client.close().catch(() => undefined);
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+
+  it('refuses when Blender claims success and writes nothing', async () => {
+    const { batch, files } = await runBatch(RECEIPT);
+    expect(batch.prepared).toBe(0);
+    expect(batch.failed).toBe(1);
+    expect(batch.outputsWritten).toBe(0);
+    expect(files).toEqual([]);
+  }, 120_000);
+
+  it('refuses when Blender writes convincing non-GLB bytes', async () => {
+    const { batch, files } = await runBatch(
+      `out=$(printf '%s' "$*" | sed -n 's/.*"output": *"\\([^"]*\\)".*/\\1/p')\n` +
+      `printf 'THIS IS NOT A GLB' > "$out"\n${RECEIPT}`,
+    );
+    expect(batch.prepared).toBe(0);
+    expect(batch.outputsWritten).toBe(0);
+    expect(files).toEqual([]);
+  }, 120_000);
 });
