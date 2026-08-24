@@ -72,7 +72,11 @@ export function registerBatchTools(server: McpServer, ctx: ToolContext): void {
         'per-item verdict plus a summary. Meshes that already pass are left untouched rather than ' +
         'rewritten. One failing item never stops the run; its error is reported and the batch ' +
         'continues. Normalization needs a local Blender install; without one this still validates ' +
-        'and simply reports what would need repairing.',
+        'and simply reports what would need repairing. Note that a FAILED item can still have ' +
+        'written a file: when normalization succeeds but the result does not clear the policy, the ' +
+        'mesh is kept for inspection and named in normalizedPath with outputKept set. Use ' +
+        'outputsWritten, not prepared, to predict how many files are in the output directory — ' +
+        'prepared is a verdict, not a file count.',
       inputSchema: {
         modelPaths: z
           .array(z.string().min(1))
