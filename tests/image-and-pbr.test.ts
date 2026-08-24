@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { promises as fs, existsSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
@@ -138,51 +138,70 @@ describe('encode / decode round trip', () => {
 
 // The decisive case: a real packed texture from a shipped asset. Skips when the
 // asset tree is absent so a bare checkout still runs green.
-describe('real shipped material', () => {
-  function repositoryRoot(): string | undefined {
-    let candidate = path.resolve('..');
-    for (let depth = 0; depth < 4; depth += 1) {
-      const guess = path.join(candidate, 'Genome Game');
-      if (existsSync(path.join(guess, 'assets'))) return guess;
-      candidate = path.resolve(candidate, '..');
-    }
-    return undefined;
-  }
+describe('a real packed metallicRoughness texture', () => {
+  // COMMITTED, not read from a sibling checkout. This used to walk up four
+  // directories hunting for a repository named "Genome Game" and read a 2K
+  // hydrant material out of it. That made the outcome depend on the machine
+  // AND on a file another project was actively editing: with the sibling
+  // present the suite ran 279 tests, without it 278 and still exited 0 — the
+  // case the README calls decisive silently not running for anyone else.
+  //
+  // The fixture is genuine data, downsampled from that shipped material rather
+  // than synthesised: 168 distinct roughness values and 148 distinct metallic
+  // values across 128x128. A synthetic fixture and the parser that reads it can
+  // share the same mistake, which is exactly how a wrong glTF magic constant
+  // once survived a whole suite. Byte-identical de-packing is a per-sample
+  // property; it never needed two million of them to be decisive.
+  const fixture = path.resolve('tests/fixtures/real/packed_metallic_roughness_128.png');
 
-  const root = repositoryRoot();
-  const model = root
-    ? path.join(root, 'assets/vendored/models/fire_hydrant/fire_hydrant_2k.gltf')
-    : undefined;
-  const haveAsset = Boolean(model && existsSync(model));
-
-  // skipIf, not an early return: a skipped test is REPORTED as skipped, whereas
-  // an early return reports a pass for work that never happened.
-  it.skipIf(!haveAsset)('extracts roughness byte-identically to the source G channel', async () => {
-    const { NodeIO } = await import('@gltf-transform/core');
-    const document = await new NodeIO().read(model as string);
-    const material = document.getRoot().listMaterials()[0];
-    const packedBytes = material?.getMetallicRoughnessTexture()?.getImage();
-    // The asset is present, so a missing packed texture is a real regression in
-    // the asset or the reader — not a reason to pass quietly.
-    expect(packedBytes, 'shipped hydrant should carry a packed metallicRoughness').toBeTruthy();
-
-    const packed = decodeImage(new Uint8Array(packedBytes as Uint8Array));
-    // Prove we examined a real, full-size texture rather than an empty one.
-    expect(packed.width * packed.height).toBeGreaterThan(1_000_000);
+  it('extracts roughness byte-identically to the source G channel', async () => {
+    const packed = decodeImage(new Uint8Array(await fs.readFile(fixture)));
     const roughness = extractChannel(packed, 'g');
+
+    let differing = 0;
+    for (let i = 0; i < packed.data.length; i += 4) {
+      if (roughness.data[i] !== packed.data[i + 1]) differing += 1;
+    }
+    // Not "close enough": a single perturbed sample makes every downstream
+    // hash meaningless.
+    expect(differing).toBe(0);
+  });
+
+  it('extracts metallic byte-identically to the source B channel', async () => {
+    const packed = decodeImage(new Uint8Array(await fs.readFile(fixture)));
     const metallic = extractChannel(packed, 'b');
 
-    // Round-tripping through PNG must not perturb a single sample, or every
-    // downstream hash is meaningless.
+    let differing = 0;
+    for (let i = 0; i < packed.data.length; i += 4) {
+      if (metallic.data[i] !== packed.data[i + 2]) differing += 1;
+    }
+    expect(differing).toBe(0);
+  });
+
+  it('survives a PNG round trip without perturbing a sample', async () => {
+    const packed = decodeImage(new Uint8Array(await fs.readFile(fixture)));
+    const roughness = extractChannel(packed, 'g');
     const reread = decodeImage(encodePNG(roughness));
+
     let differing = 0;
     for (let i = 0; i < roughness.data.length; i += 4) {
       if (roughness.data[i] !== reread.data[i]) differing += 1;
     }
     expect(differing).toBe(0);
+  });
 
-    // And the two planes must genuinely differ — a real material is not
-    // uniformly metallic and rough at once.
+  it('is real varying data, so the assertions above are not tautologies', async () => {
+    const packed = decodeImage(new Uint8Array(await fs.readFile(fixture)));
+    const roughness = extractChannel(packed, 'g');
+    const metallic = extractChannel(packed, 'b');
+
+    // Guards the fixture itself. A flat image would pass every byte-identity
+    // check above while proving nothing about de-packing.
+    const distinct = new Set<number>();
+    for (let i = 0; i < roughness.data.length; i += 4) distinct.add(roughness.data[i] as number);
+    expect(distinct.size).toBeGreaterThan(16);
+
+    // A real material is not uniformly metallic and rough at once.
     let identical = 0;
     for (let i = 0; i < roughness.data.length; i += 4) {
       if (roughness.data[i] === metallic.data[i]) identical += 1;
