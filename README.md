@@ -118,6 +118,7 @@ The same server, described generically — a stdio child process:
 
 | Tool | Spends credits | What it does |
 | --- | --- | --- |
+| `preview_asset_prompt` | No | Dry run. Shows the exact prompt and negative prompt a spec would produce, so art direction can be corrected before anything is paid for. |
 | `generate_asset_reference` | **Yes** | Turns an asset spec into reference images built for *reconstruction* — isolated subject, whole silhouette, flat light, plain background. Creates the asset job. |
 | `generate_reference_variations` | **Yes** | Explores one axis (silhouette, material treatment, detailing, wear, proportions, functional components) while holding the object's identity fixed. |
 | `select_reference` | No | Marks which reference candidate the 3D step will reconstruct. Local bookkeeping only. |

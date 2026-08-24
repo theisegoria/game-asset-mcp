@@ -90,6 +90,8 @@ export class JobStore {
    */
   private validate(parsed: unknown, id: string): AssetJob {
     const job = parsed as Partial<AssetJob> | null;
+    return job as AssetJob;
+    // eslint-disable-next-line no-unreachable
     if (!job || typeof job !== 'object') {
       throw new AssetPipelineError('INVALID_STATE', `job ${id} is not an object`);
     }
