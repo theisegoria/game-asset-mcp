@@ -163,7 +163,7 @@ Eleven of the twenty tools never spend a credit, and only **two of those eleven 
 | `inspect_asset` | What is actually inside this glTF? Meshes, materials, texture channels, sizes, bounds. |
 | `validate_game_asset` | Is this shippable? Pass/fail with per-check reasons and every threshold overridable. |
 | `normalize_mesh` | Repair it: generate UVs for objects that have none, weld coincident vertices, dissolve degenerate triangles, name materials. |
-| `batch_prepare_meshes` | The same, across a list of `.glb`/`.gltf` paths, with a per-item verdict. |
+| `batch_prepare_meshes` | The same, across a list of `.glb`/`.gltf` paths, with a per-item verdict. A *failed* item can still have written a file — when normalization succeeds but the result misses the policy, the mesh is kept for inspection. Use `outputsWritten`, not `prepared`, to predict the file count. |
 | `extract_pbr_trio` | Split a material into albedo / normal / roughness images, de-packing metallicRoughness correctly. |
 
 The usual loop is **validate → normalize → validate again**, so the repair is proven rather than assumed:

@@ -15,8 +15,8 @@ Four layers, each of which knows only about the one below it:
   Orchestration             AssetJob lifecycle, prompt construction,
         │                   download + inspection
         ▼
-  Provider abstraction      ImageProvider · Model3DProvider
-        │                   two small interfaces, no vendor types above here
+  Provider abstraction      ImageProvider · Model3DProvider · AudioProvider
+        │                   three small interfaces, no vendor types above here
         ▼
   Vendor clients            Tripo, Leonardo.Ai — REST, envelopes, quirks
 ```
@@ -26,11 +26,13 @@ Two invariants hold the layering together:
 1. **No vendor type escapes the provider layer.** Tripo's `{ code, data, message }` envelope, Leonardo's `PENDING`/`COMPLETE`/`FAILED` vocabulary, their differing id schemes — all of it is normalized at the boundary. Nothing above the provider layer imports a vendor module.
 2. **Nothing is lost in normalization.** Every mapped value keeps its raw counterpart beside it: `AssetJob.providerStatus` holds the provider's own string next to our `status`, and `Model3DTaskResult.raw` carries the entire untouched payload. Normalization that discards the original just relocates the debugging problem to a place where you no longer have the evidence.
 
-### Why two interfaces and not one
+### Why three interfaces and not one
 
-`ImageProvider` and `Model3DProvider` are separate because they fail differently and are configured independently. A user with a Tripo key and no Leonardo key must still get a fully working 3D pipeline. Fusing them into one `AssetProvider` would make that user's configuration invalid for a capability they never asked for.
+`ImageProvider`, `Model3DProvider` and `AudioProvider` are separate because they fail differently and are configured independently. A user with a Tripo key and no Leonardo key must still get a fully working 3D pipeline. Fusing them into one `AssetProvider` would make that user's configuration invalid for a capability they never asked for.
 
-Both interfaces are deliberately *small*. The goal is not to abstract over every capability any vendor might ever ship — that produces a lowest-common-denominator interface that describes no provider well. The goal is narrower and testable: **adding a second provider must not change the MCP tool surface.** Vendor-specific extras travel in `raw` rather than being promoted into the interface. If a new provider forces a change to the tool surface, the abstraction is wrong.
+`AudioProvider` arrived after the other two and is the evidence that this shape works: adding sound-effect generation added an interface and a tool, and changed neither of the existing interfaces nor any existing tool.
+
+All three interfaces are deliberately *small*. The goal is not to abstract over every capability any vendor might ever ship — that produces a lowest-common-denominator interface that describes no provider well. The goal is narrower and testable: **adding a second provider must not change the MCP tool surface.** Vendor-specific extras travel in `raw` rather than being promoted into the interface. If a new provider forces a change to the tool surface, the abstraction is wrong.
 
 ---
 
