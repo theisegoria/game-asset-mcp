@@ -7,6 +7,7 @@
  * for work that never ran.
  */
 
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -24,7 +25,7 @@ const haveBlender = Boolean(blender);
 // for. Committed here rather than read from a sibling checkout: this test used
 // to read the game repo's copy, and repairing that copy turned this red for a
 // change that was correct. A test may not pin a fact about a file it does not own.
-const uvlessMesh = path.resolve('tests/fixtures/real/uvless_alien_needler.glb');
+const uvlessMesh = fileURLToPath(new URL('./fixtures/real/uvless_alien_needler.glb', import.meta.url));
 const haveFixture = existsSync(uvlessMesh);
 
 const scratch: string[] = [];

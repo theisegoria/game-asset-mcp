@@ -6,8 +6,8 @@
  * the verdict tracks an actual repair rather than a fixture.
  */
 
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import path from 'node:path';
 import { DEFAULT_POLICY, evaluateAsset } from '../src/domain/asset-policy.js';
 import type { AssetInspection } from '../src/inspection/gltf.js';
 import { inspectGltf } from '../src/inspection/gltf.js';
@@ -168,7 +168,7 @@ describe('policy is genuinely configurable', () => {
 // fact about a file this project does not control. skipIf gated on the file
 // EXISTING, never on what was in it, so it could not protect against that.
 // A real asset with a stable meaning belongs in the repository that asserts on it.
-const uvless = path.resolve('tests/fixtures/real/uvless_alien_needler.glb');
+const uvless = fileURLToPath(new URL('./fixtures/real/uvless_alien_needler.glb', import.meta.url));
 
 describe('a real shipped asset with no UVs', () => {
   it('fails on the defect it actually has', async () => {

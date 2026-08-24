@@ -17,10 +17,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-const built = path.resolve('dist/server.js');
+// Anchored to THIS FILE, not the working directory. `npm test` happens to run
+// from the repo root, so path.resolve worked — and this test silently SKIPPED
+// when vitest was invoked from anywhere else, which is the worst possible
+// behaviour for the one test guarding a defect that broke every install.
+const built = fileURLToPath(new URL('../dist/server.js', import.meta.url));
 let workspace: string | undefined;
 
 beforeAll(() => {
@@ -47,7 +52,15 @@ describe.skipIf(!existsSync(built))('launched through a symlinked bin', () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [link],
-      env: { ...process.env, ASSET_LOG_LEVEL: 'error' },
+      // An explicit workspace, because this test is about the ENTRY-POINT guard
+      // and nothing else. Without it the server inherits the caller's working
+      // directory, and from / the default output dir becomes /assets/generated,
+      // which correctly refuses to start — a real behaviour, but not this one.
+      env: {
+        ...process.env,
+        ASSET_LOG_LEVEL: 'error',
+        ASSET_OUTPUT_DIR: path.join(workspace as string, 'workspace'),
+      },
     });
     const client = new Client({ name: 'entry-point-test', version: '1.0.0' });
 

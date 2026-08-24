@@ -6,6 +6,7 @@
  * downstream can detect that, so it has to be pinned here.
  */
 
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -152,7 +153,7 @@ describe('a real packed metallicRoughness texture', () => {
   // share the same mistake, which is exactly how a wrong glTF magic constant
   // once survived a whole suite. Byte-identical de-packing is a per-sample
   // property; it never needed two million of them to be decisive.
-  const fixture = path.resolve('tests/fixtures/real/packed_metallic_roughness_128.png');
+  const fixture = fileURLToPath(new URL('./fixtures/real/packed_metallic_roughness_128.png', import.meta.url));
 
   it('extracts roughness byte-identically to the source G channel', async () => {
     const packed = decodeImage(new Uint8Array(await fs.readFile(fixture)));
