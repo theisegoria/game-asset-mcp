@@ -74,6 +74,17 @@ function harness(opts: {
   normalizeThrows?: string[];
   repairFails?: boolean;
   blenderAvailable?: boolean;
+  /**
+   * Extra receipt fields the normalizer reports.
+   *
+   * Exists because the batch's job is to COPY what the layer below computes,
+   * and every defect here has been a field it failed to copy — weldSkipped and
+   * stdoutTruncated both reached no caller. A fixed receipt cannot express that
+   * question at all.
+   */
+  receiptExtra?: Record<string, number>;
+  /** stderr tail attached to the thrown error, as the real normalizer attaches it. */
+  failureDetail?: string;
 } = {}): Harness {
   const broken = new Set(opts.broken ?? []);
   const missing = new Set(opts.missing ?? []);
@@ -134,9 +145,22 @@ function harness(opts: {
       },
       async normalize(source, target) {
         normalizeCalls.push(source);
-        if (throws.has(source)) throw new Error(`Blender exited non-zero for ${source}`);
+        if (throws.has(source)) {
+          const err = new Error(`Blender exited non-zero for ${source}`) as Error & {
+            details?: { stderrTail?: string };
+          };
+          if (opts.failureDetail !== undefined) {
+            err.details = { stderrTail: opts.failureDetail };
+          }
+          throw err;
+        }
         normalized.add(target);
-        return { objectsUnwrapped: 2, trianglesBefore: 3183, trianglesAfter: 1750 };
+        return {
+          objectsUnwrapped: 2,
+          trianglesBefore: 3183,
+          trianglesAfter: 1750,
+          ...(opts.receiptExtra ?? {}),
+        };
       },
     },
   };
@@ -705,5 +729,57 @@ describe('the batch never deletes a file another tool put there', () => {
 
     expect(result.items[0]?.status).toBe('failed');
     expect(h.discarded).toHaveLength(0);
+  });
+});
+
+/**
+ * Flags the batch must COPY, not compute.
+ *
+ * Round 11 reverted each of 0.3.4's six fixes and found five held by nothing —
+ * the suite stayed fully green. Three of those five live here: the batch's job
+ * at this seam is purely to carry what the normalizer reports, and a field it
+ * silently drops is invisible to every test that does not read the item.
+ */
+describe('the batch carries every honesty flag the normalizer sets', () => {
+  it('copies weldSkipped, so a skipped repair cannot read as game-ready', async () => {
+    // 0.3.3 added this flag and bound one of its two consumers. The batch copied
+    // three fields and not this one, so a mesh whose weld was skipped came back
+    // "game-ready" with no sign a repair had not run.
+    const h = harness({
+      broken: ['/a/one.glb'],
+      receiptExtra: { objectsWeldSkippedThresholdUnrepresentable: 1 },
+    });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.weldSkipped).toBe(true);
+  });
+
+  it('leaves weldSkipped unset when nothing was skipped', async () => {
+    // The negative case matters: a field hardcoded true would pass the test
+    // above and tell every caller their weld was skipped.
+    const h = harness({ broken: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.weldSkipped).toBeUndefined();
+  });
+
+  it('copies stdoutTruncated, so dropped Blender output is visible per item', async () => {
+    const h = harness({ broken: ['/a/one.glb'], receiptExtra: { stdoutTruncated: 1 } });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.stdoutTruncated).toBe(true);
+  });
+
+  it('surfaces the stderr tail, which is the only text naming the cause', async () => {
+    // A failed item kept the error MESSAGE ("Blender exited non-zero") and threw
+    // away the traceback, which is the part that says what actually broke.
+    const h = harness({
+      broken: ['/a/one.glb'],
+      normalizeThrows: ['/a/one.glb'],
+      failureDetail: 'Traceback (most recent call last):\n  RuntimeError: no active object',
+    });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.errorDetail).toContain('RuntimeError: no active object');
   });
 });
