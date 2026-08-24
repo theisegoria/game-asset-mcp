@@ -79,6 +79,13 @@ def has_uvs(obj):
 
 
 def select_only(obj):
+    # An object belonging to a non-active scene is not in this view layer, and
+    # select_set then raises "cannot be selected because it is not in View
+    # Layer". A multi-scene glTF is valid and ordinary, and Blender swallows the
+    # traceback and exits 0, so the failure surfaced as "exited 0 without
+    # emitting a receipt" — naming nothing actionable.
+    if obj.name not in bpy.context.view_layer.objects:
+        bpy.context.scene.collection.objects.link(obj)
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
@@ -114,7 +121,7 @@ def world_threshold_divisor(obj):
     return largest if largest > 1e-12 else 1.0
 
 
-def clean_geometry(obj, merge_distance):
+def clean_geometry(obj, merge_distance, weld=True):
     """Weld coincident vertices and dissolve zero-area faces.
 
     `merge_distance` arrives in LOCAL units — the caller divides the documented
@@ -123,16 +130,22 @@ def clean_geometry(obj, merge_distance):
     select_only(obj)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    try:
-        bpy.ops.mesh.remove_doubles(threshold=merge_distance)
-    except AttributeError:
-        bpy.ops.mesh.merge(type="BY_DISTANCE")
+    if weld:
+        try:
+            bpy.ops.mesh.remove_doubles(threshold=merge_distance)
+        except AttributeError:
+            bpy.ops.mesh.merge(type="BY_DISTANCE")
     # An EXPLICIT threshold. This was a bare call using Blender's 1e-4 default,
     # in local space, entirely independent of mergeDistance — so a 2 mm part at
     # true scale went from 3042 triangles to ZERO even with mergeDistance set to
     # 0, and the refusal named the one knob that could not fix it. Screws, gems,
     # bullets, coins and PCB detail are all inside that default.
-    bpy.ops.mesh.dissolve_degenerate(threshold=max(merge_distance, 1e-12))
+    # NOT gated on `weld`. Dissolving zero-area faces and making normals
+    # consistent are repairs in their own right, and skipping the whole function
+    # when the weld threshold was unrepresentable handed back a mesh with its
+    # inverted faces and degenerate triangles intact — reported as
+    # readyToTexture with "geometry and materials were normalized".
+    bpy.ops.mesh.dissolve_degenerate(threshold=max(min(merge_distance, 1.0), 1e-6))
     # Recalculate outward so a flipped island does not read as a hole.
     bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -237,16 +250,19 @@ def main():
                 largest_divisor = divisor
         local_merge = requested_merge / divisor
         if options.get("cleanGeometry", True):
-            if requested_merge > 0.0 and local_merge < BLENDER_MIN_THRESHOLD:
-                # Blender would clamp this UP, applying a world threshold of
-                # BLENDER_MIN_THRESHOLD * divisor — larger than asked for, on an
-                # object whose scale is exactly what makes it fragile. Skipping
-                # destroys nothing; clamping destroyed 94% of an 800-triangle
-                # mesh and called it ready to texture.
+            # `requested_merge <= 0` means "weld nothing", which the schema's
+            # minimum of 0 implies and which Blender cannot express: its
+            # threshold floor is 1e-6, so passing 0 still merged vertices 5e-7
+            # apart. Treat it as a skip, like an unrepresentable threshold.
+            weldable = requested_merge > 0.0 and local_merge >= BLENDER_MIN_THRESHOLD
+            if not weldable:
+                # Blender clamps a smaller threshold UP, applying a world
+                # threshold larger than asked for on exactly the objects whose
+                # scale makes them fragile. Skipping the WELD destroys nothing.
                 weld_skipped += 1
-            else:
-                clean_geometry(obj, local_merge)
-                cleaned += 1
+            # The other repairs still run either way.
+            clean_geometry(obj, local_merge, weld=weldable)
+            cleaned += 1
         # Only unwrap what is actually missing UVs: re-unwrapping an authored
         # layout would silently destroy an artist's work.
         if options.get("unwrapMissingUVs", True) and not has_uvs(obj):

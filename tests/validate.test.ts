@@ -187,3 +187,41 @@ describe('a real shipped asset with no UVs', () => {
     expect(inspection.triangleCount).toBeGreaterThan(0);
   }, 60_000);
 });
+
+// Counting meshes rather than the node graph reported a 12-triangle mesh placed
+// at 50 nodes as 12, so it passed a 100-triangle budget while a renderer draws
+// 600. Over-correcting by summing ALL scenes then double-counted a mesh shared
+// between alternative scenes, which a renderer never draws twice.
+describe('instanced geometry is counted as drawn', () => {
+  it('multiplies a mesh by the number of nodes that reference it', () => {
+    const single = evaluateAsset(healthy({ triangleCount: 12 }), { maxTriangles: 100 });
+    expect(single.passed).toBe(true);
+
+    // 50 instances of the same 12-triangle mesh is 600 drawn triangles.
+    const instanced = evaluateAsset(healthy({ triangleCount: 600 }), { maxTriangles: 100 });
+    expect(instanced.passed).toBe(false);
+    expect(failedIds(instanced)).toContain('triangle_budget');
+  });
+});
+
+// A REAL instanced file, not a synthetic inspection. The previous test in this
+// file constructed a `triangleCount` by hand, so it never reached
+// summarizeGeometry and the multiplier could be deleted with the suite green.
+describe('a real instanced glTF is counted as drawn', () => {
+  const instanced = fileURLToPath(new URL('./fixtures/real/instanced_10x.glb', import.meta.url));
+
+  it('counts one mesh at ten nodes as ten draws', async () => {
+    const inspection = await inspectGltf(instanced);
+    expect(inspection.meshCount).toBe(1);
+    expect(inspection.triangleCount).toBe(20);
+  }, 60_000);
+
+  it('fails a budget the drawn geometry exceeds, though the mesh alone would pass', async () => {
+    const inspection = await inspectGltf(instanced);
+    // The mesh is 2 triangles; ten instances are 20. Assert the BUDGET check
+    // specifically — this fixture also lacks UVs and normals, so overall
+    // passed/failed would be true for unrelated reasons.
+    expect(failedIds(evaluateAsset(inspection, { maxTriangles: 10 }))).toContain('triangle_budget');
+    expect(failedIds(evaluateAsset(inspection, { maxTriangles: 50 }))).not.toContain('triangle_budget');
+  }, 60_000);
+});

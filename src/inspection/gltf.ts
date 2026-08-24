@@ -337,7 +337,12 @@ function summarizeGeometry(root: Root): GeometrySummary {
   // a 100-triangle budget while a renderer draws 600. The doc comment calls
   // this "the unit a renderer draws", which was false under instancing.
   const instancesPerMesh = new Map<string, number>();
-  for (const scene of root.listScenes()) {
+  // Only the DEFAULT scene. glTF `scenes` are alternatives and a renderer draws
+  // one; summing over all of them double-counted a mesh referenced from two
+  // scenes, so a 12-triangle asset reported 24 and failed a 20-triangle budget.
+  // Blender's own count walks one scene, so the two disagreed systematically.
+  const drawnScene = root.getDefaultScene() ?? root.listScenes()[0];
+  for (const scene of drawnScene ? [drawnScene] : []) {
     const visit = (node: ReturnType<typeof scene.listChildren>[number]): void => {
       const mesh = node.getMesh();
       if (mesh) {

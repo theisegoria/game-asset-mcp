@@ -11,16 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import {
-  constantImage,
-  decodeImage,
-  encodePNG,
-  extractChannel,
-  resizeImage,
-  sniffImageFormat,
-  MAX_IMAGE_PIXELS,
-  type RasterImage,
-} from '../src/inspection/image.js';
+import { MAX_IMAGE_PIXELS, constantColorImage, constantImage, decodeImage, encodePNG, extractChannel, resizeImage, sniffImageFormat, type RasterImage } from '../src/inspection/image.js';
 
 /** An image whose four channels hold four distinct constants. */
 function channelProbe(width = 4, height = 4): RasterImage {
@@ -219,5 +210,30 @@ describe('temporary workspace hygiene', () => {
     const decoded = decodeImage(new Uint8Array(await fs.readFile(target)));
     expect(decoded.data[0]).toBe(12);
     await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('a solid colour from a glTF factor', () => {
+  it('uses all three channels, not just the first', () => {
+    // constantImage takes ONE value and paints R, G and B with it, and the
+    // caller passed factor[0] — so a cyan baseColorFactor produced BLACK.
+    const cyan = constantColorImage(2, 2, [0, 0.6, 1]);
+    expect(cyan.data[0]).toBe(0);
+    expect(cyan.data[1]).toBeGreaterThan(150);
+    expect(cyan.data[2]).toBe(255);
+    expect(cyan.data[1]).not.toBe(cyan.data[0]);
+  });
+
+  it('encodes to sRGB rather than writing the linear value raw', () => {
+    // The plane is tagged srgb, so linear 0.5 must encode to ~188, not 128.
+    const grey = constantColorImage(1, 1, [0.5, 0.5, 0.5]);
+    expect(grey.data[0]).toBeGreaterThan(180);
+    expect(grey.data[0]).toBeLessThan(196);
+  });
+
+  it('clamps out-of-range factors instead of wrapping', () => {
+    const odd = constantColorImage(1, 1, [-1, 2, 0]);
+    expect(odd.data[0]).toBe(0);
+    expect(odd.data[1]).toBe(255);
   });
 });

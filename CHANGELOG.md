@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.4
+
+A tenth review. Six of these are fixes that 0.3.3 made *somewhere* and left
+undone somewhere else — the same defect, a second time, one call site over.
+
+- **The receipt forgery fix did not survive a chatty Blender.** 0.3.3 took the
+  LAST matching stdout line, but stdout capture stopped at 4 MiB — so on a real
+  export with megabytes of chatter the genuine receipt was *dropped by the cap*
+  and a forged line near byte 0 became "the last one". Receipt scanning is now
+  independent of the capture cap, and `stdoutTruncated` is reported.
+- **`extract_pbr_trio` dropped the factor whenever a texture was present.** The
+  glTF effective value is texture x factor. 0.3.3 fixed this for the untextured
+  branch only, so a material declaring `metallicFactor: 0` alongside a shared
+  metallicRoughness texture still exported **fully metallic**. Both branches now
+  apply the factor and report it as `factorApplied`.
+- **`triangleCount` summed every scene.** glTF `scenes` are alternatives and a
+  renderer draws one. A mesh referenced from two scenes was counted twice, so a
+  12-triangle asset reported 24 and failed a 20-triangle budget — while Blender,
+  which walks one scene, disagreed systematically. Only the default scene counts.
+- **The batch dropped the honesty flag 0.3.3 had just added.** It copied three
+  receipt fields and not `weldSkipped`, so a mesh whose weld was skipped came
+  back "game-ready" with no sign a repair had not run.
+- **The batch discarded the only text naming a failure.** A failed item kept the
+  error *message* and threw away `stderrTail`, which holds the Blender traceback.
+  Now surfaced as `errorDetail`.
+- **`destination: ""` was accepted by three tools**, resolving to the process
+  working directory — which an MCP client chooses, not the user. Now `min(1)`.
+
+### Verification
+
+Every fix above is pinned by a test that was **run against the reverted code and
+observed to fail**. That check is the point of this release: a mutation sweep
+found all five of 0.3.3's headline fixes could be reverted with the suite still
+fully green, because every Blender stub in the suite exited 0 and printed exactly
+one receipt. New: `tests/blender-protocol.test.ts` (stub-driven, no Blender
+needed) and three committed real fixtures — an instanced mesh, and two scaled
+plates that make the weld-threshold direction observable in the triangle count.
+
 ## 0.3.3
 
 A ninth review found nine defects. **0.3.0–0.3.2 should not be used.**

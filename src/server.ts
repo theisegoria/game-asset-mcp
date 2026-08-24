@@ -34,7 +34,7 @@ import { registerBatchTools } from './tools/batch.js';
 import { registerWorkflowTools } from './tools/workflows.js';
 
 const SERVER_NAME = 'game-asset-mcp';
-const SERVER_VERSION = '0.3.3';
+const SERVER_VERSION = '0.3.4';
 
 export async function main(): Promise<void> {
   const config = loadConfig();

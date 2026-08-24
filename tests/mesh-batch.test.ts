@@ -60,6 +60,8 @@ function inspection(overrides: Partial<AssetInspection> = {}): AssetInspection {
 
 interface Harness {
   deps: MeshBatchDeps;
+  /** Lets a test simulate another tool renaming a file onto our reserved path. */
+  identities: Map<string, { dev: number; ino: number }>;
   normalizeCalls: string[];
   inspectCalls: string[];
   mkdirCalls: string[];
@@ -82,12 +84,14 @@ function harness(opts: {
   const inspectCalls: string[] = [];
   const mkdirCalls: string[] = [];
   const discarded: string[] = [];
+  const identities = new Map<string, { dev: number; ino: number }>();
 
   return {
     normalizeCalls,
     inspectCalls,
     mkdirCalls,
     discarded,
+    identities,
     deps: {
       blenderAvailable: opts.blenderAvailable ?? true,
       async access(file) {
@@ -99,11 +103,13 @@ function harness(opts: {
       async isDirectory() {
         return true;
       },
-      async fileIdentity() {
-        return { dev: 1, ino: 1 };
+      async fileIdentity(target) {
+        return identities.get(target) ?? { dev: 1, ino: 1 };
       },
-      async isSameFile() {
-        return true;
+      async isSameFile(target, identity) {
+        const now = identities.get(target) ?? { dev: 1, ino: 1 };
+        const then = identity as { dev: number; ino: number };
+        return now.dev === then.dev && now.ino === then.ino;
       },
       async discardReservation(target) {
         discarded.push(target);
@@ -670,5 +676,34 @@ describe('the receipt is a claim; the bytes are the evidence', () => {
     expect(result.items[0]?.trianglesAfter).toBe(1750);
     expect(result.items[0]?.trianglesAfterMeasured).toBe(100);
     expect(result.items[0]?.receiptDisagreed).toBe(true);
+  });
+});
+
+describe('the batch never deletes a file another tool put there', () => {
+  it('discards its own reservation when the file is unchanged', async () => {
+    const h = harness({ broken: ['/a/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.status).toBe('failed');
+    expect(h.discarded).toHaveLength(1);
+  });
+
+  it('leaves the file alone when its identity changed under us', async () => {
+    // normalize_mesh has an overwrite path and can legitimately rename a
+    // verified mesh onto this exact name. The unconditional delete removed it,
+    // leaving that caller holding a receipt with a SHA-256 for bytes that
+    // existed nowhere. I argued this could not happen; it can.
+    const h = harness({ broken: ['/a/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const swapped: MeshBatchDeps = {
+      ...h.deps,
+      // Reservation sees inode 1; by release time another tool has renamed a
+      // different file into place, so the inode differs.
+      fileIdentity: async () => ({ dev: 1, ino: 1 }),
+      isSameFile: async () => false,
+    };
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, swapped);
+
+    expect(result.items[0]?.status).toBe('failed');
+    expect(h.discarded).toHaveLength(0);
   });
 });

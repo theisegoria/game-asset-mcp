@@ -29,6 +29,10 @@ export interface MeshBatchItem {
   outputKept?: boolean;
   /** Triangle count MEASURED from the produced file, not claimed by the normalizer. */
   trianglesAfterMeasured?: number;
+  /** True when welding was skipped because the requested threshold was unrepresentable. */
+  weldSkipped?: boolean;
+  /** The tail of the normalizer's stderr, when it failed and said why. */
+  errorDetail?: string;
   /**
    * True when the normalizer's receipt disagreed with this tool's own reading
    * of the file it produced. The receipt is a claim; the bytes are evidence.
@@ -222,6 +226,12 @@ async function prepareOne(
   }
   item.normalizedPath = target;
   item.unwrapped = receipt.objectsUnwrapped ?? 0;
+  // Round 9 added this honesty flag and bound one of its two consumers: the
+  // batch copied three fields and dropped it, so a mesh whose weld was skipped
+  // came back "game-ready" with no indication a repair had not run.
+  if ((receipt.objectsWeldSkippedThresholdUnrepresentable ?? 0) > 0) {
+    item.weldSkipped = true;
+  }
   item.trianglesBefore = receipt.trianglesBefore ?? 0;
   item.trianglesAfter = receipt.trianglesAfter ?? 0;
 
@@ -290,10 +300,14 @@ export async function runMeshBatch(
       // One bad file must not stall a forty-item run. The error is reported
       // against its own item and the loop moves on.
       const orphan = (err as { meshBatchOrphan?: string } | null)?.meshBatchOrphan;
+      // stderrTail carries the actual Blender traceback. Reducing the error to
+      // its message discarded the only thing that names the cause.
+      const detail = (err as { details?: { stderrTail?: string } } | null)?.details?.stderrTail;
       items.push({
         input: source,
         status: 'failed',
         error: err instanceof Error ? err.message : String(err),
+        ...(detail ? { errorDetail: String(detail).split('\n').slice(-8).join('\n') } : {}),
         ...(orphan !== undefined ? { orphanedOutput: orphan } : {}),
       });
     }

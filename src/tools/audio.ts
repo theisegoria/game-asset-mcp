@@ -79,7 +79,7 @@ export function registerAudioTools(server: McpServer, ctx: ToolContext): void {
           .max(120)
           .default(60)
           .describe('Bounded wait before returning a job id instead. 0 returns immediately.'),
-        destination: z.string().optional().describe('Output root. Defaults to ASSET_OUTPUT_DIR.'),
+        destination: z.string().min(1).optional().describe('Output root. Defaults to ASSET_OUTPUT_DIR.'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },

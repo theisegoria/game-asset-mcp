@@ -43,6 +43,8 @@ interface PlaneReceipt {
   source: 'texture' | 'factor';
   sourceChannel?: ChannelName;
   sourceTexture?: string;
+  /** The glTF factor multiplied into this plane, per texture x factor. */
+  factorApplied?: number | readonly [number, number, number];
   /** True when the source was smaller than the requested size, i.e. upscaled. */
   upsampled: boolean;
   colorSpace: 'srgb' | 'linear';
@@ -52,6 +54,27 @@ function imageFromTexture(texture: { getImage(): Uint8Array | null } | null): Ra
   const bytes = texture?.getImage();
   if (!bytes) return undefined;
   return decodeImage(new Uint8Array(bytes));
+}
+
+/**
+ * Apply a glTF scalar factor to a decoded plane.
+ *
+ * The spec's effective value is texture x factor. The textured branch read the
+ * texture and dropped the factor, so a material declaring metallicFactor 0 with
+ * a shared metallicRoughness texture exported as FULLY METALLIC. Round 9 fixed
+ * this class on the factor-only branch and left the textured one.
+ */
+function scaleChannel(image: RasterImage, factor: number): RasterImage {
+  if (factor === 1) return image;
+  const scaled = new Uint8Array(image.data.length);
+  for (let i = 0; i < image.data.length; i += 4) {
+    const value = Math.max(0, Math.min(255, Math.round((image.data[i] ?? 0) * factor)));
+    scaled[i] = value;
+    scaled[i + 1] = value;
+    scaled[i + 2] = value;
+    scaled[i + 3] = 255;
+  }
+  return { width: image.width, height: image.height, data: scaled };
 }
 
 export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
@@ -84,7 +107,7 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
           .min(0)
           .default(0)
           .describe('Which material to split when the file has several.'),
-        destination: z.string().optional().describe('Output directory. Defaults to the workspace.'),
+        destination: z.string().min(1).optional().describe('Output directory. Defaults to the workspace.'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
@@ -165,6 +188,8 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
           source: PlaneReceipt['source'];
           channel?: ChannelName;
           sourceTexture?: string;
+          /** The glTF factor multiplied into this plane, per texture x factor. */
+          factorApplied?: number | readonly [number, number, number];
         },
       ): Promise<void> {
         const upsampled = image.width < size || image.height < size;
@@ -218,17 +243,25 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
       if (metallicRoughness) {
         const textureName =
           material.getMetallicRoughnessTexture()?.getName() || 'metallicRoughnessTexture';
-        await emit('roughness', extractChannel(metallicRoughness, 'g'), {
+        // texture x factor, per the glTF spec. The factors used to be dropped
+        // whenever a texture was present, so a material declaring
+        // metallicFactor 0 with a shared metallicRoughness texture came out
+        // FULLY METALLIC.
+        const roughnessFactor = material.getRoughnessFactor();
+        const metallicFactor = material.getMetallicFactor();
+        await emit('roughness', scaleChannel(extractChannel(metallicRoughness, 'g'), roughnessFactor), {
           srgb: false,
           source: 'texture',
           channel: 'g',
           sourceTexture: textureName,
+          factorApplied: roughnessFactor,
         });
-        await emit('metallic', extractChannel(metallicRoughness, 'b'), {
+        await emit('metallic', scaleChannel(extractChannel(metallicRoughness, 'b'), metallicFactor), {
           srgb: false,
           source: 'texture',
           channel: 'b',
           sourceTexture: textureName,
+          factorApplied: metallicFactor,
         });
       } else {
         await emit(

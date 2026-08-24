@@ -111,9 +111,7 @@ export function registerDownloadTools(server: McpServer, ctx: ToolContext): void
         'Never overwrites an existing workspace; a repeat download gets a new suffixed folder.',
       inputSchema: {
         assetJobId: z.string(),
-        destination: z
-          .string()
-          .optional()
+        destination: z.string().min(1).optional()
           .describe('Override the output root. Defaults to ASSET_OUTPUT_DIR.'),
         extractTextures: z
           .boolean()

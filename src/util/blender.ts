@@ -96,6 +96,8 @@ export interface BlenderRunResult {
   receipt: Record<string, unknown>;
   stderrTail: string;
   exitCode: number;
+  /** True when Blender's stdout exceeded the capture cap and was truncated. */
+  stdoutTruncated: boolean;
 }
 
 const RECEIPT_PREFIX = 'NORMALIZE_RECEIPT=';
@@ -129,6 +131,8 @@ export async function runBlenderScript(
 
     let stdout = '';
     let stderr = '';
+    let lastReceiptLine: string | undefined;
+    let stdoutTruncated = false;
     let killedForTimeout = false;
 
     const killTree = (): void => {
@@ -151,8 +155,28 @@ export async function runBlenderScript(
       killTree();
     }, settings.timeoutMs);
 
+    // Receipt lines are scanned from EVERY chunk, independently of the capture
+    // cap. The cap silently dropped everything past 4 MiB — including the real
+    // receipt, which the script prints last — so a forged line near byte 0
+    // survived and became "the last matching line". Blender echoes glTF mesh
+    // names to stdout, so a mesh named "X\nNORMALIZE_RECEIPT={...}" plus 6 MiB
+    // of padding dictated every non-measured field in the response, including
+    // the Blender version it claimed to be running.
+    let pendingLine = '';
+    const scanForReceipt = (text: string): void => {
+      const combined = pendingLine + text;
+      const lines = combined.split('\n');
+      pendingLine = lines.pop() ?? '';
+      for (const entry of lines) {
+        if (entry.startsWith(RECEIPT_PREFIX)) lastReceiptLine = entry;
+      }
+    };
+
     child.stdout.on('data', (chunk: Buffer) => {
-      if (stdout.length < MAX_CAPTURE_BYTES) stdout += chunk.toString('utf8');
+      const text = chunk.toString('utf8');
+      scanForReceipt(text);
+      if (stdout.length < MAX_CAPTURE_BYTES) stdout += text;
+      else stdoutTruncated = true;
     });
     child.stderr.on('data', (chunk: Buffer) => {
       if (stderr.length < MAX_CAPTURE_BYTES) stderr += chunk.toString('utf8');
@@ -195,17 +219,22 @@ export async function runBlenderScript(
       // — Blender echoes mesh names to stdout, so a mesh named
       // "MESH\nNORMALIZE_RECEIPT={...}" injected a complete receipt that was
       // reported as fact. Every non-measured field became attacker-controlled.
-      const receiptLines = stdout.split('\n').filter((entry) => entry.startsWith(RECEIPT_PREFIX));
-      const line = receiptLines.length > 0 ? receiptLines[receiptLines.length - 1] : undefined;
+      // Flush whatever the last chunk left unterminated, then take the last
+      // receipt seen across the WHOLE stream, not the captured prefix of it.
+      if (pendingLine.startsWith(RECEIPT_PREFIX)) lastReceiptLine = pendingLine;
+      const line = lastReceiptLine;
       // A non-zero exit is a failure even WITH a receipt. finish() checked only
       // for the receipt's presence, so a Blender exiting 3 that had printed one
       // was reported as a clean success.
-      if (code !== 0 && code !== null) {
+      // `code === null` means the child was killed by a SIGNAL. Exempting it
+      // reported an OOM-killed or segfaulting Blender as a clean success, with
+      // exitCode 0, provided a receipt had already been printed.
+      if (code !== 0) {
         reject(
           new AssetPipelineError(
             'INSPECTION_FAILED',
-            `Blender exited ${code}`,
-            { details: { exitCode: code, stderrTail } },
+            code === null ? 'Blender was killed by a signal' : `Blender exited ${code}`,
+            { details: { exitCode: code, killedBySignal: code === null, stderrTail } },
           ),
         );
         return;
@@ -232,6 +261,7 @@ export async function runBlenderScript(
         }
         resolve({
           receipt: parsed as Record<string, unknown>,
+          stdoutTruncated,
           stderrTail,
           exitCode: code ?? 0,
         });

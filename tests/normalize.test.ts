@@ -750,3 +750,75 @@ describe('the verdict comes from the file, not the receipt', () => {
     expect(await fs.readFile(victim)).toEqual(before);
   }, 120_000);
 });
+
+// The weld threshold is documented in scene units and applied to LOCAL
+// coordinates, so it must be divided by the object's world scale. Which
+// direction was wrong once: dividing by min(|scale|) makes the threshold
+// LARGER, and a plate scaled [1,1,0.02] lost 73% of its triangles at defaults
+// while reporting readyToTexture. Needs real Blender, because the divisor lives
+// in the Python and only the produced mesh can show the difference.
+describe.skipIf(!haveBlender)('the weld threshold respects world scale', () => {
+  const plate = fileURLToPath(new URL('./fixtures/real/thin_scaled_plate.glb', import.meta.url));
+
+  it('preserves a thin-scaled mesh at default mergeDistance', async () => {
+    const dir = await tmpDir();
+    const output = path.join(dir, 'plate_out.glb');
+    const result = await runBlenderScript(
+      packagedScript('blender_normalize.py'),
+      {
+        input: plate,
+        output,
+        unwrapMissingUVs: false,
+        cleanGeometry: true,
+        mergeDistance: 0.0001,
+        normalizeMaterials: true,
+        angleLimitDegrees: 66,
+        islandMargin: 0.002,
+      },
+      { timeoutMs: 300_000 },
+    );
+
+    const receipt = result.receipt as Record<string, number>;
+    // 1600 in, 1600 out. Measured with the divisor inverted: 16 — a 99% loss,
+    // and the tool still called the husk ready to texture.
+    //
+    // Two earlier fixtures for this test did NOT discriminate, both reporting
+    // 1600 either way, and I nearly shipped one as proof. remove_doubles merges
+    // VERTICES; a triangle only dies when its own edges collapse. So the mesh
+    // has to be built of triangles whose EDGES (0.001) sit between the correct
+    // threshold (0.0001) and the inverted one (0.005) — welding quads with
+    // sub-threshold GAPS just joins them and deletes nothing.
+    expect(receipt.trianglesAfter).toBeGreaterThan(1500);
+  }, 300_000);
+
+  // Blender's threshold floor is 1e-6 and it clamps a smaller value UPWARDS, so
+  // a divisor over 100 applied a WIDER world threshold than requested on
+  // precisely the meshes whose scale makes them fragile. The fix skips the weld
+  // and says it did.
+  it('reports the weld as skipped when the threshold cannot be expressed', async () => {
+    const dir = await tmpDir();
+    const output = path.join(dir, 'huge_out.glb');
+    const result = await runBlenderScript(
+      packagedScript('blender_normalize.py'),
+      {
+        input: fileURLToPath(new URL('./fixtures/real/hugely_scaled_plate.glb', import.meta.url)),
+        output,
+        unwrapMissingUVs: false,
+        cleanGeometry: true,
+        mergeDistance: 0.0001,
+        normalizeMaterials: true,
+        angleLimitDegrees: 66,
+        islandMargin: 0.002,
+      },
+      { timeoutMs: 300_000 },
+    );
+
+    const receipt = result.receipt as Record<string, number>;
+    expect(receipt.largestThresholdDivisor).toBeCloseTo(1000, 0);
+    // The counter is the ONLY oracle here, and that is stated rather than
+    // implied: this fixture's local edges are 0.001, far above even the clamped
+    // 1e-6, so the triangle count is 200 with the guard and 200 without it.
+    // Geometry cannot see this one — the receipt is what the fix promised.
+    expect(receipt.objectsWeldSkippedThresholdUnrepresentable).toBe(1);
+  }, 300_000);
+});
