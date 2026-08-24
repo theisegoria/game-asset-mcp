@@ -29,7 +29,7 @@ export function registerInspectionTools(server: McpServer, ctx: ToolContext): vo
         'job, or modelPath to inspect any local file.',
       inputSchema: {
         assetJobId: z.string().optional().describe('A job that has already been downloaded.'),
-        modelPath: z.string().optional().describe('Absolute path to a local .glb or .gltf file.'),
+        modelPath: z.string().optional().describe('Absolute path to a local mesh. GLB and glTF are inspected directly; other mesh formats are accepted and will fail at decode, since only glTF can be read.'),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },

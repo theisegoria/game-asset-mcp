@@ -140,7 +140,7 @@ describe('reserveWorkspace', () => {
     const first = await reserveWorkspace(root, 'crate');
     // A marker in the first workspace proves the second reservation did not
     // reuse or clear it, which a directory-name check alone would not show.
-    await fs.writeFile(path.join(first.dir, 'metadata', 'marker.txt'), 'first', 'utf8');
+    await fs.writeFile(path.join(first.dir, 'previews', 'marker.txt'), 'first', 'utf8');
 
     const second = await reserveWorkspace(root, 'crate');
 
@@ -150,7 +150,7 @@ describe('reserveWorkspace', () => {
     expect(path.basename(second.dir)).toBe('crate_2');
     expect((await fs.stat(first.dir)).isDirectory()).toBe(true);
     expect((await fs.stat(second.dir)).isDirectory()).toBe(true);
-    expect(await fs.readFile(path.join(first.dir, 'metadata', 'marker.txt'), 'utf8')).toBe('first');
+    expect(await fs.readFile(path.join(first.dir, 'previews', 'marker.txt'), 'utf8')).toBe('first');
     expect(await listDir(second.dir)).toEqual([...ASSET_SUBDIRS].sort());
   });
 });

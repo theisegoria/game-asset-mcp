@@ -9,7 +9,6 @@
  *     model/          the mesh
  *     textures/       extracted PBR maps
  *     previews/       provider renders
- *     metadata/       raw provider payloads, kept for debugging
  *
  * Nothing is ever silently overwritten. Names that collide get a numeric
  * suffix, so re-running a generation preserves the earlier result instead of
@@ -21,7 +20,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { AssetPipelineError } from '../util/errors.js';
 
-export const ASSET_SUBDIRS = ['source', 'model', 'textures', 'previews', 'metadata'] as const;
+// `metadata/` used to be here, documented as "raw provider payloads, kept for
+// debugging". Nothing ever wrote to it, so every asset workspace carried an
+// empty directory and the documentation described a feature that did not exist.
+// Removed rather than implemented: adding a payload-persistence feature is a
+// change worth making deliberately, not as a footnote to a documentation fix.
+export const ASSET_SUBDIRS = ['source', 'model', 'textures', 'previews'] as const;
 export type AssetSubdir = (typeof ASSET_SUBDIRS)[number];
 
 /**

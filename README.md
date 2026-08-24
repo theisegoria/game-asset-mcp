@@ -57,7 +57,7 @@ Set these in your MCP client's `env` block — see the snippets below. **There i
 | `LEONARDO_API_KEY` | for image and audio tools | — | Leonardo.Ai key with API access enabled. One key covers both reference images and sound effects. |
 | `LEONARDO_MODEL_ID` | no | built-in default | Override the default Leonardo image model. A per-call `modelId` also exists. |
 | `ASSET_OUTPUT_DIR` | no | `./assets/generated` | Where assets and job records are written. Relative to the server's working directory. |
-| `ASSET_MAX_DOWNLOAD_BYTES` | no | `268435456` (256 MiB) | Hard ceiling on any single download, enforced while streaming. |
+| `ASSET_MAX_DOWNLOAD_BYTES` | no | `268435456` (256 MiB) | Hard ceiling on any single download, enforced while streaming — and on any LOCAL file you supply, so an over-large mesh you already own is refused with `DOWNLOAD_TOO_LARGE`. |
 | `ASSET_HTTP_TIMEOUT_MS` | no | `60000` | Per-request HTTP timeout. |
 | `ASSET_LOG_LEVEL` | no | `info` | `silent` \| `error` \| `warn` \| `info` \| `debug`. |
 | `BLENDER_PATH` | no | auto-detected | Blender executable for `normalize_mesh` and `batch_prepare_meshes`. Overrides discovery. |
@@ -252,7 +252,6 @@ assets/generated/
     ├── model/                      the mesh (GLB by default)
     ├── textures/                   extracted PBR maps
     ├── previews/                   provider-rendered turnarounds
-    └── metadata/                   raw provider payloads, kept for debugging
 ```
 
 `<asset_name>` is your spec's name, sanitized: lowercased, non-alphanumerics collapsed to underscores. The `.jobs` directory is a dot-directory on purpose — browsing your asset workspace should show assets, not bookkeeping.
@@ -316,7 +315,7 @@ Concretely, these remain **unverified**:
 - **Sound-effect generation is unverified.** Leonardo documents the Sound Effects v2 *request*
   contract (`model`, `prompt`, `duration` 1-22s, `prompt_influence`, `loop`, `quantity`) but not
   its response shape or how the finished audio is retrieved. The client reads the generation id
-  and audio URLs from several plausible shapes and throws with the raw payload attached when none
+  and audio URLs from several plausible shapes and throws with the response's top-level key NAMES attached (not the body, which could be large or carry a signed URL) when none
   match, rather than reporting an empty success. Expect the first real call to need a fix, and
   please open an issue with the payload shape you saw.
 - The Leonardo model ids in `src/providers/image/leonardo.ts`, which were transcribed from published documentation. Check them against `GET /platformModels`; a stale id fails as an HTTP 400 that reads like a malformed request body. Both `LEONARDO_MODEL_ID` and a per-call `modelId` exist as escape hatches.
