@@ -841,16 +841,16 @@ describe.skipIf(!haveBlender)('the weld threshold respects world scale', () => {
  * the baked one, at the DEFAULT mergeDistance.
  */
 describe.skipIf(!haveBlender)('splitting scale between node and vertices changes nothing', () => {
-  const run = async (fixture: string): Promise<Record<string, number>> => {
+  const run = async (fixture: string, mergeDistance = 0.0001): Promise<Record<string, number>> => {
     const dir = await tmpDir();
     const result = await runBlenderScript(
       packagedScript('blender_normalize.py'),
       {
         input: fileURLToPath(new URL(`./fixtures/real/${fixture}.glb`, import.meta.url)),
-        output: path.join(dir, `${fixture}_out.glb`),
+        output: path.join(dir, `${fixture}_${mergeDistance}_out.glb`),
         unwrapMissingUVs: false,
         cleanGeometry: true,
-        mergeDistance: 0.0001,
+        mergeDistance,
         normalizeMaterials: true,
         angleLimitDegrees: 66,
         islandMargin: 0.002,
@@ -878,6 +878,36 @@ describe.skipIf(!haveBlender)('splitting scale between node and vertices changes
     // "not zero" is not the property worth pinning.
     expect(nodeScaled.trianglesAfter).toBe(nodeScaled.trianglesBefore);
   }, 600_000);
+
+  // ⚠ THE VERSION OF THIS TEST THAT SHIPPED WAS HARDCODED TO mergeDistance
+  // 0.0001 AND COULD NOT SEE THE WORST CASE. A later fix special-cased
+  // `mergeDistance: 0` with a LOCAL constant and no divisor, so asking for ZERO
+  // merging applied a strictly WIDER repair than asking for a small positive
+  // one — and these same two fixtures went to 100 and 0 triangles. The
+  // invariant is not "at the default"; it is "at every merge distance".
+  it.each([0.0001, 0, 0.01])(
+    'produces the same geometry at mergeDistance %p, either scale split',
+    async (mergeDistance) => {
+      const [nodeScaled, baked] = await Promise.all([
+        run('tiny_parts_node_scaled', mergeDistance),
+        run('tiny_parts_baked', mergeDistance),
+      ]);
+
+      expect(nodeScaled.largestThresholdDivisor).toBeCloseTo(1000, 0);
+      expect(baked.largestThresholdDivisor).toBeCloseTo(1, 5);
+
+      // THE invariant, and it holds at every threshold including destructive
+      // ones: the two splits must agree. Preservation is a separate, narrower
+      // claim — at 0.01, 25x wider than these 0.4 mm features, BOTH correctly
+      // go to zero. Asserting preservation there would have been asserting that
+      // a wide merge does nothing, which is not the contract.
+      expect(nodeScaled.trianglesAfter).toBe(baked.trianglesAfter);
+      if (mergeDistance <= 0.0001) {
+        expect(nodeScaled.trianglesAfter).toBe(nodeScaled.trianglesBefore);
+      }
+    },
+    600_000,
+  );
 });
 
 /**

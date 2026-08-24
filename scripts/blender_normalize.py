@@ -96,6 +96,13 @@ def select_only(obj):
 # bpy.ops.mesh.remove_doubles' RNA, not assumed.
 BLENDER_MIN_THRESHOLD = 1e-6
 
+# glTF units are metres by specification. One micrometre is below any feature a
+# real asset carries, so it is the widest WORLD radius we are willing to treat
+# as "degenerate only" when the caller asks for mergeDistance 0. Stated in world
+# space deliberately: the defect this replaces stated it in LOCAL space, where
+# its real size depended on the object's scale.
+DEGENERATE_WORLD_EPSILON = 1e-6
+
 
 def world_threshold_divisor(obj):
     """How much to DIVIDE a world-space threshold by to express it locally.
@@ -284,19 +291,39 @@ def main():
                 # scale makes them fragile. Skipping the WELD destroys nothing.
                 weld_skipped += 1
 
-            # A SEPARATE question from weldability — see clean_geometry.
+            # A SEPARATE question from weldability, but the SAME arithmetic —
+            # and that is the whole point of writing it as one formula.
             #
-            #   requested 0     -> "merge nothing, but still repair": dissolve at
-            #                      the 1e-6 floor, which removes only faces that
-            #                      are degenerate at any threshold.
-            #   representable   -> dissolve at the same local threshold.
-            #   unrepresentable -> skip, because the clamp would exceed what was
-            #                      asked for. This is the r11 data-loss fix.
-            if requested_merge <= 0.0:
-                dissolve_threshold = BLENDER_MIN_THRESHOLD
-            elif local_merge >= BLENDER_MIN_THRESHOLD:
-                dissolve_threshold = local_merge
+            # The previous version special-cased `requested_merge <= 0` as
+            # `dissolve_threshold = BLENDER_MIN_THRESHOLD`, in LOCAL units, with
+            # no divisor, while both other branches divided. The world-space
+            # radius was therefore 1e-6 * divisor, and the branch below SKIPS
+            # whenever the request is narrower than that — so asking for ZERO
+            # merging applied a strictly WIDER repair than asking for a small
+            # positive one. That is the r11 data-loss argument verbatim,
+            # reintroduced by the fix whose comment cites it.
+            #
+            # Measured: two files with byte-identical WORLD geometry, differing
+            # only in how scale splits between node and vertices, went to 100
+            # and 0 triangles at mergeDistance 0. A partial case lost 98% (102
+            # triangles to 2) and still reported readyToTexture with the skip
+            # counter reading zero. Its test used a fixture at scale [1,1,1] —
+            # divisor 1, the one value at which the bug is invisible.
+            #
+            # `mergeDistance: 0` means "merge nothing, but still repair faces
+            # that are degenerate at any scale". That is a WORLD-space claim, so
+            # it is expressed as one: the narrowest world radius we are willing
+            # to call degenerate-only. Everything then flows through the single
+            # divisor rule, which is monotonic by construction.
+            effective_merge = (
+                requested_merge if requested_merge > 0.0 else DEGENERATE_WORLD_EPSILON
+            )
+            dissolve_local = effective_merge / divisor
+            if dissolve_local >= BLENDER_MIN_THRESHOLD:
+                dissolve_threshold = dissolve_local
             else:
+                # Unrepresentable: the clamp to Blender's floor would exceed the
+                # world threshold asked for. Skipping destroys nothing.
                 dissolve_threshold = None
                 dissolve_skipped += 1
 
