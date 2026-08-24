@@ -124,7 +124,32 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
       const outputDir = args.outputPath
         ? path.dirname(path.resolve(args.outputPath))
         : path.dirname(source);
-      await fs.mkdir(outputDir, { recursive: true });
+      if (args.outputPath === undefined) {
+        // The source's own directory, which exists by definition.
+        await fs.mkdir(outputDir, { recursive: true });
+      } else {
+        // An explicit destination's parent must ALREADY exist. This used to
+        // mkdir -p before any validation, so a mistyped path silently built a
+        // directory tree anywhere the process could write: outputPath
+        // "~/out.glb" is not expanded by the shell here and created a literal
+        // "~" directory in the server's working directory. Refusing is both
+        // safer and a better diagnosis — a missing parent is nearly always a
+        // typo or an unexpanded variable.
+        let parentIsDirectory = false;
+        try {
+          parentIsDirectory = (await fs.stat(outputDir)).isDirectory();
+        } catch {
+          parentIsDirectory = false;
+        }
+        if (!parentIsDirectory) {
+          throw invalidInput(
+            `the directory for outputPath does not exist: ${outputDir}. Create it first, or omit ` +
+            'outputPath to write beside the source. Note that a leading ~ is NOT expanded here and ' +
+            'a relative path resolves against the server\'s working directory, not yours.',
+            { outputPath: path.resolve(args.outputPath), outputDir },
+          );
+        }
+      }
 
       const resolved = await resolveNormalizeTarget(
         {
@@ -154,7 +179,15 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
               await handle.close();
               return true;
             } catch (err) {
-              if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+              const code = (err as NodeJS.ErrnoException).code;
+              if (code === 'EEXIST') return false;
+              if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') {
+                throw invalidInput(
+                  `cannot write to outputPath (${code}): the directory is not writable by this ` +
+                  'process. Choose a destination you own, or omit outputPath to write beside the source.',
+                  { code },
+                );
+              }
               throw err;
             }
           },

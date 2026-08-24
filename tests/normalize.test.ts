@@ -588,3 +588,43 @@ describe('timeoutSeconds is a real bound', () => {
     expect(survivors).toBe('0');
   }, 60_000);
 });
+
+describe('an explicit destination never builds directories', () => {
+  it('refuses a path whose parent does not exist, creating nothing', async () => {
+    const dir = await tmpDir();
+    const source = path.join(dir, 'src.glb');
+    await fs.copyFile(uvlessMesh, source);
+    const before = await fs.readdir(dir);
+
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
+      cwd: dir,
+      env: { ...process.env, ASSET_LOG_LEVEL: 'error', ASSET_OUTPUT_DIR: path.join(dir, 'ws') },
+    });
+    const client = new Client({ name: 'containment-test', version: '1.0.0' });
+    try {
+      await client.connect(transport);
+      // ~ is not expanded here. This used to mkdir -p before any validation and
+      // create a literal "~" directory wherever the server happened to be
+      // running — which is how a stray ~ ended up at a repository root.
+      const result = await client.callTool({
+        name: 'normalize_mesh',
+        arguments: { modelPath: source, outputPath: '~/tilde.glb' },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toMatch(/does not exist/);
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+
+    // The only new entry may be the server's OWN configured workspace, which it
+    // creates at startup. The tool itself must have built nothing — above all
+    // no literal ~ directory.
+    const created = (await fs.readdir(dir)).filter((name) => !before.includes(name));
+    expect(created.filter((name) => name !== 'ws')).toEqual([]);
+    expect(created).not.toContain('~');
+  }, 120_000);
+});
