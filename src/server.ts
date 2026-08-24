@@ -10,6 +10,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { configuredProviders, loadConfig } from './config.js';
@@ -82,12 +83,30 @@ export async function main(): Promise<void> {
 }
 
 // Only run when executed directly, so tests can import this module freely.
-// Compared via fileURLToPath rather than string-building a file:// URL: any
-// space or non-ASCII character in the install path is percent-encoded in
-// import.meta.url but literal in argv, so the naive comparison silently fails
-// and the server exits without ever starting.
-const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : undefined;
-if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
+//
+// Two ways this comparison silently fails, both observed rather than imagined:
+//
+//  1. Any space or non-ASCII character in the install path is percent-encoded
+//     in import.meta.url but literal in argv, so string-building a file:// URL
+//     never matches. Hence fileURLToPath.
+//  2. An npm-installed package is launched through node_modules/.bin, which is
+//     a SYMLINK. Node resolves import.meta.url to the real file but leaves
+//     argv[1] as the symlink, so the paths differ and main() never runs — the
+//     server starts, exits instantly, and the client reports only "connection
+//     closed". Hence realpath on both sides.
+//
+// Both failures are invisible in development, where the real path is invoked
+// directly, and fatal for anyone who installs the package.
+function canonical(target: string): string {
+  try {
+    return realpathSync(path.resolve(target));
+  } catch {
+    return path.resolve(target);
+  }
+}
+
+const invokedPath = process.argv[1] ? canonical(process.argv[1]) : undefined;
+if (invokedPath && canonical(fileURLToPath(import.meta.url)) === invokedPath) {
   main().catch((err: unknown) => {
     process.stderr.write(
       `${JSON.stringify({ level: 'error', msg: 'fatal', error: err instanceof Error ? err.message : String(err) })}\n`,
