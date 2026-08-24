@@ -38,6 +38,7 @@ const EXPECTED_TOOLS = [
   'rig_asset',
   'animate_asset',
   'retopologize_asset',
+  'batch_prepare_meshes',
 ];
 
 async function main() {

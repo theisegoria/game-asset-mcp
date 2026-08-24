@@ -29,6 +29,7 @@ import { registerNormalizeTools } from './tools/normalize.js';
 import { registerSpendTools } from './tools/spend.js';
 import { registerValidateTools } from './tools/validate.js';
 import { registerAnimationTools } from './tools/animation.js';
+import { registerBatchTools } from './tools/batch.js';
 import { registerWorkflowTools } from './tools/workflows.js';
 
 const SERVER_NAME = 'game-asset-mcp';
@@ -56,6 +57,7 @@ export async function main(): Promise<void> {
   registerSpendTools(server, ctx);
   registerValidateTools(server, ctx);
   registerAnimationTools(server, ctx);
+  registerBatchTools(server, ctx);
 
   const providers = configuredProviders(config);
   logger.info('game-asset-mcp starting', {

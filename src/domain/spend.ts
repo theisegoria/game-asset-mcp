@@ -89,6 +89,7 @@ export const FREE_TOOLS: ReadonlySet<string> = new Set([
   'normalize_mesh',
   'validate_game_asset',
   'get_spend_report',
+  'batch_prepare_meshes',
 ]);
 
 export function isSpendingTool(tool: string): boolean {
