@@ -7,6 +7,7 @@
  * for work that never ran.
  */
 
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs, existsSync } from 'node:fs';
@@ -544,4 +545,46 @@ describe('the destination is only replaced by a verified write', () => {
     expect(result.isError).toBe(true);
     expect(await fs.readFile(victim)).toEqual(victimBefore);
   }, 120_000);
+});
+
+describe('timeoutSeconds is a real bound', () => {
+  it('kills the whole process group, not just the direct child', async () => {
+    const dir = await tmpDir();
+    // A wrapper that leaves a descendant holding the pipe. BLENDER_PATH is a
+    // supported override and is routinely a wrapper — xvfb-run, flatpak run,
+    // snap run — so this is the normal shape, not a contrivance. Signalling
+    // only the direct child, and resolving on 'close' (which waits for every
+    // pipe holder), returned after 45s against a 10s timeout while the error
+    // claimed the process had been terminated.
+    // A unique marker so the descendant can be identified precisely.
+    const marker = `blender-timeout-probe-${process.pid}-${Math.floor(Date.now() / 1000)}`;
+    const wrapper = path.join(dir, 'wrapper.sh');
+    await fs.writeFile(
+      wrapper,
+      `#!/bin/sh\n/bin/sh -c 'exec -a ${marker} sleep 120' &\nsleep 120\n`,
+    );
+    await fs.chmod(wrapper, 0o755);
+
+    const started = Date.now();
+    await expect(
+      runBlenderScript(
+        packagedScript('blender_normalize.py'),
+        { input: 'x', output: 'y' },
+        { timeoutMs: 2000, blenderPath: wrapper },
+      ),
+    ).rejects.toThrow(/exceeded 2000ms/);
+
+    // Generous, but far below the 120s the descendant would otherwise hold.
+    expect(Date.now() - started).toBeLessThan(15_000);
+
+    // Returning on time is only half of it. Killing the direct child alone
+    // leaves the descendant running for its full 120s, holding whatever it
+    // holds, after the caller has been told the run was terminated.
+    await new Promise((settle) => setTimeout(settle, 500));
+    const survivors = await new Promise<string>((settle) => {
+      execFile('/bin/sh', ['-c', `ps -A -o command | grep -c '[${marker.slice(0, 1)}]${marker.slice(1)}' || true`],
+        (_err, stdout) => settle(String(stdout).trim()));
+    });
+    expect(survivors).toBe('0');
+  }, 60_000);
 });

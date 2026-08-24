@@ -116,19 +116,39 @@ export async function runBlenderScript(
   const executable = settings.blenderPath ?? requireBlender();
 
   return new Promise<BlenderRunResult>((resolve, reject) => {
+    // detached puts the child in its OWN process group, so the timeout can kill
+    // the whole tree. BLENDER_PATH is a supported override and is routinely a
+    // wrapper — xvfb-run, flatpak run, snap run are the normal ways to run
+    // headless Blender — so the process we spawn is often not the process doing
+    // the work. Signalling only the direct child left descendants running.
     const child = spawn(
       executable,
       ['--background', '--factory-startup', '--python', scriptPath, '--', JSON.stringify(options)],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      { stdio: ['ignore', 'pipe', 'pipe'], detached: true },
     );
 
     let stdout = '';
     let stderr = '';
     let killedForTimeout = false;
 
+    const killTree = (): void => {
+      // Negative pid targets the group. Falling back to the child alone matters
+      // where process groups are unavailable; either way we must not throw out
+      // of a timer.
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // The process is already gone.
+        }
+      }
+    };
+
     const timer = setTimeout(() => {
       killedForTimeout = true;
-      child.kill('SIGKILL');
+      killTree();
     }, settings.timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
@@ -147,15 +167,23 @@ export async function runBlenderScript(
       );
     });
 
-    child.on('close', (code) => {
+    // 'exit' rather than 'close': close waits for every holder of the pipes,
+    // so one surviving descendant kept this pending for 45s against a 10s
+    // timeout while the error claimed the process "was terminated". A short
+    // grace period still lets buffered output arrive.
+    child.on('exit', (code) => {
       clearTimeout(timer);
+      setTimeout(() => finish(code), 25);
+    });
+
+    const finish = (code: number | null): void => {
       const stderrTail = stderr.split('\n').slice(-40).join('\n');
 
       if (killedForTimeout) {
         reject(
           new AssetPipelineError(
             'TIMEOUT',
-            `Blender exceeded ${settings.timeoutMs}ms and was terminated`,
+            `Blender exceeded ${settings.timeoutMs}ms; its process group was sent SIGKILL`,
             { retryable: true, details: { stderrTail } },
           ),
         );
@@ -190,6 +218,6 @@ export async function runBlenderScript(
           }),
         );
       }
-    });
+    };
   });
 }
