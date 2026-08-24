@@ -27,8 +27,8 @@ function looksSecret(key: string): boolean {
 }
 
 /**
- * Replace secret-looking values with a length-preserving marker. Recurses into
- * plain objects and arrays; leaves other types alone.
+ * Replace secret-looking values with a fixed marker. Recurses into plain
+ * objects and arrays; leaves other types alone.
  */
 export function redact(value: unknown, depth = 0): unknown {
   if (depth > 6) return '[depth-limit]';

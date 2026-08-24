@@ -244,7 +244,17 @@ This is early software, and the parts most likely to drift are marked as such ra
 
 **Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. The paths are the **first** thing the live smoke test checks, because a wrong path returns a 404 that looks exactly like a bad API key.
 
-**Live integration tests are skipped when API keys are absent.** The suite is split by cost. Pure logic — prompt construction, status mapping, path safety, the job store — is tested with no credentials and no spend, so `npm test` works on a fresh clone. Anything that talks to a real provider spends real credits, so it runs only when the corresponding key is present in the environment. If `npm test` reports skipped suites, that is the intended behaviour and not a broken checkout.
+**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 165 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
+
+Concretely, these remain **unverified**:
+
+- The Tripo v3 endpoint paths described above.
+- Whether `texture_model` accepts an **uploaded** mesh (`file_token`) or only a mesh produced by a prior Tripo task (`original_model_task_id`). This decides whether you can retexture a model you already own, which is the feature this server exists for. Resolving it costs one HD texture call.
+- The Leonardo model ids in `src/providers/image/leonardo.ts`, which were transcribed from published documentation. Check them against `GET /platformModels`; a stale id fails as an HTTP 400 that reads like a malformed request body. Both `LEONARDO_MODEL_ID` and a per-call `modelId` exist as escape hatches.
+
+If you are the first person to run this with real keys, expect to fix an endpoint path, and please open an issue with what you found.
+
+**What *is* verified:** `npm run verify` builds the server, starts it over stdio with a real MCP client, completes the handshake and asserts all eleven tools register. That is a protocol round-trip, not a version string — a server that fails to register its tools still starts perfectly happily.
 
 ---
 

@@ -115,16 +115,36 @@ async function fetchHttpsOnly(url: string, init: RequestInit, signal: AbortSigna
     const location = response.headers.get('location');
     if (!location) return response;
 
+    // NEVER follow a redirect on a non-GET request. A 307/308 re-sends the
+    // body verbatim, so following even one hop can deliver the same
+    // credit-consuming request twice — and a chain could deliver it six times.
+    // Refusing is safe: no supported provider redirects a create call, so this
+    // only fires on something genuinely unexpected.
+    if (init.method && init.method !== 'GET') {
+      throw new AssetPipelineError(
+        'PROVIDER_HTTP',
+        `refusing to follow a redirect on a ${init.method} request: re-delivering the body can double-charge`,
+        { details: { status: response.status, url: safeUrlForLogs(current) } },
+      );
+    }
+
     const next = new URL(location, current).toString();
     // Re-check on every hop: this is the whole point of manual redirects.
     assertHttps(next);
-    current = next;
 
-    // A 303, or a 301/302 on POST, must continue as GET per HTTP semantics.
-    if (response.status === 303 || ((response.status === 301 || response.status === 302) && init.method && init.method !== 'GET')) {
-      init = { ...init, method: 'GET' };
-      delete (init as { body?: unknown }).body;
+    // Strip credentials when the origin changes. The redirect target is chosen
+    // by the responding server, not by us, so forwarding Authorization hands
+    // our provider key to whatever host it names.
+    if (new URL(next).origin !== new URL(current).origin) {
+      const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
+      for (const key of Object.keys(headers)) {
+        const lower = key.toLowerCase();
+        if (lower === 'authorization' || lower === 'cookie') delete headers[key];
+      }
+      init = { ...init, headers };
     }
+
+    current = next;
   }
 
   throw new AssetPipelineError('PROVIDER_HTTP', `too many redirects (>${MAX_REDIRECTS})`, {

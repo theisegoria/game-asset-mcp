@@ -1,0 +1,16 @@
+{
+  // Tests are excluded from the build config (they must not be emitted into
+  // dist), which meant they were never typechecked at all — vitest transpiles
+  // without checking, so invalid types sat in the suite unnoticed. This config
+  // exists purely so `npm run typecheck` covers them too.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  // `exclude` MUST be restated: it is inherited from the base config, which
+  // excludes tests, and an inherited exclude silently wins over include —
+  // leaving this config checking zero test files while appearing to pass.
+  "exclude": ["node_modules", "dist"],
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

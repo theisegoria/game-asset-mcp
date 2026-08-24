@@ -4,10 +4,11 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
-    // Integration tests that need real API keys guard themselves with
-    // `describe.skipIf(!process.env.TRIPO_API_KEY)`; they are reported as
-    // SKIPPED rather than silently passing, so a green run never implies a
-    // live call was made.
+    // NOTE: this suite contains NO live-provider integration tests. Every test
+    // here runs against mocks or the local filesystem, so a green run says
+    // nothing about whether the provider APIs behave as this code assumes.
+    // Any future integration test must guard itself on key presence and be
+    // reported as SKIPPED rather than silently passing.
     reporters: ['verbose'],
     testTimeout: 20_000,
   },

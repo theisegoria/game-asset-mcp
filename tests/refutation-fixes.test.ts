@@ -33,7 +33,7 @@ async function tmpDir(): Promise<string> {
 /** A fetch mock that behaves like the real one w.r.t. abort signals. */
 function mockFetch(handler: (url: string, init: RequestInit) => Response): { calls: () => number } {
   let sent = 0;
-  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     // Real fetch refuses an already-aborted signal without sending anything.
     if (init?.signal?.aborted) {
       const err = new Error('The operation was aborted.');
@@ -295,5 +295,58 @@ describe('MEDIUM #8 / #18 — the job store neither hides jobs nor trusts unknow
     const store = await JobStore.open(dir);
     await expect(store.get('../../etc/passwd')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('HIGH — the symlink guard and the redirect POST refusal are actually exercised', () => {
+  it('assertRealPathInside rejects a directory that symlinks outside the root', async () => {
+    const { assertRealPathInside } = await import('../src/storage/filesystem.js');
+    const root = await tmpDir();
+    const outside = await tmpDir();
+    const linked = path.join(root, 'ws');
+    await fs.symlink(outside, linked, 'dir');
+
+    await expect(assertRealPathInside(root, linked)).rejects.toMatchObject({ code: 'PATH_ESCAPE' });
+    // And it accepts a genuine child, so the guard is not simply always-throwing.
+    const real = path.join(root, 'real');
+    await fs.mkdir(real);
+    await expect(assertRealPathInside(root, real)).resolves.toBeUndefined();
+
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  it('refuses to follow a redirect on a POST rather than re-delivering the body', async () => {
+    let posts = 0;
+    globalThis.fetch = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'POST') posts += 1;
+      return new Response(null, { status: 307, headers: { location: 'https://elsewhere.test/x' } });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      requestJson('https://example.com/charge', { method: 'POST', timeoutMs: 1000, body: { charge: true } }),
+    ).rejects.toMatchObject({ code: 'PROVIDER_HTTP' });
+    // The body reached the network exactly once, not once per redirect hop.
+    expect(posts).toBe(1);
+  });
+
+  it('does not forward the Authorization header across a cross-origin redirect', async () => {
+    const seen: (string | undefined)[] = [];
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      seen.push(headers.authorization);
+      if (String(input).includes('example.com')) {
+        return new Response(null, { status: 302, headers: { location: 'https://cdn.other.test/f' } });
+      }
+      return new Response('{"ok":true}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await requestJson('https://example.com/start', {
+      timeoutMs: 1000,
+      headers: { authorization: 'Bearer SUPER-SECRET' },
+    });
+
+    expect(seen[0]).toBe('Bearer SUPER-SECRET');
+    expect(seen[1]).toBeUndefined();
   });
 });

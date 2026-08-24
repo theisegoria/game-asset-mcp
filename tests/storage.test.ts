@@ -196,7 +196,7 @@ describe('JobStore', () => {
 
   it('round-trips a saved job deeply-equal', async () => {
     const job = makeJob();
-    job.status = 'succeeded';
+    job.status = 'ready';
     job.providerStatus = 'SUCCESS';
     job.candidates = [{ id: 'cand_1', url: 'https://example.invalid/a.png', seed: 42 }];
     job.selectedCandidateId = 'cand_1';
@@ -239,7 +239,7 @@ describe('JobStore', () => {
     const job = makeJob();
     await store.save(job);
 
-    const updated: AssetJob = { ...job, status: 'succeeded', updatedAt: '2026-04-01T00:00:00.000Z' };
+    const updated: AssetJob = { ...job, status: 'ready', updatedAt: '2026-04-01T00:00:00.000Z' };
     await store.save(updated);
 
     expect(await listDir(storeDir)).toEqual([`${job.id}.json`]);
