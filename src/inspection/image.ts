@@ -245,6 +245,40 @@ export function constantColorImage(
   return { width, height, data };
 }
 
+/**
+ * Multiply an sRGB-ENCODED image by a linear per-channel factor.
+ *
+ * The multiply has to happen in linear light, so this decodes, scales and
+ * re-encodes rather than scaling the stored bytes. Scaling encoded bytes is
+ * correct only for planes whose data IS linear (roughness, metallic, occlusion)
+ * — doing it to albedo would darken wrongly: 50% of sRGB 188 is 94, but 50% of
+ * the LIGHT that 188 represents encodes to 137.
+ *
+ * Exists because `baseColorFactor` was dropped whenever a base-colour texture
+ * was present, so a material tinting a shared atlas exported the untinted
+ * texture and reported "came from real texture data".
+ */
+export function scaleSrgbRgb(
+  image: RasterImage,
+  linearFactor: readonly [number, number, number],
+): RasterImage {
+  const [fr, fg, fb] = linearFactor;
+  if (fr === 1 && fg === 1 && fb === 1) return image;
+  const factors = [fr, fg, fb].map((f) => Math.max(0, f));
+  const out = new Uint8Array(image.data.length);
+  for (let i = 0; i < image.data.length; i += 4) {
+    for (let channel = 0; channel < 3; channel += 1) {
+      const linear = SRGB_TO_LINEAR[image.data[i + channel] ?? 0] ?? 0;
+      const scaled = Math.max(0, Math.min(1, linear * (factors[channel] ?? 1)));
+      out[i + channel] = LINEAR_TO_SRGB[Math.round(scaled * 4095)] ?? 0;
+    }
+    // Alpha is coverage, not colour: it is already linear and must not be
+    // touched by an RGB tint.
+    out[i + 3] = image.data[i + 3] ?? 255;
+  }
+  return { width: image.width, height: image.height, data: out };
+}
+
 export function constantImage(width: number, height: number, value: number): RasterImage {
   assertPixelBudget(width, height);
   const clamped = Math.max(0, Math.min(255, Math.round(value)));

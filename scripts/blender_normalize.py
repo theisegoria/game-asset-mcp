@@ -126,6 +126,11 @@ def clean_geometry(obj, merge_distance, weld=True):
 
     `merge_distance` arrives in LOCAL units — the caller divides the documented
     scene-unit value by the object's world scale.
+
+    `weld=False` means the requested threshold CANNOT BE EXPRESSED (either the
+    caller asked for 0, or division by the world scale put it under Blender's
+    1e-6 floor). Both thresholded operations are skipped in that case; only the
+    unthresholded repair below still runs.
     """
     select_only(obj)
     bpy.ops.object.mode_set(mode="EDIT")
@@ -135,18 +140,33 @@ def clean_geometry(obj, merge_distance, weld=True):
             bpy.ops.mesh.remove_doubles(threshold=merge_distance)
         except AttributeError:
             bpy.ops.mesh.merge(type="BY_DISTANCE")
-    # An EXPLICIT threshold. This was a bare call using Blender's 1e-4 default,
-    # in local space, entirely independent of mergeDistance — so a 2 mm part at
-    # true scale went from 3042 triangles to ZERO even with mergeDistance set to
-    # 0, and the refusal named the one knob that could not fix it. Screws, gems,
-    # bullets, coins and PCB detail are all inside that default.
-    # NOT gated on `weld`. Dissolving zero-area faces and making normals
-    # consistent are repairs in their own right, and skipping the whole function
-    # when the weld threshold was unrepresentable handed back a mesh with its
-    # inverted faces and degenerate triangles intact — reported as
-    # readyToTexture with "geometry and materials were normalized".
-    bpy.ops.mesh.dissolve_degenerate(threshold=max(min(merge_distance, 1.0), 1e-6))
-    # Recalculate outward so a flipped island does not read as a hole.
+
+        # An EXPLICIT threshold. This was a bare call using Blender's 1e-4
+        # default, in local space, entirely independent of mergeDistance — so a
+        # 2 mm part at true scale went from 3042 triangles to ZERO even with
+        # mergeDistance set to 0, and the refusal named the one knob that could
+        # not fix it. Screws, gems, bullets, coins and PCB detail are all inside
+        # that default.
+        #
+        # ⚠ GATED ON `weld`, and this is the whole point. It used to sit outside
+        # the branch clamped as `max(min(merge_distance, 1.0), 1e-6)`, so when
+        # the weld was skipped for being unrepresentable the dissolve ran at
+        # 1e-6 local anyway. That is not an edge case, it is an identity: the
+        # skip fires exactly when merge_distance < 1e-6, and the clamp then
+        # yields exactly 1e-6 — by construction STRICTLY WIDER than what the
+        # caller asked for, by a factor of 1e-6·divisor / mergeDistance.
+        # So the honesty counter fired precisely on the runs where the
+        # protection had failed. Measured: two meshes with byte-identical WORLD
+        # geometry, differing only in how the scale was split between node and
+        # vertices, went to 61 and 1 triangles respectively — the node scale
+        # changing the world result being the exact thing the divisor exists to
+        # prevent — and the husk was reported readyToTexture.
+        bpy.ops.mesh.dissolve_degenerate(threshold=min(merge_distance, 1.0))
+
+    # NOT gated. Recalculating normals outward has no threshold and cannot
+    # delete geometry, and skipping the whole function handed back a mesh with
+    # its inverted faces intact while reporting "geometry and materials were
+    # normalized". A flipped island reads as a hole.
     bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode="OBJECT")
 

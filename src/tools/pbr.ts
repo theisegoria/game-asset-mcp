@@ -23,6 +23,7 @@ import {
   encodePNG,
   extractChannel,
   resizeImage,
+  scaleSrgbRgb,
   type ChannelName,
   type RasterImage,
 } from '../inspection/image.js';
@@ -75,6 +76,51 @@ function scaleChannel(image: RasterImage, factor: number): RasterImage {
     scaled[i + 3] = 255;
   }
   return { width: image.width, height: image.height, data: scaled };
+}
+
+/**
+ * glTF occlusion: `1 + strength * (sampled - 1)`.
+ *
+ * Deliberately NOT a multiply. At strength 0 a multiply gives black — fully
+ * occluded, the exact opposite of "no occlusion" — where the spec's form gives
+ * white. The data is linear, so the arithmetic is correct on stored bytes.
+ */
+function applyOcclusionStrength(image: RasterImage, strength: number): RasterImage {
+  if (strength === 1) return image;
+  const out = new Uint8Array(image.data.length);
+  for (let i = 0; i < image.data.length; i += 4) {
+    const sampled = image.data[i] ?? 255;
+    const value = Math.max(0, Math.min(255, Math.round(255 + strength * (sampled - 255))));
+    out[i] = value;
+    out[i + 1] = value;
+    out[i + 2] = value;
+    out[i + 3] = 255;
+  }
+  return { width: image.width, height: image.height, data: out };
+}
+
+/**
+ * glTF normal mapping: `normalize((rgb * 2 - 1) * vec3(scale, scale, 1))`.
+ *
+ * Only X and Y are scaled; Z is not, and the result is renormalized, so this
+ * cannot be expressed as a channel multiply. Linear data, so no sRGB decode.
+ */
+function applyNormalScale(image: RasterImage, scale: number): RasterImage {
+  if (scale === 1) return image;
+  const out = new Uint8Array(image.data.length);
+  for (let i = 0; i < image.data.length; i += 4) {
+    const x = ((image.data[i] ?? 128) / 255) * 2 - 1;
+    const y = ((image.data[i + 1] ?? 128) / 255) * 2 - 1;
+    const z = ((image.data[i + 2] ?? 255) / 255) * 2 - 1;
+    const sx = x * scale;
+    const sy = y * scale;
+    const length = Math.hypot(sx, sy, z) || 1;
+    out[i] = Math.max(0, Math.min(255, Math.round(((sx / length + 1) / 2) * 255)));
+    out[i + 1] = Math.max(0, Math.min(255, Math.round(((sy / length + 1) / 2) * 255)));
+    out[i + 2] = Math.max(0, Math.min(255, Math.round(((z / length + 1) / 2) * 255)));
+    out[i + 3] = 255;
+  }
+  return { width: image.width, height: image.height, data: out };
 }
 
 export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
@@ -206,6 +252,13 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
           source: options.source,
           ...(options.channel ? { sourceChannel: options.channel } : {}),
           ...(options.sourceTexture ? { sourceTexture: options.sourceTexture } : {}),
+          // Was accepted in the signature, declared on PlaneReceipt, passed by
+          // two call sites, headlined in a release note — and never copied into
+          // the receipt, so every consumer read `undefined`. Optional-property
+          // typing means tsc says nothing. This is the `weldSkipped` defect
+          // verbatim ("created, then dropped by its own consumer"), reappearing
+          // one release later inside the very fix that promised to report it.
+          ...(options.factorApplied !== undefined ? { factorApplied: options.factorApplied } : {}),
           upsampled,
           colorSpace: options.srgb ? 'srgb' : 'linear',
         });
@@ -213,10 +266,24 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
 
       // Albedo — the only sRGB plane here; everything else is data.
       if (baseColor) {
-        await emit('albedo', baseColor, {
+        // texture x factor. This branch dropped the factor entirely while the
+        // metallicRoughness branch below was fixed to apply it — the same
+        // defect, in the same function, in the identical pair of branches, and
+        // the release note claiming "both branches now apply the factor" meant
+        // both branches of metallicRoughness only. A material tinting a shared
+        // atlas texture exported the UNTINTED texture and reported "came from
+        // real texture data": a red-tinted white 8x8 came out pure white.
+        //
+        // Multiplied in LINEAR light, unlike the data channels — see
+        // scaleSrgbRgb. Alpha is left alone; baseColorFactor[3] is opacity and
+        // belongs to the material, not to an albedo plane.
+        const colorFactor = material.getBaseColorFactor();
+        const rgbFactor = [colorFactor[0] ?? 1, colorFactor[1] ?? 1, colorFactor[2] ?? 1] as const;
+        await emit('albedo', scaleSrgbRgb(baseColor, rgbFactor), {
           srgb: true,
           source: 'texture',
           sourceTexture: material.getBaseColorTexture()?.getName() || 'baseColorTexture',
+          factorApplied: rgbFactor,
         });
       } else {
         const factor = material.getBaseColorFactor();
@@ -231,10 +298,17 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
       }
 
       if (normal) {
-        await emit('normal', normal, {
+        // normalScale is part of the surface, not a rendering preference: glTF
+        // defines the shading normal as normalize((rgb*2-1) * vec3(s, s, 1)).
+        // A standalone plane exported without it shades differently from the
+        // source material, which is the whole failure this tool exists to
+        // avoid. Baked in and reported rather than silently dropped.
+        const normalScale = material.getNormalScale();
+        await emit('normal', applyNormalScale(normal, normalScale), {
           srgb: false,
           source: 'texture',
           sourceTexture: material.getNormalTexture()?.getName() || 'normalTexture',
+          factorApplied: normalScale,
         });
       }
 
@@ -277,11 +351,17 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
       }
 
       if (occlusion) {
-        await emit('occlusion', extractChannel(occlusion, 'r'), {
+        // Occlusion does NOT multiply. glTF defines the effective value as
+        // 1 + strength * (sampled - 1), which fades toward unoccluded white as
+        // strength falls, rather than toward black. Dropped entirely until now,
+        // like every other factor in this function.
+        const strength = material.getOcclusionStrength();
+        await emit('occlusion', applyOcclusionStrength(extractChannel(occlusion, 'r'), strength), {
           srgb: false,
           source: 'texture',
           channel: 'r',
           sourceTexture: material.getOcclusionTexture()?.getName() || 'occlusionTexture',
+          factorApplied: strength,
         });
       }
 

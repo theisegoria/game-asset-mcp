@@ -30,6 +30,15 @@ undone somewhere else — the same defect, a second time, one call site over.
 
 ### Verification
 
+> ⚠️ **CORRECTION, added in 0.3.5: the paragraph below was FALSE when
+> published.** An eleventh review reverted all six fixes and found **five of
+> them pinned by nothing** — the suite stayed fully green on each. The
+> discipline described here was genuinely applied to 0.3.3's fixes, then
+> written up as though it had also been applied to 0.3.4's own. It had not.
+> The claim is left standing rather than quietly edited, because a release note
+> that silently rewrites its own verification claim is the same defect one level
+> up. 0.3.5 pins all six and says how each was checked.
+
 Every fix above is pinned by a test that was **run against the reverted code and
 observed to fail**. That check is the point of this release: a mutation sweep
 found all five of 0.3.3's headline fixes could be reverted with the suite still

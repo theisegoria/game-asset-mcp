@@ -815,10 +815,67 @@ describe.skipIf(!haveBlender)('the weld threshold respects world scale', () => {
 
     const receipt = result.receipt as Record<string, number>;
     expect(receipt.largestThresholdDivisor).toBeCloseTo(1000, 0);
+    // (continued below — see the scale-split equivalence test, which is the
+    // assertion that actually holds the destructive half of this in place.)
     // The counter is the ONLY oracle here, and that is stated rather than
     // implied: this fixture's local edges are 0.001, far above even the clamped
     // 1e-6, so the triangle count is 200 with the guard and 200 without it.
     // Geometry cannot see this one — the receipt is what the fix promised.
     expect(receipt.objectsWeldSkippedThresholdUnrepresentable).toBe(1);
   }, 300_000);
+});
+
+/**
+ * The reconciling equation for scale handling.
+ *
+ * Two files whose WORLD-space geometry is byte-for-byte the same, differing
+ * only in how the scale is split between the node transform and the vertex
+ * data. A renderer cannot tell them apart, so normalization must not either.
+ * Asserting the two AGREE is strictly stronger than asserting either hits a
+ * particular triangle count, and it is the shape of every scale defect this
+ * tool has shipped: local-vs-world units, the inverted divisor, and the
+ * unrepresentable-threshold clamp were all "the node scale changed the world
+ * result".
+ *
+ * Measured before the fix: 100 -> 0 for the node-scaled file and 100 -> 100 for
+ * the baked one, at the DEFAULT mergeDistance.
+ */
+describe.skipIf(!haveBlender)('splitting scale between node and vertices changes nothing', () => {
+  const run = async (fixture: string): Promise<Record<string, number>> => {
+    const dir = await tmpDir();
+    const result = await runBlenderScript(
+      packagedScript('blender_normalize.py'),
+      {
+        input: fileURLToPath(new URL(`./fixtures/real/${fixture}.glb`, import.meta.url)),
+        output: path.join(dir, `${fixture}_out.glb`),
+        unwrapMissingUVs: false,
+        cleanGeometry: true,
+        mergeDistance: 0.0001,
+        normalizeMaterials: true,
+        angleLimitDegrees: 66,
+        islandMargin: 0.002,
+      },
+      { timeoutMs: 300_000 },
+    );
+    return result.receipt as Record<string, number>;
+  };
+
+  it('produces the same geometry whether the scale is on the node or baked in', async () => {
+    const [nodeScaled, baked] = await Promise.all([
+      run('tiny_parts_node_scaled'),
+      run('tiny_parts_baked'),
+    ]);
+
+    // Precondition: the fixtures really do differ in the way this test claims.
+    // Without this the equality below could pass by both being unscaled.
+    expect(nodeScaled.largestThresholdDivisor).toBeCloseTo(1000, 0);
+    expect(baked.largestThresholdDivisor).toBeCloseTo(1, 5);
+    expect(nodeScaled.trianglesBefore).toBe(baked.trianglesBefore);
+
+    expect(nodeScaled.trianglesAfter).toBe(baked.trianglesAfter);
+    // And neither is a husk. The zero-geometry refusal downstream would catch
+    // the 100 -> 0 case, but NOT the 61 -> 1 case that first exposed this, so
+    // "not zero" is not the property worth pinning.
+    expect(nodeScaled.trianglesAfter).toBe(nodeScaled.trianglesBefore);
+  }, 600_000);
 });
