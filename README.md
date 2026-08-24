@@ -306,7 +306,7 @@ This is early software, and the parts most likely to drift are marked as such ra
 
 **Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. If they are wrong you will see a 404 that looks exactly like a bad API key, so check the path before the key.
 
-**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 330 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
+**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 347 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
 
 Concretely, these remain **unverified**:
 
@@ -327,6 +327,14 @@ If you are the first person to run this with real keys, expect to fix an endpoin
 Parts of the local pipeline — `inspect_asset`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset` — are additionally checked against real shipped game assets rather than fixtures, because a synthetic fixture and the parser that reads it can share the same mistake and both look green. It has happened here: a wrong glTF magic constant survived a full synthetic suite and was caught only by a real file. The UV-less mesh they use is **committed here** rather than read from a sibling checkout. It used to be read live from the game repo, and when that mesh was repaired these tests went red for a change that was entirely correct — an assertion pinning a fact about a file this project does not control. A test may not depend on content it does not own.
 
 One test spawns the built server through a **symlinked bin** — what `node_modules/.bin` actually contains — and speaks MCP to it, because that is where the entry-point guard failed: the server exited instantly on every install while passing every other test. It symlinks rather than installing, so it cannot catch a packaging regression in `files` or `prepare`; a real `npm install` from GitHub is still a manual check.
+
+### Why the test count is not the point
+
+In 0.3.4 each of the previous release's five headline fixes was reverted one at a time and the suite re-run. **All five survived — every mutant was fully green.** The fixes were real; nothing in the suite was holding them. The cause was a single shared assumption: every stubbed Blender exited 0 and printed exactly one receipt, so none of the subprocess-protocol hardening was observable by any test.
+
+That is worth stating in a README because it is the honest reading of any test count, including this one. A suite certifies the author's assumptions, and a defect that lives *inside* an assumption is invisible to every test written under it. What changed is the discipline, not the number: fixes are now pinned by tests that were **run against the reverted code and observed to fail**, and shared fakes are treated as suspects rather than infrastructure.
+
+The same check caught a bad proof twice in one sitting. Two successive fixtures written to prove a weld-threshold fix reported an *identical* triangle count with the code correct and with it broken, and either would have shipped as evidence. A fixture is not proof until it has been run through both the fixed and the broken code and the two numbers printed.
 
 ---
 
