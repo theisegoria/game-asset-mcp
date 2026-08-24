@@ -27,6 +27,13 @@ export interface MeshBatchItem {
   failures?: string[];
   /** True when a normalized file was produced but did not clear the policy. */
   outputKept?: boolean;
+  /** Triangle count MEASURED from the produced file, not claimed by the normalizer. */
+  trianglesAfterMeasured?: number;
+  /**
+   * True when the normalizer's receipt disagreed with this tool's own reading
+   * of the file it produced. The receipt is a claim; the bytes are evidence.
+   */
+  receiptDisagreed?: boolean;
   /**
    * A reserved file that could NOT be removed after the item failed. It is
    * still on disk, so it is counted in outputsWritten — a cleanup that failed
@@ -67,6 +74,8 @@ export interface MeshBatchDeps {
   access(file: string): Promise<void>;
   mkdir(dir: string): Promise<void>;
   inspect(file: string): Promise<AssetInspection>;
+  /** True when `dir` exists and is a directory. */
+  isDirectory(dir: string): Promise<boolean>;
   /** Repairs `source` into `target` and returns the normalizer's receipt. */
   normalize(source: string, target: string): Promise<Record<string, number>>;
   /**
@@ -157,7 +166,22 @@ async function prepareOne(
   }
 
   const dir = options.outputDir === undefined ? path.dirname(source) : path.resolve(options.outputDir);
-  await deps.mkdir(dir);
+  if (options.outputDir === undefined) {
+    // The source's own directory, which exists by definition.
+    await deps.mkdir(dir);
+  } else if (!(await deps.isDirectory(dir))) {
+    // A caller-named outputDir must ALREADY exist. This used to mkdir -p
+    // unconditionally, so `outputDir: "~/nested/deep/out"` built a literal "~"
+    // tree wherever the server happened to be running — no shell is involved,
+    // so ~ is not expanded. normalize_mesh stopped doing exactly this; the
+    // sibling tool kept doing it.
+    throw invalidInput(
+      `outputDir does not exist: ${dir}. Create it first, or omit outputDir to write beside each ` +
+      'source. A leading ~ is NOT expanded here, and a relative path resolves against the ' +
+      "server's working directory rather than yours.",
+      { outputDir: dir },
+    );
+  }
   const target = await deps.reserveOutputPath(dir, `${path.basename(source, actualExt)}_normalized.glb`);
 
   let receipt: Record<string, number>;
@@ -179,8 +203,10 @@ async function prepareOne(
   item.trianglesAfter = receipt.trianglesAfter ?? 0;
 
   let after;
+  let inspection;
   try {
-    after = evaluateAsset(await deps.inspect(target), options.policy);
+    inspection = await deps.inspect(target);
+    after = evaluateAsset(inspection, options.policy);
   } catch (err) {
     if (!(await release(deps, target))) item.orphanedOutput = target;
     delete item.normalizedPath;
@@ -188,6 +214,19 @@ async function prepareOne(
       meshBatchOrphan: item.orphanedOutput,
     });
   }
+  // The receipt above is the normalizer's CLAIM; `inspection` is this tool's own
+  // measurement of the same bytes. They were both reported and never compared,
+  // so a stub could report "unwrapped: 3" for a mesh the very next line
+  // observed to have no UVs at all. Where they disagree, the measurement wins
+  // and the disagreement is surfaced rather than averaged away.
+  item.trianglesAfterMeasured = inspection.triangleCount;
+  if (receipt.trianglesAfter !== undefined && receipt.trianglesAfter !== inspection.triangleCount) {
+    item.receiptDisagreed = true;
+  }
+  if ((receipt.objectsUnwrapped ?? 0) > 0 && !inspection.hasUVs) {
+    item.receiptDisagreed = true;
+  }
+
   item.passedAfter = after.passed;
   item.status = after.passed ? 'prepared' : 'failed';
   if (!after.passed) {

@@ -36,6 +36,13 @@ export function createMeshBatchDeps(options: {
       await fs.mkdir(dir, { recursive: true });
     },
     inspect: (file) => inspectGltf(file),
+    isDirectory: async (dir) => {
+      try {
+        return (await fs.stat(dir)).isDirectory();
+      } catch {
+        return false;
+      }
+    },
     reserveOutputPath: (dir, fileName) => uniqueFilePath(dir, fileName),
     discardReservation: async (target) => {
       await fs.rm(target, { force: true });

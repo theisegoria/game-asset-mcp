@@ -96,6 +96,9 @@ function harness(opts: {
       async mkdir(dir) {
         mkdirCalls.push(dir);
       },
+      async isDirectory() {
+        return true;
+      },
       async discardReservation(target) {
         discarded.push(target);
         reserved.delete(target);
@@ -277,6 +280,7 @@ describe('where the bytes actually land', () => {
       mkdir: async (dir) => {
         mkdirSync(dir, { recursive: true });
       },
+      isDirectory: async (dir) => existsSync(dir),
       discardReservation: async (target) => {
         rmSync(target, { force: true });
       },
@@ -311,6 +315,9 @@ describe('where the bytes actually land', () => {
   beforeEach(() => {
     work = mkdtempSync(path.join(tmpdir(), 'mesh-batch-'));
     outDir = path.join(work, 'out');
+    // A caller-named outputDir must exist: the batch no longer creates one,
+    // because mkdir -p on an unvalidated path built directory trees anywhere.
+    mkdirSync(outDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -604,4 +611,56 @@ describe('a lying Blender cannot make the batch report success', () => {
     expect(batch.outputsWritten).toBe(0);
     expect(files).toEqual([]);
   }, 120_000);
+});
+
+describe('the batch never builds directory trees either', () => {
+  it('refuses an outputDir that does not exist, creating nothing', async () => {
+    // A mesh that NEEDS repair: one that already passes is skipped before any
+    // output directory is consulted, which is correct — the check only matters
+    // when something is about to be written.
+    const h = harness({ broken: ['/a/one.glb'] });
+    const missing: MeshBatchDeps = { ...h.deps, isDirectory: async () => false };
+    const result = await runMeshBatch(
+      ['/a/one.glb'],
+      { ...OPTIONS, outputDir: '/nowhere/nested/deep' },
+      missing,
+    );
+
+    // normalize_mesh stopped doing this; the sibling tool kept doing it, and
+    // an unexpanded ~ built a literal "~" tree wherever the server was running.
+    expect(result.items[0]?.status).toBe('failed');
+    expect(result.items[0]?.error).toMatch(/outputDir does not exist/);
+    expect(h.mkdirCalls).toEqual([]);
+  });
+
+  it('still creates nothing but writes beside the source when outputDir is omitted', async () => {
+    const h = harness({ broken: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.status).toBe('prepared');
+    expect(h.mkdirCalls).toEqual(['/a']);
+  });
+});
+
+describe('the receipt is a claim; the bytes are the evidence', () => {
+  it('flags a normalizer whose receipt contradicts the produced file', async () => {
+    // The receipt said unwrapped:3 while the tool's own inspection of the same
+    // bytes reported no UVs, and both were reported without ever being
+    // compared — a verdict of "game-ready" resting on the claim.
+    const h = harness({ broken: ['/a/one.glb'], repairFails: true });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.receiptDisagreed).toBe(true);
+    expect(result.items[0]?.status).toBe('failed');
+  });
+
+  it('reports the MEASURED triangle count beside the claimed one', async () => {
+    const h = harness({ broken: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    // The fake receipt claims 1750; the fake inspection reports 100.
+    expect(result.items[0]?.trianglesAfter).toBe(1750);
+    expect(result.items[0]?.trianglesAfterMeasured).toBe(100);
+    expect(result.items[0]?.receiptDisagreed).toBe(true);
+  });
 });

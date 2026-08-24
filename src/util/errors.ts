@@ -1,7 +1,7 @@
 /**
  * Structured errors.
  *
- * Every error carries a machine-readable `code` so an agent can decide what to
+ * Every error carries a machine-readable `error` field so an agent can decide what to
  * do next without parsing prose, and a `retryable` flag so callers never retry
  * something that would double-charge the user.
  */

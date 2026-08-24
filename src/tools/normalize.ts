@@ -20,6 +20,7 @@ import { invalidInput, invalidState } from '../util/errors.js';
 import { MESH_EXTENSIONS } from '../util/local-file.js';
 import { sha256, uniqueFilePath } from '../storage/filesystem.js';
 import { resolveNormalizeTarget } from '../domain/normalize-target.js';
+import { inspectGltf } from '../inspection/gltf.js';
 import { guard, ok, type ToolContext } from './context.js';
 
 export function registerNormalizeTools(server: McpServer, ctx: ToolContext): void {
@@ -291,11 +292,19 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
           `Blender reported success but produced an empty file. The destination ${output} is unchanged.`,
         );
       }
-      if (Buffer.from(bytes.subarray(0, 4)).toString('utf8') !== 'glTF') {
+      // A four-byte magic check is not verification. A 12-byte file beginning
+      // "glTF" passed it, atomically replaced a reviewed 91,088-byte mesh, and
+      // came back readyToTexture:true — staging made that WORSE, because the
+      // replacement is now atomic. The repository already owns the real check
+      // and batch_prepare_meshes already uses it: parse the thing.
+      try {
+        await inspectGltf(staging);
+      } catch (err) {
         await discardStaging();
         await releaseReservation();
         throw invalidState(
-          `Blender produced a file that is not a GLB. The destination ${output} is unchanged.`,
+          `Blender produced a file that does not parse as glTF: ` +
+          `${err instanceof Error ? err.message : String(err)}. The destination ${output} is unchanged.`,
         );
       }
 
@@ -318,13 +327,27 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
       const uvsBefore = Number(receipt.objectsMissingUVsBefore ?? 0);
       const uvsAfter = Number(receipt.objectsMissingUVsAfter ?? 0);
 
+      // The receipt is spread FIRST so measured values win. It used to come
+      // last, so Blender's claim overrode the bytes actually read back — a stub
+      // claiming outputBytes 999999999 was reported verbatim for a 91,088-byte
+      // file, and the same spread could overwrite schema, sourcePath and
+      // outputPath. The whole point of reading the file is that the subprocess
+      // is a claim and the bytes are the evidence; letting the claim land last
+      // discarded the evidence after computing it.
+      //
+      // The receipt's own `input`/`output` are dropped: they name the STAGING
+      // path, which has been renamed away and no longer exists. Every
+      // successful response was returning a key called `output` pointing at a
+      // deleted temporary file.
+      const { input: _receiptInput, output: _receiptOutput, ...receiptFields } = receipt;
+
       return ok({
+        ...receiptFields,
         schema: 'org.gamedebug.mesh_normalize.v1',
         sourcePath: source,
         outputPath: output,
         outputBytes: bytes.byteLength,
         outputSHA256: sha256(bytes),
-        ...receipt,
         /** True only when nothing is left that would block texturing. */
         readyToTexture: uvsAfter === 0,
         nextStep:
