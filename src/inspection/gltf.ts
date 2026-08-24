@@ -162,8 +162,12 @@ export async function inspectGltf(filePath: string): Promise<AssetInspection> {
 
   const root = document.getRoot();
   const geometry = summarizeGeometry(root);
-  const materials = root.listMaterials();
-  const textures = summarizeTextures(root.listTextures());
+  // DRAWN materials and the textures they bind — the same scope as the geometry
+  // counters. Using root.listMaterials() here meant the two halves of one report
+  // described two different files.
+  const materials = geometry.drawnMaterials;
+  const drawnTextures = texturesOf(materials);
+  const textures = summarizeTextures(drawnTextures);
   const bounds = computeBoundingBox(root);
   const pbr = summarizePbr(materials);
 
@@ -281,7 +285,7 @@ export async function inspectGltf(filePath: string): Promise<AssetInspection> {
     undrawnTriangleCount: geometry.undrawnTriangleCount,
     sceneGraphFallback: geometry.sceneGraphFallback,
     materialCount: materials.length,
-    textureCount: root.listTextures().length,
+    textureCount: drawnTextures.length,
     textureResolutions: textures.resolutions,
     boundingBox: bounds.box,
     hasUVs,
@@ -327,6 +331,18 @@ interface GeometrySummary {
    * every mesh was counted once rather than reported as zero geometry.
    */
   sceneGraphFallback: boolean;
+  /**
+   * Materials bound to DRAWN primitives.
+   *
+   * Collected here because it is the same walk. Materials, textures and the PBR
+   * channel summary stayed file-scoped while geometry was narrowed to the drawn
+   * scene, and every consequence was a wrong VERDICT at severity `error`: an
+   * undrawn collision proxy binding a normal map failed `tangents_for_normal_map`
+   * on a model whose drawn mesh correctly needs no tangents, and an undrawn LOD
+   * carrying a base-colour texture made `base_color_texture` pass for a drawn
+   * mesh that has none.
+   */
+  drawnMaterials: Material[];
   missingUv: number;
   missingNormal: number;
   missingTangent: number;
@@ -376,6 +392,7 @@ function summarizeGeometry(root: Root): GeometrySummary {
     undrawnTriangleCount: 0,
     undrawnPrimitiveCount: 0,
     sceneGraphFallback: false,
+    drawnMaterials: [],
     missingTangent: 0,
     nonTriangleCount: 0,
   };
@@ -413,8 +430,30 @@ function summarizeGeometry(root: Root): GeometrySummary {
   // computeBoundingBox already carries exactly this fallback and its comment
   // already calls the shape valid. The two readers disagreeing is what produced
   // the contradiction, so the fallback is mirrored here rather than invented.
-  const nothingDrawn = instancesPerMesh.size === 0;
-  summary.sceneGraphFallback = nothingDrawn && meshes.length > 0;
+  // ⚠ The predicate is "NO SCENE ANYWHERE references a mesh", not "the default
+  // scene draws nothing". Those are different files and the first version
+  // conflated them.
+  //
+  // A Blender export whose default scene holds only a camera and a light, with
+  // the geometry in a second scene, is entirely ordinary — and under the old
+  // predicate every mesh in that second scene was counted as DRAWN. That
+  // restored both defects this narrowing exists to prevent: a three-LOD file
+  // reported 3x what a renderer submits, and an undrawn unwrapped collision
+  // proxy failed `uvs_present` at severity `error` on a model whose drawn mesh
+  // is perfectly unwrapped. The fix worked only when the default scene happened
+  // to be non-empty, which is exactly the case its test covered.
+  const referencedByAnyScene = new Set<string>();
+  for (const scene of root.listScenes()) {
+    const visitAny = (node: ReturnType<typeof scene.listChildren>[number]): void => {
+      const mesh = node.getMesh();
+      if (mesh) {
+        referencedByAnyScene.add(String(mesh.getName() ?? '') + ':' + String(meshes.indexOf(mesh)));
+      }
+      for (const child of node.listChildren()) visitAny(child);
+    };
+    for (const node of scene.listChildren()) visitAny(node);
+  }
+  summary.sceneGraphFallback = referencedByAnyScene.size === 0 && meshes.length > 0;
 
   for (const mesh of meshes) {
     const key = String(mesh.getName() ?? '') + ':' + String(meshes.indexOf(mesh));
@@ -438,6 +477,10 @@ function summarizeGeometry(root: Root): GeometrySummary {
         continue;
       }
       summary.primitiveCount += 1;
+      const material = primitive.getMaterial();
+      if (material && !summary.drawnMaterials.includes(material)) {
+        summary.drawnMaterials.push(material);
+      }
       summary.vertexCount += (primitive.getAttribute('POSITION')?.getCount() ?? 0) * instances;
       summary.triangleCount += trianglesInPrimitive(primitive) * instances;
 
@@ -458,6 +501,30 @@ function summarizeGeometry(root: Root): GeometrySummary {
   }
 
   return summary;
+}
+
+/**
+ * Every distinct texture bound by these materials.
+ *
+ * Deliberately derived from the materials rather than from `root.listTextures()`:
+ * a texture present in the file but bound by nothing is not something a renderer
+ * samples, and it used to raise `texture_resolution` and `power_of_two_textures`
+ * warnings against models whose drawn textures were fine.
+ */
+function texturesOf(materials: Material[]): Texture[] {
+  const seen: Texture[] = [];
+  for (const material of materials) {
+    for (const texture of [
+      material.getBaseColorTexture(),
+      material.getMetallicRoughnessTexture(),
+      material.getNormalTexture(),
+      material.getOcclusionTexture(),
+      material.getEmissiveTexture(),
+    ]) {
+      if (texture && !seen.includes(texture)) seen.push(texture);
+    }
+  }
+  return seen;
 }
 
 function summarizePbr(materials: Material[]): PbrChannels {
