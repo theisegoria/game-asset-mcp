@@ -29,7 +29,14 @@ npx github:theisegoria/game-asset-mcp
 
 # or add it to a project
 npm install github:theisegoria/game-asset-mcp
+
+# pin a specific version — recommended for anything you depend on
+npm install github:theisegoria/game-asset-mcp#v0.3.6
 ```
+
+**Pin the version.** Without a `#vX.Y.Z` suffix both forms resolve to whatever `main` is at that moment, which is not a stable dependency. Every release is tagged, so `#v0.3.6` gets you exactly that tree. Releases are listed at [github.com/theisegoria/game-asset-mcp/releases](https://github.com/theisegoria/game-asset-mcp/releases), each carrying the defects that release fixed.
+
+> ⛔ **Do not pin v0.3.0, v0.3.1 or v0.3.2.** Later review found live paths in those that destroy the mesh you pass them and report success. They are tagged only so the history is complete. Their release pages say so too.
 
 Or work from a clone, which is what you want if you intend to change anything:
 
