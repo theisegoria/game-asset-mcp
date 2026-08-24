@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18.17 is the declared floor; 22 and 24 catch anything that only works
+        # on the newest runtime. No native modules, so this matrix is cheap.
+        node: ['18.17', '22', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        # No API keys are provided, so integration tests are skipped and
+        # reported as skipped. A green run here never implies a live provider
+        # call was made.
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify the server registers its tools
+        # A protocol round-trip, not a version string: a server that fails to
+        # register its tools still starts perfectly happily.
+        run: node scripts/verify-install.mjs
