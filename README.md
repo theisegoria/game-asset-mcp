@@ -6,7 +6,7 @@ Most asset-generation tooling stops at "type a prompt, get a mesh". That is the 
 
 Everything is recorded. Every job keeps the prompt, the seed, the provider model version, the provider task id, and a SHA-256 for every downloaded byte — so six months from now you can still answer "what produced this file?"
 
-The server is provider-agnostic by construction. Today it drives [Tripo](https://platform.tripo3d.ai) for 3D and [Leonardo.Ai](https://app.leonardo.ai) for reference images, behind two small interfaces (`ImageProvider`, `Model3DProvider`). Adding a provider does not change the tool surface. See [docs/architecture.md](docs/architecture.md) for why it is built this way.
+The server is provider-agnostic by construction. Today it drives [Tripo](https://platform.tripo3d.ai) for 3D and [Leonardo.Ai](https://app.leonardo.ai) for reference images and sound effects, behind three small interfaces (`ImageProvider`, `Model3DProvider`, `AudioProvider`). Adding a provider does not change the tool surface. See [docs/architecture.md](docs/architecture.md) for why it is built this way.
 
 ---
 
@@ -35,7 +35,7 @@ npm install game-asset-mcp
 Or build from source:
 
 ```bash
-git clone https://github.com/<your-account>/game-asset-mcp.git
+git clone https://github.com/theisegoria/game-asset-mcp.git
 cd game-asset-mcp
 npm install
 npm run build     # emits dist/
@@ -53,7 +53,7 @@ Copy `.env.example` to `.env`, or set the variables in your MCP client's `env` b
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
 | `TRIPO_API_KEY` | for 3D tools | — | Tripo API key. Create one at [platform.tripo3d.ai](https://platform.tripo3d.ai). |
-| `LEONARDO_API_KEY` | for image tools | — | Leonardo.Ai key with API access enabled. |
+| `LEONARDO_API_KEY` | for image and audio tools | — | Leonardo.Ai key with API access enabled. One key covers both reference images and sound effects. |
 | `ASSET_OUTPUT_DIR` | no | `./assets/generated` | Where assets and job records are written. Relative to the server's working directory. |
 | `ASSET_MAX_DOWNLOAD_BYTES` | no | `268435456` (256 MiB) | Hard ceiling on any single download, enforced while streaming. |
 | `ASSET_HTTP_TIMEOUT_MS` | no | `60000` | Per-request HTTP timeout. |
@@ -127,10 +127,12 @@ The same server, described generically — a stdio child process:
 | `get_asset_job` | No | Polls a job. Maps the provider's status vocabulary onto one normalized lifecycle and keeps the raw status alongside. |
 | `download_asset` | No | Fetches the provider's model, textures and preview renders into your workspace, hashing and recording each file. |
 | `inspect_asset` | No | Reads a downloaded glTF/GLB and reports what is actually in it — meshes, materials, texture channels, sizes. |
+| `extract_pbr_trio` | No | Splits a glTF material into independent albedo, normal and roughness images, de-packing metallicRoughness (roughness = green, metallic = blue). Resamples to an exact size, averaging colour in linear light and data channels directly. |
+| `generate_sound_effect` | **Yes** | Generates a short game sound effect from a description — impacts, weapon reports, UI blips, or a seamless ambience loop. Polls and downloads inline. |
 | `create_game_prop` | **Yes — images only** | The intention-shaped entry point: plain-language request in, asset spec plus reference candidates out. Deliberately stops before the 3D spend so a human or agent picks the reference first. |
 | `list_asset_jobs` | No | Lists known jobs, newest first, as compact summaries. |
 
-Only five tools can cost you money, and each one says so in its description before it is called.
+Only six tools can cost you money, and each one says so in its description before it is called.
 
 ---
 
@@ -167,9 +169,9 @@ One paid call instead of two, and the geometry you already approved comes back u
 
 ## Costs and side effects
 
-**Calls that spend provider credits:** `generate_asset_reference`, `generate_reference_variations`, `create_3d_asset`, `texture_existing_asset`, and the image-generation step inside `create_game_prop`. Nothing else in this server can be charged for.
+**Calls that spend provider credits:** `generate_asset_reference`, `generate_reference_variations`, `create_3d_asset`, `texture_existing_asset`, `generate_sound_effect`, and the image-generation step inside `create_game_prop`. Nothing else in this server can be charged for.
 
-**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`. Poll and download as often as you like.
+**Calls that are free:** `select_reference`, `get_asset_job`, `download_asset`, `inspect_asset`, `list_asset_jobs`, `preview_asset_prompt`, `extract_pbr_trio`. Poll, inspect, split and download as often as you like.
 
 **A credit-consuming POST is never retried automatically.** This is a deliberate, load-bearing rule and it lives in the HTTP layer, not in each call site. When a request that creates a generation task fails — timeout, socket reset, 502 — the client *cannot tell* whether the provider accepted it before the connection broke. Retrying might be free; it might also double-charge you for a mesh you never receive. So it does not retry, the error comes straight back, and the decision to try again is yours. Idempotent reads — status polls, file downloads — retry freely with backoff, because they cost nothing to repeat.
 
@@ -250,6 +252,12 @@ Concretely, these remain **unverified**:
 
 - The Tripo v3 endpoint paths described above.
 - Whether `texture_model` accepts an **uploaded** mesh (`file_token`) or only a mesh produced by a prior Tripo task (`original_model_task_id`). This decides whether you can retexture a model you already own, which is the feature this server exists for. Resolving it costs one HD texture call.
+- **Sound-effect generation is unverified.** Leonardo documents the Sound Effects v2 *request*
+  contract (`model`, `prompt`, `duration` 1-22s, `prompt_influence`, `loop`, `quantity`) but not
+  its response shape or how the finished audio is retrieved. The client reads the generation id
+  and audio URLs from several plausible shapes and throws with the raw payload attached when none
+  match, rather than reporting an empty success. Expect the first real call to need a fix, and
+  please open an issue with the payload shape you saw.
 - The Leonardo model ids in `src/providers/image/leonardo.ts`, which were transcribed from published documentation. Check them against `GET /platformModels`; a stale id fails as an HTTP 400 that reads like a malformed request body. Both `LEONARDO_MODEL_ID` and a per-call `modelId` exist as escape hatches.
 
 If you are the first person to run this with real keys, expect to fix an endpoint path, and please open an issue with what you found.

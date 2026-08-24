@@ -14,7 +14,9 @@ import type { Logger } from '../util/logging.js';
 import type { JobStore } from '../storage/jobs.js';
 import type { ImageProvider } from '../providers/image/types.js';
 import type { Model3DProvider } from '../providers/model3d/types.js';
+import type { AudioProvider } from '../providers/audio/types.js';
 import { LeonardoProvider } from '../providers/image/leonardo.js';
+import { LeonardoAudioProvider } from '../providers/audio/leonardo.js';
 import { TripoProvider } from '../providers/model3d/tripo.js';
 import { describeError } from '../util/errors.js';
 
@@ -24,6 +26,7 @@ export interface ToolContext {
   store: JobStore;
   imageProvider(): ImageProvider;
   model3dProvider(): Model3DProvider;
+  audioProvider(): AudioProvider;
 }
 
 export function createToolContext(params: {
@@ -37,6 +40,7 @@ export function createToolContext(params: {
   // first use rather than at startup.
   let image: ImageProvider | undefined;
   let model3d: Model3DProvider | undefined;
+  let audio: AudioProvider | undefined;
 
   return {
     config,
@@ -59,6 +63,17 @@ export function createToolContext(params: {
         });
       }
       return model3d;
+    },
+    audioProvider(): AudioProvider {
+      if (!audio) {
+        // Same credential as the image provider — one Leonardo account, two
+        // modalities — so a user who configured images gets audio for free.
+        audio = new LeonardoAudioProvider({
+          apiKey: requireLeonardoKey(config),
+          timeoutMs: config.httpTimeoutMs,
+        });
+      }
+      return audio;
     },
   };
 }

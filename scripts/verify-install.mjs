@@ -31,6 +31,7 @@ const EXPECTED_TOOLS = [
   'download_asset',
   'inspect_asset',
   'extract_pbr_trio',
+  'generate_sound_effect',
 ];
 
 async function main() {
@@ -58,6 +59,7 @@ async function main() {
     'create_3d_asset',
     'texture_existing_asset',
     'create_game_prop',
+    'generate_sound_effect',
   ]);
 
   console.log(`connected. ${found.length} tools advertised:\n`);

@@ -67,13 +67,27 @@ export interface Model3DGenerationRecord {
   metadata?: Record<string, unknown>;
 }
 
+export interface AudioGenerationRecord {
+  provider: string;
+  model: string;
+  prompt: string;
+  durationSeconds?: number;
+  loop?: boolean;
+  quantity?: number;
+  promptInfluence?: number;
+  providerGenerationId?: string;
+  requestedAt: string;
+  creditCost?: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface DownloadedFile {
   path: string;
   bytes: number;
   sha256: string;
   contentType?: string;
   /** What this file is, for callers that do not want to guess from extension. */
-  kind: 'model' | 'texture' | 'reference' | 'preview' | 'metadata';
+  kind: 'model' | 'texture' | 'reference' | 'preview' | 'metadata' | 'audio';
 }
 
 export interface AssetJob {
@@ -97,6 +111,7 @@ export interface AssetJob {
   selectedCandidateId?: string;
 
   model3d?: Model3DGenerationRecord;
+  audio?: AudioGenerationRecord;
 
   files: DownloadedFile[];
   /** Directory holding this asset's workspace, relative to the output root. */

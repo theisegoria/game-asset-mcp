@@ -23,6 +23,7 @@ import { registerJobTools } from './tools/jobs.js';
 import { registerDownloadTools } from './tools/downloads.js';
 import { registerInspectionTools } from './tools/inspection.js';
 import { registerPbrTools } from './tools/pbr.js';
+import { registerAudioTools } from './tools/audio.js';
 import { registerWorkflowTools } from './tools/workflows.js';
 
 const SERVER_NAME = 'game-asset-mcp';
@@ -44,6 +45,7 @@ export async function main(): Promise<void> {
   registerDownloadTools(server, ctx);
   registerInspectionTools(server, ctx);
   registerPbrTools(server, ctx);
+  registerAudioTools(server, ctx);
 
   const providers = configuredProviders(config);
   logger.info('game-asset-mcp starting', {
