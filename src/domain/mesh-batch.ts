@@ -115,6 +115,13 @@ function errorIds(report: ReturnType<typeof evaluateAsset>): string[] {
  */
 async function release(deps: MeshBatchDeps, target: string): Promise<boolean> {
   try {
+    // Unconditional here, DELIBERATELY, unlike normalize_mesh. A review argued
+    // the guard should be shared, but the two tools own their targets
+    // differently: this one reserves by exclusive create and has no overwrite
+    // path, so a concurrent call always lands on a `_2` name and the bytes at
+    // this path are always our own. Deleting our own failed output is right;
+    // refusing to would leave garbage from every failed run. normalize_mesh
+    // needs the guard because it CAN target a file it did not create.
     await deps.discardReservation(target);
     return true;
   } catch {

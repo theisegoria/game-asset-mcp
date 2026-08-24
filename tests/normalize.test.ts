@@ -706,7 +706,7 @@ describe('the verdict comes from the file, not the receipt', () => {
     const result = await normalizeWith(
       `out=$(printf '%s' "$*" | sed -n 's/.*"output": *"\\([^"]*\\)".*/\\1/p')\n` +
       `node -e 'const j=${JSON.stringify(emptyGltf)};` +
-      `const b=Buffer.from(j);const p=(4-b.length%4)%4;const json=Buffer.concat([b,Buffer.alloc(p,32)]);` +
+      `const b=Buffer.from(j);const p=(4 - b.length % 4) % 4;const json=Buffer.concat([b,Buffer.alloc(p,32)]);` +
       `const h=Buffer.alloc(12);h.write("glTF",0);h.writeUInt32LE(2,4);h.writeUInt32LE(12+8+json.length,8);` +
       `const ch=Buffer.alloc(8);ch.writeUInt32LE(json.length,0);ch.write("JSON",4);` +
       `require("fs").writeFileSync(process.argv[1],Buffer.concat([h,ch,json]))' "$out"\n` +
@@ -716,5 +716,37 @@ describe('the verdict comes from the file, not the receipt', () => {
 
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toMatch(/no drawable geometry/);
+  }, 120_000);
+
+  it('leaves the destination byte-identical when it refuses a husk', async () => {
+    // The check used to run AFTER the rename, so the destination was atomically
+    // replaced by a husk and the caller was told "The destination is
+    // unchanged" — a false reassurance, which is worse than no check, because
+    // nobody re-checks. The previous test asserted the MESSAGE and never
+    // stat'd the file the message is about.
+    const dir = await tmpDir();
+    const source = path.join(dir, 'src.glb');
+    await fs.copyFile(uvlessMesh, source);
+    const victim = path.join(dir, 'reviewed.glb');
+    await fs.copyFile(uvlessMesh, victim);
+    const before = await fs.readFile(victim);
+
+    const emptyGltf = JSON.stringify({ asset: { version: '2.0' }, scenes: [{ nodes: [] }], scene: 0, nodes: [] });
+    const result = await normalizeWith(
+      `out=$(printf '%s' "$*" | sed -n 's/.*"output": *"\\([^"]*\\)".*/\\1/p')\n` +
+      `node -e 'const j=${JSON.stringify(emptyGltf)};` +
+      `const b=Buffer.from(j);const p=(4 - b.length % 4) % 4;const json=Buffer.concat([b,Buffer.alloc(p,32)]);` +
+      `const h=Buffer.alloc(12);h.write("glTF",0);h.writeUInt32LE(2,4);h.writeUInt32LE(12+8+json.length,8);` +
+      `const ch=Buffer.alloc(8);ch.writeUInt32LE(json.length,0);ch.write("JSON",4);` +
+      `require("fs").writeFileSync(process.argv[1],Buffer.concat([h,ch,json]))' "$out"\n` +
+      `echo 'NORMALIZE_RECEIPT={"input":"x","output":"y","meshObjects":1,"trianglesAfter":0,` +
+      `"objectsMissingUVsAfter":0,"blenderVersion":"stub"}'`,
+      { outputPath: victim, overwrite: true },
+    );
+
+    expect(result.isError).toBe(true);
+    // The claim and the filesystem must agree.
+    expect(JSON.stringify(result.content)).toMatch(/unchanged/);
+    expect(await fs.readFile(victim)).toEqual(before);
   }, 120_000);
 });

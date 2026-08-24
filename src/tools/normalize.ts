@@ -325,6 +325,20 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         );
       }
 
+      // BEFORE the rename. This check used to run after it, so the destination
+      // was atomically replaced by a husk and the caller was then told "The
+      // destination is unchanged" — a false reassurance, which is worse than no
+      // check at all because nobody re-checks. Measured 70,492 bytes to 224.
+      if (produced.triangleCount === 0) {
+        await discardStaging();
+        await releaseReservation();
+        throw invalidState(
+          'normalization produced a file with no drawable geometry (0 triangles). Common causes: ' +
+          'mergeDistance too large for this mesh, or a mesh whose parts are smaller than the ' +
+          `degenerate-face threshold. The destination ${output} is unchanged.`,
+        );
+      }
+
       // Verified, so it may now replace the destination. rename is atomic
       // within a filesystem: a reader sees the old file or the new one, never a
       // half-written one, and a crash here cannot leave a truncated mesh.
@@ -342,18 +356,6 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
 
       const receipt = result.receipt as Record<string, number | string>;
       const uvsBefore = Number(receipt.objectsMissingUVsBefore ?? 0);
-
-      // A mesh that normalized down to nothing is not a normalized mesh. This
-      // is measured, not claimed: the receipt can say whatever it likes.
-      if (produced.triangleCount === 0) {
-        await discardStaging();
-        await releaseReservation();
-        throw invalidState(
-          `normalization produced a file with no drawable geometry (0 triangles). ` +
-          `This usually means mergeDistance was too large for the mesh's coordinate space. ` +
-          `The destination ${output} is unchanged.`,
-        );
-      }
 
       // The receipt is spread FIRST so measured values win. It used to come
       // last, so Blender's claim overrode the bytes actually read back — a stub

@@ -83,36 +83,36 @@ def select_only(obj):
     bpy.context.view_layer.objects.active = obj
 
 
-def apply_object_scale(obj):
-    """Bake the object's scale into its vertices, returning the factor applied.
+def world_threshold_divisor(obj):
+    """How much to DIVIDE a world-space threshold by to express it locally.
 
-    mergeDistance is documented as "scene units" and was applied to LOCAL vertex
-    coordinates, while every size this pipeline reports — boundingBox.sizeMeters
-    and the min/max dimension policies — is world space, measured after node
-    transforms. On an asset whose node carries a scale, those are different
-    units by exactly that factor.
+    mergeDistance is documented as scene units, and welding happens on LOCAL
+    vertex coordinates, so the two differ by the object's world scale. The first
+    attempt at this baked the scale into the vertices with transform_apply. That
+    was wrong three ways, all reproduced: it read obj.scale, so a scale on a
+    PARENT node was missed entirely and 92% of a mesh was still destroyed at
+    defaults; it raised "Cannot apply to a multi user" on instanced meshes,
+    turning a working input into a hard failure; and it mutated geometry to fix
+    a units problem.
 
-    This is not exotic: the reference mesh committed to this repository has a
-    node scale of 100, so the default 0.0001 acted as 1 CENTIMETRE on a 2.2 m
-    weapon. Assets authored in centimetres or millimetres and scaled at the node
-    are the ordinary output of Blender, Maya and FBX round-trips. Measured at
-    defaults, a 0.69 m prop lost 96% of its triangles and was still reported
-    ready to texture.
-
-    Baking the scale makes local and world the same units, so the documented
-    meaning of mergeDistance becomes the true one. World-space geometry is
-    unchanged by this: it moves the same factor from the node to the vertices.
+    Reading the WORLD scale and dividing the threshold fixes all three: parents
+    are included because matrix_world is the full chain, nothing is mutated, and
+    instancing is untouched. min() of the axes is deliberate — welding is
+    isotropic, so the smallest axis decides what is safe to merge; taking the
+    largest would over-weld a non-uniformly scaled mesh on its thin axis.
     """
-    scale = tuple(obj.scale)
-    if abs(scale[0] - 1.0) < 1e-9 and abs(scale[1] - 1.0) < 1e-9 and abs(scale[2] - 1.0) < 1e-9:
-        return 1.0
-    select_only(obj)
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    return max(abs(scale[0]), abs(scale[1]), abs(scale[2]))
+    scale = obj.matrix_world.to_scale()
+    smallest = min(abs(scale[0]), abs(scale[1]), abs(scale[2]))
+    # A degenerate or zero scale cannot divide anything; leave the threshold be.
+    return smallest if smallest > 1e-12 else 1.0
 
 
 def clean_geometry(obj, merge_distance):
-    """Weld coincident vertices and dissolve zero-area faces."""
+    """Weld coincident vertices and dissolve zero-area faces.
+
+    `merge_distance` arrives in LOCAL units — the caller divides the documented
+    scene-unit value by the object's world scale.
+    """
     select_only(obj)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
@@ -120,7 +120,12 @@ def clean_geometry(obj, merge_distance):
         bpy.ops.mesh.remove_doubles(threshold=merge_distance)
     except AttributeError:
         bpy.ops.mesh.merge(type="BY_DISTANCE")
-    bpy.ops.mesh.dissolve_degenerate()
+    # An EXPLICIT threshold. This was a bare call using Blender's 1e-4 default,
+    # in local space, entirely independent of mergeDistance — so a 2 mm part at
+    # true scale went from 3042 triangles to ZERO even with mergeDistance set to
+    # 0, and the refusal named the one knob that could not fix it. Screws, gems,
+    # bullets, coins and PCB detail are all inside that default.
+    bpy.ops.mesh.dissolve_degenerate(threshold=max(merge_distance, 1e-12))
     # Recalculate outward so a flipped island does not read as a hole.
     bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -200,18 +205,20 @@ def main():
     renamed_total = 0
     opaque_total = 0
 
-    scales_applied = 0
-    largest_scale_applied = 1.0
+    scaled_objects = 0
+    largest_divisor = 1.0
+    requested_merge = float(options.get("mergeDistance", 0.0001))
     for obj in objects:
+        # Computed for EVERY object, not only when welding: unwrap reads it too,
+        # and gating it on cleanGeometry meant turning welding off silently
+        # degraded UV texel density by 2.8x on a non-uniformly scaled mesh.
+        divisor = world_threshold_divisor(obj)
+        if divisor != 1.0:
+            scaled_objects += 1
+            largest_divisor = max(largest_divisor, divisor)
+        local_merge = requested_merge / divisor
         if options.get("cleanGeometry", True):
-            # Bake the node scale FIRST, so mergeDistance means what the tool
-            # documents it to mean — scene units — rather than local units that
-            # differ from world by the node's scale factor.
-            factor = apply_object_scale(obj)
-            if factor != 1.0:
-                scales_applied += 1
-                largest_scale_applied = max(largest_scale_applied, factor)
-            clean_geometry(obj, float(options.get("mergeDistance", 0.0001)))
+            clean_geometry(obj, local_merge)
             cleaned += 1
         # Only unwrap what is actually missing UVs: re-unwrapping an authored
         # layout would silently destroy an artist's work.
@@ -277,8 +284,13 @@ def main():
         "objectsDecimated": decimated,
         "materialsRenamed": renamed_total,
         "materialsForcedOpaque": opaque_total,
-        "objectScalesApplied": scales_applied,
-        "largestScaleApplied": largest_scale_applied,
+        # Reported honestly: these describe the THRESHOLD adjustment, and no
+        # longer claim geometry was mutated, because it is not. The previous
+        # counters were also provably false for a scale like [-1, 1, 1], whose
+        # largest component is 1.
+        "objectsWithNonUnitWorldScale": scaled_objects,
+        "largestThresholdDivisor": largest_divisor,
+        "mergeDistanceRequestedSceneUnits": requested_merge,
         "outputBytes": exported_bytes,
         "blenderVersion": bpy.app.version_string,
     }

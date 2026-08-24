@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.1
+
+**0.3.0 should not be used.** A review of that release found four live paths
+that still destroyed data, three of them introduced by 0.3.0's own fixes.
+
+- **`dissolve_degenerate` ran with Blender's hardcoded 1e-4 threshold**, in local
+  space, entirely independent of `mergeDistance`. A mesh of 2 mm parts at true
+  scale went from 3,042 triangles to **zero** even with `mergeDistance: 0` — and
+  the refusal named the one setting that could not fix it. Screws, gems, coins
+  and PCB detail all sit inside that default. The threshold is now explicit.
+- **The zero-geometry refusal fired *after* the rename.** The destination was
+  atomically replaced by a husk and the caller was told "The destination is
+  unchanged" — a false reassurance, which is worse than no check, because nobody
+  re-checks. Measured: 70,492 bytes to 224. The check now runs before the rename.
+- **Scale is no longer baked into geometry.** 0.3.0 applied `transform_apply`,
+  which read the object's own scale and so missed a scale on a **parent** node —
+  92% of a mesh was still destroyed at defaults — and which raised "Cannot apply
+  to a multi user" on **instanced** meshes, turning a working input into a hard
+  failure. The world scale is now read and the *threshold* divided by it: parents
+  are included, instancing is untouched, and no geometry is mutated.
+- **The threshold adjustment applies whether or not `cleanGeometry` is on.** It
+  sat inside that branch, so turning welding off silently degraded UV texel
+  density by 2.8x on a non-uniformly scaled mesh.
+- The receipt's scale counters were provably false for a scale like `[-1, 1, 1]`.
+  They now describe the threshold adjustment, which is what actually happens.
+
 ## 0.3.0
 
 Seven rounds of adversarial review, each of which found a real way this server
