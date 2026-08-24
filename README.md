@@ -14,30 +14,24 @@ The server is provider-agnostic by construction. Today it drives [Tripo](https:/
 
 - **Node.js >= 18.17** — the server uses global `fetch`, `FormData`, `Blob` and `AbortController`.
 - No native modules, no build toolchain, no database. It runs anywhere Node runs.
-- **Optional:** a local [Blender](https://www.blender.org/download/) 4.x+ install enables `normalize_mesh`. Every other tool works without it; the tool refuses with instructions when it is absent. On macOS Blender is not on `PATH`, so set `BLENDER_PATH` or rely on the bundled `/Applications/Blender.app` default.
+- **Optional:** a local [Blender](https://www.blender.org/download/) 4.x+ install enables the repair half of `normalize_mesh` and `batch_prepare_meshes`. Every other tool works without it; the tool refuses with instructions when it is absent. On macOS Blender is not on `PATH`, so set `BLENDER_PATH` or rely on the bundled `/Applications/Blender.app` default.
 - At least one provider API key (see [Configuration](#configuration)). One is enough — they are validated lazily.
 
 ---
 
 ## Installation
 
-> **Not on npm yet.** Install straight from GitHub — the commands below are the ones that work today. Once the package is published, `npx @theisegoria/game-asset-mcp` will work too; until then it would only give you a 404.
-
-Run it without installing anything permanently:
+Install straight from GitHub. Both forms build the TypeScript during install, so you get a runnable `game-asset-mcp` binary either way.
 
 ```bash
+# run it without installing anything permanently
 npx github:theisegoria/game-asset-mcp
-```
 
-Or install it into a project:
-
-```bash
+# or add it to a project
 npm install github:theisegoria/game-asset-mcp
 ```
 
-Both build the TypeScript on install, so you get a runnable `game-asset-mcp` binary either way.
-
-Or build from source:
+Or work from a clone, which is what you want if you intend to change anything:
 
 ```bash
 git clone https://github.com/theisegoria/game-asset-mcp.git
@@ -46,6 +40,8 @@ npm install
 npm run build     # emits dist/
 node dist/server.js
 ```
+
+> **Not on npm.** There is no `npm install @theisegoria/game-asset-mcp` — the package is distributed from GitHub only. Anything telling you otherwise is out of date.
 
 The server speaks MCP over **stdio**. Started directly in a terminal it will simply sit there waiting for a client to talk to it — that is correct behaviour, not a hang. Logs go to stderr; stdout belongs to the protocol.
 
@@ -156,6 +152,37 @@ Only nine tools can cost you money, and each one says so in its description befo
 
 ---
 
+## The free local half (no API keys, no network)
+
+Eleven of the twenty tools never contact a provider, never spend a credit, and never touch the network. If you already have meshes, this is the whole product and you can stop reading at the end of this section.
+
+| Tool | What it answers |
+| --- | --- |
+| `inspect_asset` | What is actually inside this glTF? Meshes, materials, texture channels, sizes, bounds. |
+| `validate_game_asset` | Is this shippable? Pass/fail with per-check reasons and every threshold overridable. |
+| `normalize_mesh` | Repair it: generate UVs for objects that have none, weld coincident vertices, dissolve degenerate triangles, name materials. |
+| `batch_prepare_meshes` | The same, across a whole folder, with a per-item verdict. |
+| `extract_pbr_trio` | Split a material into albedo / normal / roughness images, de-packing metallicRoughness correctly. |
+
+The usual loop is **validate → normalize → validate again**, so the repair is proven rather than assumed:
+
+```
+validate_game_asset  modelPath=/art/crate.glb
+   → fails: uvs_present   ("nothing can texture this")
+normalize_mesh       modelPath=/art/crate.glb  outputDir=/art/out
+   → objectsUnwrapped=2, triangles 3183 → 1750
+validate_game_asset  modelPath=/art/out/crate_normalized.glb
+   → passes
+```
+
+`batch_prepare_meshes` runs that loop over a list and reports each item separately. Meshes that already pass are left untouched rather than rewritten, one bad file never stops the run, and two sources that share a basename get distinct outputs instead of overwriting each other.
+
+**Missing UVs is the defect worth knowing about.** A mesh with no UV coordinates cannot be textured by anything — not this tool, not a provider, not you by hand. Generators and marketplace assets ship without them routinely. `validate_game_asset` names it first for that reason.
+
+**Normalization needs Blender** (4.x+). Without it the tools still validate and report; they simply cannot repair. On macOS Blender is not on `PATH`, so either set `BLENDER_PATH` or rely on the bundled `/Applications/Blender.app` default.
+
+---
+
 ## Example workflow
 
 ### Full pipeline: idea to inspected asset
@@ -232,6 +259,15 @@ assets/generated/
 
 Every error carries a machine-readable `code` and a `retryable` flag, so an agent can decide what to do next without parsing prose.
 
+**The server starts and immediately exits — the client says only "connection closed".**
+Three known causes, and the server now names the first two itself rather than dying silently.
+- **A relative `ASSET_OUTPUT_DIR`.** It resolves against the *server's* working directory, which your MCP client chooses — several spawn from `/`, where `assets/generated` becomes `/assets` and cannot be created. **Use an absolute path.** The refusal names the resolved path and the working directory it came from.
+- **A workspace the process cannot write to.** Same refusal, different errno.
+- **A stale build.** If `dist/` predates a change to the entry point, rebuild. `npm run verify` builds and then completes a real MCP handshake, which is the fastest way to tell a broken server from a broken client config.
+
+**`normalize_mesh` or `batch_prepare_meshes` refuses with "Blender not found".**
+There is no local Blender on `PATH`. On macOS the app bundle is not on `PATH` even when Blender is installed — set `BLENDER_PATH` to the executable inside the bundle. `batch_prepare_meshes` degrades rather than failing: it still validates every mesh and reports what *would* need repairing.
+
 **`CONFIG_MISSING` — missing credential.**
 The tool you called needs a provider you have not configured. The message names the exact environment variable. Set it in your MCP client's `env` block and restart the client — a `.env` file is only read if the server's working directory is where you think it is, which under an MCP client it usually is not.
 
@@ -267,7 +303,7 @@ This is early software, and the parts most likely to drift are marked as such ra
 
 **Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. The paths are the **first** thing the live smoke test checks, because a wrong path returns a 404 that looks exactly like a bad API key.
 
-**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 254 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
+**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 279 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
 
 Concretely, these remain **unverified**:
 
@@ -285,7 +321,7 @@ If you are the first person to run this with real keys, expect to fix an endpoin
 
 **What *is* verified:** `npm run verify` builds the server, starts it over stdio with a real MCP client, completes the handshake and asserts all twenty tools register. That is a protocol round-trip, not a version string — a server that fails to register its tools still starts perfectly happily.
 
-Parts of the local pipeline — `inspect_asset`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset` — are additionally checked against real shipped game assets rather than fixtures, because a synthetic fixture and the parser that reads it can share the same mistake and both look green. It has happened here: a wrong glTF magic constant survived a full synthetic suite and was caught only by a real file. **Those four tests are environment-gated** and skip on any machine without the private asset checkout beside this one, so a stranger sees `250 passed | 4 skipped`, not 254. The skip is reported, never silently green.
+Parts of the local pipeline — `inspect_asset`, `extract_pbr_trio`, `normalize_mesh`, `validate_game_asset` — are additionally checked against real shipped game assets rather than fixtures, because a synthetic fixture and the parser that reads it can share the same mistake and both look green. It has happened here: a wrong glTF magic constant survived a full synthetic suite and was caught only by a real file. The UV-less mesh they use is **committed here** rather than read from a sibling checkout. It used to be read live from the game repo, and when that mesh was repaired these tests went red for a change that was entirely correct — an assertion pinning a fact about a file this project does not control. A test may not depend on content it does not own.
 
 One test spawns the built server through a **symlinked bin** — what `node_modules/.bin` actually contains — and speaks MCP to it, because that is where the entry-point guard failed: the server exited instantly on every install while passing every other test. It symlinks rather than installing, so it cannot catch a packaging regression in `files` or `prepare`; a real `npm install` from GitHub is still a manual check.
 

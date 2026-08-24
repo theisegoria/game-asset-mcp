@@ -1,0 +1,31 @@
+{
+  "schema": "evo.vendored_asset.v2",
+  "asset": "assets/vendored/models/mp_weapons/alien_needler.glb",
+  "sha256": "066a677cf1a4d053eefcd94830151cdbb18374a575288c5d972c098b79d7b295",
+  "bytes": 91088,
+  "license_type": "CC0-1.0",
+  "license_note": "public domain dedication",
+  "commercial_use": true,
+  "attribution_required": false,
+  "attribution": "",
+  "author": "Quaternius",
+  "source_name": "Poly Pizza / Quaternius",
+  "source_url": "https://poly.pizza/m/NHYaHnTNIM",
+  "origin_url": "",
+  "origin_file": "/private/tmp/mp_asset_batch/alien_smg.glb",
+  "consumer": "Alien needler and spike-launcher silhouette source",
+  "entitlement": {
+    "product_name": "Scifi Smg",
+    "product_id": "NHYaHnTNIM",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "licensee": "",
+    "acquired_on": "2026-08-20",
+    "evidence": "",
+    "seat_scope": "public",
+    "contractor_sharing": "allowed",
+    "ai_use": "allowed"
+  },
+  "source_format": "GLB",
+  "vendored_on": "2026-08-20",
+  "vendored_by": "tools/vendor_asset_intake.py"
+}

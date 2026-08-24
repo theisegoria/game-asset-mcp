@@ -19,6 +19,7 @@ import { findBlender, packagedScript, runBlenderScript } from '../util/blender.j
 import { invalidInput, invalidState } from '../util/errors.js';
 import { MESH_EXTENSIONS } from '../util/local-file.js';
 import { sha256, uniqueFilePath } from '../storage/filesystem.js';
+import { resolveNormalizeTarget } from '../domain/normalize-target.js';
 import { guard, ok, type ToolContext } from './context.js';
 
 export function registerNormalizeTools(server: McpServer, ctx: ToolContext): void {
@@ -41,6 +42,14 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
           .string()
           .optional()
           .describe('Where to write the GLB. Defaults to <input>_normalized.glb beside the source.'),
+        overwrite: z
+          .boolean()
+          .default(false)
+          .describe(
+            'Allow an explicit outputPath to replace an existing file. Off by default: a silent ' +
+            'overwrite destroys a result you may already have reviewed. Never permits writing ' +
+            'over the input mesh.',
+          ),
         unwrapMissingUVs: z
           .boolean()
           .default(true)
@@ -105,9 +114,27 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         ? path.dirname(path.resolve(args.outputPath))
         : path.dirname(source);
       await fs.mkdir(outputDir, { recursive: true });
-      const output = args.outputPath
-        ? path.resolve(args.outputPath)
-        : await uniqueFilePath(outputDir, `${path.basename(source, ext)}_normalized.glb`);
+
+      const output = await resolveNormalizeTarget(
+        {
+          source,
+          sourceExtension: ext,
+          outputDir,
+          outputPath: args.outputPath,
+          overwrite: args.overwrite,
+        },
+        {
+          exists: async (target) => {
+            try {
+              await fs.access(target);
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          reserve: (dir, fileName) => uniqueFilePath(dir, fileName),
+        },
+      );
 
       const result = await runBlenderScript(
         packagedScript('blender_normalize.py'),

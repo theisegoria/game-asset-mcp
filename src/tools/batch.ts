@@ -17,6 +17,50 @@ import { runMeshBatch, type MeshBatchDeps } from '../domain/mesh-batch.js';
 import { packagedScript, runBlenderScript, findBlender } from '../util/blender.js';
 import { guard, ok, type ToolContext } from './context.js';
 
+/**
+ * The real dependencies, built where a test can reach them.
+ *
+ * This used to be an object literal inside the tool handler, unreachable from
+ * the suite: a mutant that replaced the name reservation with a plain path join
+ * — reintroducing the silent-overwrite defect in full — passed lint, typecheck
+ * and every one of the tests. The wiring is the part that was wrong once, so
+ * the wiring is what needs to be reachable.
+ */
+export function createMeshBatchDeps(options: {
+  blenderAvailable: boolean;
+  timeoutMs: number;
+}): MeshBatchDeps {
+  return {
+    access: (file) => fs.access(file),
+    mkdir: async (dir) => {
+      await fs.mkdir(dir, { recursive: true });
+    },
+    inspect: (file) => inspectGltf(file),
+    reserveOutputPath: (dir, fileName) => uniqueFilePath(dir, fileName),
+    discardReservation: async (target) => {
+      await fs.rm(target, { force: true });
+    },
+    normalize: async (source, target) => {
+      const result = await runBlenderScript(
+        packagedScript('blender_normalize.py'),
+        {
+          input: source,
+          output: target,
+          unwrapMissingUVs: true,
+          cleanGeometry: true,
+          mergeDistance: 0.0001,
+          normalizeMaterials: true,
+          angleLimitDegrees: 66,
+          islandMargin: 0.002,
+        },
+        { timeoutMs: options.timeoutMs },
+      );
+      return result.receipt as Record<string, number>;
+    },
+    blenderAvailable: options.blenderAvailable,
+  };
+}
+
 export function registerBatchTools(server: McpServer, ctx: ToolContext): void {
   server.registerTool(
     'batch_prepare_meshes',
@@ -70,32 +114,10 @@ export function registerBatchTools(server: McpServer, ctx: ToolContext): void {
         ctx.logger.warn('batch running in report-only mode: Blender not found');
       }
 
-      const deps: MeshBatchDeps = {
-        access: (file) => fs.access(file),
-        mkdir: async (dir) => {
-          await fs.mkdir(dir, { recursive: true });
-        },
-        inspect: (file) => inspectGltf(file),
-        reserveOutputPath: (dir, fileName) => uniqueFilePath(dir, fileName),
-        normalize: async (source, target) => {
-          const result = await runBlenderScript(
-            packagedScript('blender_normalize.py'),
-            {
-              input: source,
-              output: target,
-              unwrapMissingUVs: true,
-              cleanGeometry: true,
-              mergeDistance: 0.0001,
-              normalizeMaterials: true,
-              angleLimitDegrees: 66,
-              islandMargin: 0.002,
-            },
-            { timeoutMs: args.timeoutSecondsPerItem * 1000 },
-          );
-          return result.receipt as Record<string, number>;
-        },
+      const deps = createMeshBatchDeps({
         blenderAvailable,
-      };
+        timeoutMs: args.timeoutSecondsPerItem * 1000,
+      });
 
       const batch = await runMeshBatch(
         args.modelPaths,

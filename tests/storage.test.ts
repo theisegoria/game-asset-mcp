@@ -295,3 +295,24 @@ describe('JobStore', () => {
     await expect(store.delete(job.id)).resolves.toBeUndefined();
   });
 });
+
+describe('safeJoin distinguishes a .. segment from a .. prefix', () => {
+  it('refuses a real escape', () => {
+    expect(() => safeJoin('/ws', '../outside.glb')).toThrow(/outside the asset workspace/);
+    expect(() => safeJoin('/ws', '..')).toThrow(/outside the asset workspace/);
+    expect(() => safeJoin('/ws', 'a/../../b.glb')).toThrow(/outside the asset workspace/);
+  });
+
+  it('accepts a filename that merely BEGINS with dots', () => {
+    // `..foo.glb` is a legal name, and `.._normalized.glb` is what this
+    // project's own normalizer derives from a mesh called `...glb`. Both were
+    // refused as path escapes they never attempted.
+    expect(safeJoin('/ws', '..foo.glb')).toBe(path.join('/ws', '..foo.glb'));
+    expect(safeJoin('/ws', '.._normalized.glb')).toBe(path.join('/ws', '.._normalized.glb'));
+    expect(safeJoin('/ws', '...glb')).toBe(path.join('/ws', '...glb'));
+  });
+
+  it('still refuses an absolute path', () => {
+    expect(() => safeJoin('/ws', '/etc/passwd')).toThrow(/outside the asset workspace/);
+  });
+});

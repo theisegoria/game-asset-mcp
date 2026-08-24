@@ -53,11 +53,21 @@ export async function main(): Promise<void> {
     store = await JobStore.open(config.jobsDir);
     spend = await SpendLedger.open(config.jobsDir, config.spendLimitCents);
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'EACCES' || code === 'EPERM' || code === 'EROFS') {
+    const code = (err as NodeJS.ErrnoException).code ?? '';
+    // ENOTDIR: the path, or a component of it, is a file. ELOOP: a symlink
+    // cycle. ENAMETOOLONG: an over-long component. All produced a bare errno
+    // that reached the client as "connection closed" and nothing else.
+    const WORKSPACE_ERRNOS = new Set([
+      'ENOENT', 'EACCES', 'EPERM', 'EROFS', 'ENOTDIR', 'ELOOP', 'ENAMETOOLONG', 'ENOSPC',
+    ]);
+    if (WORKSPACE_ERRNOS.has(code)) {
       const supplied = process.env.ASSET_OUTPUT_DIR?.trim();
       throw new Error(
         `cannot create the asset workspace at ${config.outputDir} (${code}). ` +
+        (code === 'ENOTDIR'
+          ? 'Something on that path is a file, not a directory — ASSET_OUTPUT_DIR must name a ' +
+            'directory the server may create. '
+          : '') +
         (supplied && !path.isAbsolute(supplied)
           ? `ASSET_OUTPUT_DIR is "${supplied}", a RELATIVE path, resolved against this server's ` +
             `working directory "${process.cwd()}" — which the MCP client chose, not you. ` +

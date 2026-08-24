@@ -10,28 +10,20 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { promises as fs, existsSync } from 'node:fs';
 import path from 'node:path';
+import pathModule from 'node:path';
+import { resolveNormalizeTarget } from '../src/domain/normalize-target.js';
 import os from 'node:os';
 import { findBlender, packagedScript, requireBlender, runBlenderScript } from '../src/util/blender.js';
 
 const blender = findBlender();
 const haveBlender = Boolean(blender);
 
-function repositoryRoot(): string | undefined {
-  let candidate = path.resolve('..');
-  for (let depth = 0; depth < 4; depth += 1) {
-    const guess = path.join(candidate, 'Genome Game');
-    if (existsSync(path.join(guess, 'assets'))) return guess;
-    candidate = path.resolve(candidate, '..');
-  }
-  return undefined;
-}
-
-const root = repositoryRoot();
-// A mesh confirmed to carry NO UV coordinates — the case this tool exists for.
-const uvlessMesh = root
-  ? path.join(root, 'assets/vendored/models/mp_weapons/alien_needler.glb')
-  : undefined;
-const haveFixture = Boolean(uvlessMesh && existsSync(uvlessMesh));
+// A real mesh confirmed to carry NO UV coordinates — the case this tool exists
+// for. Committed here rather than read from a sibling checkout: this test used
+// to read the game repo's copy, and repairing that copy turned this red for a
+// change that was correct. A test may not pin a fact about a file it does not own.
+const uvlessMesh = path.resolve('tests/fixtures/real/uvless_alien_needler.glb');
+const haveFixture = existsSync(uvlessMesh);
 
 const scratch: string[] = [];
 afterEach(async () => {
@@ -144,4 +136,106 @@ describe.skipIf(!haveBlender || !haveFixture)('normalizing a real UV-less mesh',
     expect(receipt.objectsMissingUVsBefore).toBe(0);
     expect(receipt.objectsUnwrapped).toBe(0);
   }, 600_000);
+});
+
+// ---------------------------------------------------------------------------
+// Where normalize_mesh writes.
+//
+// An explicit outputPath was once written verbatim with no check: passing the
+// input mesh as the output replaced the caller's own file in place and reported
+// success, and an existing file at that path was destroyed silently — while the
+// derived-name branch beside it went through an exclusive reservation. Both
+// guards lived inside the tool handler, unreachable from any test, and mutants
+// removing them passed the whole suite.
+// ---------------------------------------------------------------------------
+describe('choosing the output path', () => {
+  const SOURCE = '/art/crate.glb';
+  const deps = (existing: string[] = []) => {
+    const taken = new Set(existing);
+    const reserved: string[] = [];
+    return {
+      reserved,
+      deps: {
+        exists: async (target: string) => taken.has(target),
+        reserve: async (dir: string, fileName: string) => {
+          const target = pathModule.join(dir, fileName);
+          reserved.push(target);
+          return target;
+        },
+      },
+    };
+  };
+
+  it('refuses to write over the input mesh, with no opt-out', async () => {
+    const d = deps();
+    await expect(
+      resolveNormalizeTarget(
+        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: SOURCE },
+        d.deps,
+      ),
+    ).rejects.toThrow(/destroy the original/);
+  });
+
+  it('still refuses in place even when overwrite is requested', async () => {
+    const d = deps();
+    // overwrite:true means "replace that other file", never "shred my input".
+    await expect(
+      resolveNormalizeTarget(
+        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: SOURCE, overwrite: true },
+        d.deps,
+      ),
+    ).rejects.toThrow(/destroy the original/);
+  });
+
+  it('refuses to silently replace an existing file', async () => {
+    const d = deps(['/art/reviewed.glb']);
+    await expect(
+      resolveNormalizeTarget(
+        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: '/art/reviewed.glb' },
+        d.deps,
+      ),
+    ).rejects.toThrow(/refusing to overwrite/);
+  });
+
+  it('replaces an existing file when overwrite is explicit', async () => {
+    const d = deps(['/art/reviewed.glb']);
+    await expect(
+      resolveNormalizeTarget(
+        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: '/art/reviewed.glb', overwrite: true },
+        d.deps,
+      ),
+    ).resolves.toBe('/art/reviewed.glb');
+  });
+
+  it('accepts a free explicit path without reserving anything', async () => {
+    const d = deps();
+    await expect(
+      resolveNormalizeTarget(
+        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art', outputPath: '/art/out.glb' },
+        d.deps,
+      ),
+    ).resolves.toBe('/art/out.glb');
+    expect(d.reserved).toHaveLength(0);
+  });
+
+  it('reserves a derived name when no outputPath is given', async () => {
+    const d = deps();
+    await expect(
+      resolveNormalizeTarget(
+        { source: SOURCE, sourceExtension: '.glb', outputDir: '/art' },
+        d.deps,
+      ),
+    ).resolves.toBe(pathModule.join('/art', 'crate_normalized.glb'));
+    expect(d.reserved).toHaveLength(1);
+  });
+
+  it('strips an uppercase extension rather than embedding it', async () => {
+    const d = deps();
+    await expect(
+      resolveNormalizeTarget(
+        { source: '/art/BARREL.GLB', sourceExtension: '.GLB', outputDir: '/art' },
+        d.deps,
+      ),
+    ).resolves.toBe(pathModule.join('/art', 'BARREL_normalized.glb'));
+  });
 });

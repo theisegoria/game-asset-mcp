@@ -66,6 +66,17 @@ export interface MeshBatchDeps {
    * existence check, or two items still race.
    */
   reserveOutputPath(dir: string, fileName: string): Promise<string>;
+  /**
+   * Releases a reservation whose work then failed.
+   *
+   * The reservation creates the file to claim the name. Without this, a failed
+   * item leaves a zero-byte .glb behind that (a) breaks the invariant that
+   * `prepared` equals the file count in the output directory, (b) is never
+   * mentioned in the failed item's verdict, so the write is silent, and (c)
+   * permanently steals the canonical name — a later successful re-run gets
+   * `_2` while the empty file keeps the name and sorts first in any glob.
+   */
+  discardReservation(target: string): Promise<void>;
   blenderAvailable: boolean;
 }
 
@@ -118,13 +129,26 @@ async function prepareOne(
   await deps.mkdir(dir);
   const target = await deps.reserveOutputPath(dir, `${path.basename(source, actualExt)}_normalized.glb`);
 
-  const receipt = await deps.normalize(source, target);
+  let receipt: Record<string, number>;
+  try {
+    receipt = await deps.normalize(source, target);
+  } catch (err) {
+    await deps.discardReservation(target);
+    throw err;
+  }
   item.normalizedPath = target;
   item.unwrapped = receipt.objectsUnwrapped ?? 0;
   item.trianglesBefore = receipt.trianglesBefore ?? 0;
   item.trianglesAfter = receipt.trianglesAfter ?? 0;
 
-  const after = evaluateAsset(await deps.inspect(target), options.policy);
+  let after;
+  try {
+    after = evaluateAsset(await deps.inspect(target), options.policy);
+  } catch (err) {
+    await deps.discardReservation(target);
+    delete item.normalizedPath;
+    throw err;
+  }
   item.passedAfter = after.passed;
   item.status = after.passed ? 'prepared' : 'failed';
   if (!after.passed) item.failures = errorIds(after);

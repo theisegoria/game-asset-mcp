@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AssetInspection } from '../src/inspection/gltf.js';
 import { runMeshBatch, type MeshBatchDeps, type MeshBatchOptions } from '../src/domain/mesh-batch.js';
+import { createMeshBatchDeps } from '../src/tools/batch.js';
 
 function inspection(overrides: Partial<AssetInspection> = {}): AssetInspection {
   return {
@@ -58,6 +59,7 @@ interface Harness {
   normalizeCalls: string[];
   inspectCalls: string[];
   mkdirCalls: string[];
+  discarded: string[];
 }
 
 function harness(opts: {
@@ -75,11 +77,13 @@ function harness(opts: {
   const normalizeCalls: string[] = [];
   const inspectCalls: string[] = [];
   const mkdirCalls: string[] = [];
+  const discarded: string[] = [];
 
   return {
     normalizeCalls,
     inspectCalls,
     mkdirCalls,
+    discarded,
     deps: {
       blenderAvailable: opts.blenderAvailable ?? true,
       async access(file) {
@@ -87,6 +91,10 @@ function harness(opts: {
       },
       async mkdir(dir) {
         mkdirCalls.push(dir);
+      },
+      async discardReservation(target) {
+        discarded.push(target);
+        reserved.delete(target);
       },
       async reserveOutputPath(dir, fileName) {
         const ext = path.extname(fileName);
@@ -265,6 +273,9 @@ describe('where the bytes actually land', () => {
       mkdir: async (dir) => {
         mkdirSync(dir, { recursive: true });
       },
+      discardReservation: async (target) => {
+        rmSync(target, { force: true });
+      },
       reserveOutputPath: async (dir, fileName) => {
         const ext = path.extname(fileName);
         const stem = path.basename(fileName, ext);
@@ -363,5 +374,79 @@ describe('where the bytes actually land', () => {
 
     expect(path.dirname(result.items[0]!.normalizedPath as string)).toBe(srcDir);
     expect(readdirSync(srcDir).sort()).toEqual(['crate.glb', 'crate_normalized.glb']);
+  });
+});
+
+describe('a failed item leaves nothing behind', () => {
+  it('releases the reserved name when the normalizer fails', async () => {
+    const h = harness({ broken: ['/a/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    // The reservation CREATES the file to claim the name. Left behind, it is a
+    // zero-byte .glb nobody was told about, and it steals the canonical name
+    // from the successful re-run that follows.
+    expect(result.items[0]?.status).toBe('failed');
+    expect(h.discarded).toHaveLength(1);
+    expect(h.discarded[0]).toContain('one_normalized.glb');
+  });
+
+  it('does not report a normalizedPath for a mesh that was never produced', async () => {
+    const h = harness({ broken: ['/a/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.normalizedPath).toBeUndefined();
+  });
+
+  it('frees the name so a later item can take it', async () => {
+    const h = harness({ broken: ['/a/one.glb', '/b/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb', '/b/one.glb'], OPTIONS, h.deps);
+
+    // Without the release the survivor is pushed to _2 while an empty file
+    // keeps the canonical name and sorts first in any glob.
+    expect(result.items[1]?.status).toBe('prepared');
+    expect(path.basename(result.items[1]!.normalizedPath as string)).toBe('one_normalized.glb');
+  });
+});
+
+describe('the production wiring, not just the loop', () => {
+  let work: string;
+  beforeEach(() => {
+    work = mkdtempSync(path.join(tmpdir(), 'mesh-batch-wiring-'));
+  });
+  afterEach(() => {
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  // These call the REAL dependencies the tool uses. A mutant that swapped the
+  // name reservation for a plain path join passed lint, typecheck and every
+  // other test in this file while restoring the silent-overwrite defect in
+  // full, because nothing exercised the wiring itself.
+  it('reserves distinct names for the same requested filename', async () => {
+    const deps = createMeshBatchDeps({ blenderAvailable: true, timeoutMs: 1000 });
+    const first = await deps.reserveOutputPath(work, 'crate_normalized.glb');
+    const second = await deps.reserveOutputPath(work, 'crate_normalized.glb');
+
+    expect(first).not.toBe(second);
+    expect(readdirSync(work).sort()).toEqual(['crate_normalized.glb', 'crate_normalized_2.glb']);
+  });
+
+  it('reserves exclusively against a file that already exists', async () => {
+    const taken = path.join(work, 'crate_normalized.glb');
+    writeFileSync(taken, 'REVIEWED-RESULT');
+    const deps = createMeshBatchDeps({ blenderAvailable: true, timeoutMs: 1000 });
+    const reserved = await deps.reserveOutputPath(work, 'crate_normalized.glb');
+
+    expect(reserved).not.toBe(taken);
+    expect(readFileSync(taken, 'utf8')).toBe('REVIEWED-RESULT');
+  });
+
+  it('really deletes a released reservation', async () => {
+    const deps = createMeshBatchDeps({ blenderAvailable: true, timeoutMs: 1000 });
+    const reserved = await deps.reserveOutputPath(work, 'crate_normalized.glb');
+    expect(existsSync(reserved)).toBe(true);
+    await deps.discardReservation(reserved);
+
+    expect(existsSync(reserved)).toBe(false);
+    expect(readdirSync(work)).toHaveLength(0);
   });
 });

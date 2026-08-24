@@ -7,7 +7,6 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_POLICY, evaluateAsset } from '../src/domain/asset-policy.js';
 import type { AssetInspection } from '../src/inspection/gltf.js';
@@ -159,28 +158,32 @@ describe('policy is genuinely configurable', () => {
   });
 });
 
-// The verdict must track a real repair, not just synthetic fixtures.
-function repositoryRoot(): string | undefined {
-  let candidate = path.resolve('..');
-  for (let depth = 0; depth < 4; depth += 1) {
-    const guess = path.join(candidate, 'Genome Game');
-    if (existsSync(path.join(guess, 'assets'))) return guess;
-    candidate = path.resolve(candidate, '..');
-  }
-  return undefined;
-}
+// The verdict must track a real asset, not just synthetic fixtures — a wrong
+// glTF magic constant once survived a whole synthetic suite because the fixture
+// builder and the parser shared the error.
+//
+// The fixture is COMMITTED here rather than read from a sibling checkout. It
+// used to be read live from the game repo, and when that mesh was repaired the
+// test went red for a change that was entirely correct: the assertion pinned a
+// fact about a file this project does not control. skipIf gated on the file
+// EXISTING, never on what was in it, so it could not protect against that.
+// A real asset with a stable meaning belongs in the repository that asserts on it.
+const uvless = path.resolve('tests/fixtures/real/uvless_alien_needler.glb');
 
-const root = repositoryRoot();
-const uvless = root
-  ? path.join(root, 'assets/vendored/models/mp_weapons/alien_needler.glb')
-  : undefined;
-
-describe.skipIf(!uvless || !existsSync(uvless))('a real shipped asset', () => {
+describe('a real shipped asset with no UVs', () => {
   it('fails on the defect it actually has', async () => {
-    const report = evaluateAsset(await inspectGltf(uvless as string));
+    const report = evaluateAsset(await inspectGltf(uvless));
     // This mesh genuinely has no UVs — the verdict must say so rather than
     // passing an asset nothing can texture.
     expect(report.passed).toBe(false);
     expect(failedIds(report)).toContain('uvs_present');
+  }, 60_000);
+
+  it('is still genuinely UV-less, so the test above means what it says', async () => {
+    // Guards the fixture itself. Without this, replacing it with a repaired
+    // mesh would turn the assertion above into a tautology about the wrong file.
+    const inspection = await inspectGltf(uvless);
+    expect(inspection.hasUVs).toBe(false);
+    expect(inspection.triangleCount).toBeGreaterThan(0);
   }, 60_000);
 });

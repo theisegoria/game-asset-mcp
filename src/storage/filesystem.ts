@@ -37,7 +37,11 @@ export function safeJoin(root: string, ...segments: string[]): string {
   const resolvedRoot = path.resolve(root);
   const target = path.resolve(resolvedRoot, ...segments);
   const rel = path.relative(resolvedRoot, target);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  // `rel.startsWith('..')` also matched legal names — a mesh called
+  // `..foo.glb`, or the derived `.._normalized.glb`, was refused as a path
+  // escape it never attempted. Only the `..` SEGMENT escapes.
+  const escapes = rel === '..' || rel.startsWith(`..${path.sep}`);
+  if (escapes || path.isAbsolute(rel)) {
     throw new AssetPipelineError('PATH_ESCAPE', 'refusing to write outside the asset workspace', {
       details: { root: resolvedRoot, attempted: target },
     });
