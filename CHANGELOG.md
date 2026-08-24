@@ -1,5 +1,89 @@
 # Changelog
 
+## 0.3.5
+
+An eleventh review found nine defects. One destroys geometry; one is a false
+claim I published in 0.3.4's own release note.
+
+### The correction first
+
+0.3.4 said every fix in it was pinned by a test observed to fail against
+reverted code. **Five of its six fixes were pinned by nothing** — reverting each
+left the suite fully green. The discipline was applied to 0.3.3's fixes and then
+written up as though it had been applied to 0.3.4's. All six are pinned now, and
+0.3.4's claim is left standing with a correction beside it rather than quietly
+edited.
+
+### Data destruction
+
+- **The unrepresentable-threshold fix reached `remove_doubles` and not
+  `dissolve_degenerate`, thirteen lines below it in the same function.** Not an
+  edge case but an identity: the weld is skipped exactly when the local
+  threshold falls under Blender's 1e-6 floor, and the dissolve's old clamp then
+  produced exactly 1e-6 — by construction *wider* than the caller asked for. So
+  the honesty counter fired precisely on the runs where the protection had
+  failed. Two meshes with byte-identical world geometry, differing only in how
+  scale was split between node and vertices, normalized to **100 and 0
+  triangles**, and the husk was reported `readyToTexture`.
+
+### Wrong output
+
+- **`baseColorFactor` was ignored whenever a base-colour texture was present.**
+  0.3.4 claimed "both branches now apply the factor"; that meant both branches
+  of metallicRoughness. A red-tinted white texture exported pure white. Albedo
+  is now multiplied in linear light, unlike the data channels.
+- **`occlusionStrength` and `normalScale` were dropped entirely.** Occlusion is
+  `1 + strength x (sampled - 1)`, not a multiply — at strength 0 a multiply
+  gives black, the exact opposite of "no occlusion".
+- **The bounding box unioned every scene** while the triangle counter walked
+  one, with doc comments that contradicted each other. `sizeMeters` feeds
+  `min_dimension`, severity `error`: a flat plate correctly refused on its own
+  was reported **shippable** once an undrawn second scene existed.
+- **Meshes in a non-default scene were counted as drawn**, so a three-LOD file
+  reported 3x what a renderer submits. Drawn and present are now separate
+  counts (`undrawnMeshCount`, `undrawnTriangleCount`).
+
+### False success
+
+- **`factorApplied` was declared, passed by two call sites, headlined in a
+  release note, and never written into the receipt.** Optional-property typing
+  means `tsc` says nothing. This is the `weldSkipped` defect verbatim, one
+  release later, inside the fix that promised to report it.
+- **`stdoutTruncated` reached no tool response at all.** It matters here
+  specifically: the receipt is the last line of stdout, so a dropped tail is how
+  a forged receipt near byte 0 wins.
+- **A partial texture extraction reported `textureCount: 0`.** The `catch`
+  wrapped the whole loop, so a failure on texture 3 of 5 discarded the record of
+  1 and 2 — already on disk — and `asset.json`, the provenance document, denied
+  them. The guard is now per-texture, and failures are named in the response.
+- **`extract_pbr_trio` had no cleanup for its reservations**, the third call
+  site of a fix `normalize_mesh` and the batch both have. A failure partway
+  left earlier planes plus a zero-byte `<stem>_metallic.png` holding the
+  canonical name — sorting first in any glob — while the caller was told the
+  call had failed. Cleanup is keyed on device+inode, so it can only remove a
+  file this call still owns.
+- **The summary called a missing normal plane a "flat constant".** The normal
+  plane has no factor fallback and is simply not written; absent and constant
+  are different answers. Reported separately as `missingPlanes`.
+
+### Verification
+
+Every fix above was reverted and observed to fail, and **each mutant was
+confirmed to compile and to have actually applied** — a build failure is not a
+kill, and a mutation that silently matched nothing is worse.
+
+New: `tests/helpers/tool-harness.ts`. Until now nothing in the suite invoked a
+tool through its registered handler; it tested domain helpers and the Blender
+subprocess and stopped at the tool boundary. That is the structural reason
+"computed correctly, dropped on the way out" kept shipping — the helper is
+right, so a helper test cannot see it. Tool responses are now asserted as the
+JSON a client actually receives.
+
+One test in this release passed for the wrong reason before being fixed, and it
+is worth naming: the `destination: ""` tests asserted only that the call failed,
+against a nonexistent model, a nonexistent job and an unconfigured provider —
+all of which fail anyway. Reverting the constraint left them green.
+
 ## 0.3.4
 
 A tenth review. Six of these are fixes that 0.3.3 made *somewhere* and left

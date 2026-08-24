@@ -189,3 +189,25 @@ describe('a factor is applied even when a texture is present', () => {
     expect(planeField(payload, 'normal', 'factorApplied')).toBe(0.25);
   });
 });
+
+describe('the summary describes what is actually on disk', () => {
+  it('says a missing normal plane is ABSENT, not a flat constant', async () => {
+    // The normal plane has no factor fallback: when a material declares no
+    // normal texture it is simply not emitted. The summary nevertheless said
+    // "the rest are flat constants derived from material factors", naming a
+    // file that does not exist. Absent and constant are different answers.
+    const model = await writeModel(path.join(work, 'nonormal.glb'), (doc, material) => {
+      material.setBaseColorTexture(
+        doc.createTexture('base').setImage(solidPng(200, 200, 200)).setMimeType('image/png'),
+      );
+    });
+
+    const { isError, payload, text } = await tools.call('extract_pbr_trio', { modelPath: model });
+    expect(isError, text).toBe(false);
+
+    expect(payload.missingPlanes).toEqual(['normal']);
+    const planes = payload.planes as Array<Record<string, unknown>>;
+    expect(planes.some((p) => p.plane === 'normal')).toBe(false);
+    expect(String(payload.nextStep)).toMatch(/not written at all/);
+  });
+});

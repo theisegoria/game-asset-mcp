@@ -226,6 +226,40 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
       const stem = path.basename(source, path.extname(source));
       const planes: PlaneReceipt[] = [];
 
+      /**
+       * Every path this call created, with the identity it had when we created
+       * it.
+       *
+       * `uniqueFilePath` claims a name by creating a zero-byte file (O_EXCL),
+       * and this tool had NO cleanup anywhere — unlike normalize_mesh
+       * (`releaseReservation`) and the batch (`discardReservation`), which are
+       * the same reservation pattern with the same consequences spelled out.
+       * A failure between plane 1 and plane 5 therefore left the earlier planes
+       * plus a zero-byte `<stem>_metallic.png` permanently holding the
+       * canonical name — sorting FIRST in any glob — while the caller was told
+       * the call had failed.
+       */
+      const created: Array<{ path: string; dev: number; ino: number }> = [];
+
+      /** Removes only files this call created AND still owns. */
+      async function discardCreated(): Promise<void> {
+        for (const entry of created.reverse()) {
+          try {
+            // Identity, not existence. Another call may legitimately hold this
+            // name by now; removing it then would destroy someone else's
+            // verified output, which is exactly the defect round 9 found in the
+            // batch's release().
+            const info = await fs.stat(entry.path);
+            if (info.dev === entry.dev && info.ino === entry.ino) {
+              await fs.rm(entry.path, { force: true });
+            }
+          } catch {
+            // Already gone, or unreadable. Cleanup must never displace the real
+            // error the caller is about to be told about.
+          }
+        }
+      }
+
       async function emit(
         plane: PlaneReceipt['plane'],
         image: RasterImage,
@@ -242,7 +276,34 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
         const resized = resizeImage(image, size, size, { srgb: options.srgb });
         const encoded = encodePNG(resized);
         const target = await uniqueFilePath(outputRoot, `${stem}_${plane}.png`);
+        // Recorded the moment the name is CLAIMED, before the bytes land, so a
+        // failure mid-write still leaves a cleanable zero-byte reservation
+        // rather than an orphan holding the canonical name.
+        try {
+          const reserved = await fs.stat(target);
+          created.push({ path: target, dev: reserved.dev, ino: reserved.ino });
+        } catch {
+          // Cannot stat what we just made — record nothing rather than risk
+          // removing a path we cannot prove is ours.
+        }
         const sha256 = await writeFileAtomic(target, encoded);
+        // Re-recorded: writeFileAtomic writes a temp and RENAMES over the
+        // target, so the inode is not the reservation's. Comparing against the
+        // stale one would make every successfully written plane un-cleanable —
+        // the guard would silently protect the exact files it exists to remove.
+        try {
+          const settled = await fs.stat(target);
+          const entry = created.find((candidate) => candidate.path === target);
+          if (entry) {
+            entry.dev = settled.dev;
+            entry.ino = settled.ino;
+          } else {
+            created.push({ path: target, dev: settled.dev, ino: settled.ino });
+          }
+        } catch {
+          // Unreadable after writing is itself alarming, but the write already
+          // reported success; leave the reservation identity in place.
+        }
         planes.push({
           plane,
           path: target,
@@ -264,105 +325,114 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
         });
       }
 
-      // Albedo — the only sRGB plane here; everything else is data.
-      if (baseColor) {
-        // texture x factor. This branch dropped the factor entirely while the
-        // metallicRoughness branch below was fixed to apply it — the same
-        // defect, in the same function, in the identical pair of branches, and
-        // the release note claiming "both branches now apply the factor" meant
-        // both branches of metallicRoughness only. A material tinting a shared
-        // atlas texture exported the UNTINTED texture and reported "came from
-        // real texture data": a red-tinted white 8x8 came out pure white.
-        //
-        // Multiplied in LINEAR light, unlike the data channels — see
-        // scaleSrgbRgb. Alpha is left alone; baseColorFactor[3] is opacity and
-        // belongs to the material, not to an albedo plane.
-        const colorFactor = material.getBaseColorFactor();
-        const rgbFactor = [colorFactor[0] ?? 1, colorFactor[1] ?? 1, colorFactor[2] ?? 1] as const;
-        await emit('albedo', scaleSrgbRgb(baseColor, rgbFactor), {
-          srgb: true,
-          source: 'texture',
-          sourceTexture: material.getBaseColorTexture()?.getName() || 'baseColorTexture',
-          factorApplied: rgbFactor,
-        });
-      } else {
-        const factor = material.getBaseColorFactor();
-        // All THREE channels, and sRGB-encoded. This used factor[0] for every
-        // channel, so a cyan [0, 0.6, 1] baseColorFactor came out BLACK, and it
-        // wrote the linear value raw while tagging the plane sRGB.
-        await emit(
-          'albedo',
-          constantColorImage(size, size, [factor[0] ?? 1, factor[1] ?? 1, factor[2] ?? 1]),
-          { srgb: true, source: 'factor' },
-        );
-      }
+      // Every plane is written under one guard. Without it, a failure on
+      // plane 4 left planes 1-3 and a zero-byte reservation on disk while
+      // the caller was told the call had failed — files nobody was told
+      // about, one of them holding the canonical name.
+      try {
+        // Albedo — the only sRGB plane here; everything else is data.
+        if (baseColor) {
+          // texture x factor. This branch dropped the factor entirely while the
+          // metallicRoughness branch below was fixed to apply it — the same
+          // defect, in the same function, in the identical pair of branches, and
+          // the release note claiming "both branches now apply the factor" meant
+          // both branches of metallicRoughness only. A material tinting a shared
+          // atlas texture exported the UNTINTED texture and reported "came from
+          // real texture data": a red-tinted white 8x8 came out pure white.
+          //
+          // Multiplied in LINEAR light, unlike the data channels — see
+          // scaleSrgbRgb. Alpha is left alone; baseColorFactor[3] is opacity and
+          // belongs to the material, not to an albedo plane.
+          const colorFactor = material.getBaseColorFactor();
+          const rgbFactor = [colorFactor[0] ?? 1, colorFactor[1] ?? 1, colorFactor[2] ?? 1] as const;
+          await emit('albedo', scaleSrgbRgb(baseColor, rgbFactor), {
+            srgb: true,
+            source: 'texture',
+            sourceTexture: material.getBaseColorTexture()?.getName() || 'baseColorTexture',
+            factorApplied: rgbFactor,
+          });
+        } else {
+          const factor = material.getBaseColorFactor();
+          // All THREE channels, and sRGB-encoded. This used factor[0] for every
+          // channel, so a cyan [0, 0.6, 1] baseColorFactor came out BLACK, and it
+          // wrote the linear value raw while tagging the plane sRGB.
+          await emit(
+            'albedo',
+            constantColorImage(size, size, [factor[0] ?? 1, factor[1] ?? 1, factor[2] ?? 1]),
+            { srgb: true, source: 'factor' },
+          );
+        }
 
-      if (normal) {
-        // normalScale is part of the surface, not a rendering preference: glTF
-        // defines the shading normal as normalize((rgb*2-1) * vec3(s, s, 1)).
-        // A standalone plane exported without it shades differently from the
-        // source material, which is the whole failure this tool exists to
-        // avoid. Baked in and reported rather than silently dropped.
-        const normalScale = material.getNormalScale();
-        await emit('normal', applyNormalScale(normal, normalScale), {
-          srgb: false,
-          source: 'texture',
-          sourceTexture: material.getNormalTexture()?.getName() || 'normalTexture',
-          factorApplied: normalScale,
-        });
-      }
+        if (normal) {
+          // normalScale is part of the surface, not a rendering preference: glTF
+          // defines the shading normal as normalize((rgb*2-1) * vec3(s, s, 1)).
+          // A standalone plane exported without it shades differently from the
+          // source material, which is the whole failure this tool exists to
+          // avoid. Baked in and reported rather than silently dropped.
+          const normalScale = material.getNormalScale();
+          await emit('normal', applyNormalScale(normal, normalScale), {
+            srgb: false,
+            source: 'texture',
+            sourceTexture: material.getNormalTexture()?.getName() || 'normalTexture',
+            factorApplied: normalScale,
+          });
+        }
 
-      // The de-pack: G is roughness, B is metallic. Reading the wrong channel
-      // yields a surface that is confidently and silently wrong.
-      if (metallicRoughness) {
-        const textureName =
-          material.getMetallicRoughnessTexture()?.getName() || 'metallicRoughnessTexture';
-        // texture x factor, per the glTF spec. The factors used to be dropped
-        // whenever a texture was present, so a material declaring
-        // metallicFactor 0 with a shared metallicRoughness texture came out
-        // FULLY METALLIC.
-        const roughnessFactor = material.getRoughnessFactor();
-        const metallicFactor = material.getMetallicFactor();
-        await emit('roughness', scaleChannel(extractChannel(metallicRoughness, 'g'), roughnessFactor), {
-          srgb: false,
-          source: 'texture',
-          channel: 'g',
-          sourceTexture: textureName,
-          factorApplied: roughnessFactor,
-        });
-        await emit('metallic', scaleChannel(extractChannel(metallicRoughness, 'b'), metallicFactor), {
-          srgb: false,
-          source: 'texture',
-          channel: 'b',
-          sourceTexture: textureName,
-          factorApplied: metallicFactor,
-        });
-      } else {
-        await emit(
-          'roughness',
-          constantImage(size, size, Math.round(material.getRoughnessFactor() * 255)),
-          { srgb: false, source: 'factor' },
-        );
-        await emit(
-          'metallic',
-          constantImage(size, size, Math.round(material.getMetallicFactor() * 255)),
-          { srgb: false, source: 'factor' },
-        );
-      }
+        // The de-pack: G is roughness, B is metallic. Reading the wrong channel
+        // yields a surface that is confidently and silently wrong.
+        if (metallicRoughness) {
+          const textureName =
+            material.getMetallicRoughnessTexture()?.getName() || 'metallicRoughnessTexture';
+          // texture x factor, per the glTF spec. The factors used to be dropped
+          // whenever a texture was present, so a material declaring
+          // metallicFactor 0 with a shared metallicRoughness texture came out
+          // FULLY METALLIC.
+          const roughnessFactor = material.getRoughnessFactor();
+          const metallicFactor = material.getMetallicFactor();
+          await emit('roughness', scaleChannel(extractChannel(metallicRoughness, 'g'), roughnessFactor), {
+            srgb: false,
+            source: 'texture',
+            channel: 'g',
+            sourceTexture: textureName,
+            factorApplied: roughnessFactor,
+          });
+          await emit('metallic', scaleChannel(extractChannel(metallicRoughness, 'b'), metallicFactor), {
+            srgb: false,
+            source: 'texture',
+            channel: 'b',
+            sourceTexture: textureName,
+            factorApplied: metallicFactor,
+          });
+        } else {
+          await emit(
+            'roughness',
+            constantImage(size, size, Math.round(material.getRoughnessFactor() * 255)),
+            { srgb: false, source: 'factor' },
+          );
+          await emit(
+            'metallic',
+            constantImage(size, size, Math.round(material.getMetallicFactor() * 255)),
+            { srgb: false, source: 'factor' },
+          );
+        }
 
-      if (occlusion) {
-        // Occlusion does NOT multiply. glTF defines the effective value as
-        // 1 + strength * (sampled - 1), which fades toward unoccluded white as
-        // strength falls, rather than toward black. Dropped entirely until now,
-        // like every other factor in this function.
-        const strength = material.getOcclusionStrength();
-        await emit('occlusion', applyOcclusionStrength(extractChannel(occlusion, 'r'), strength), {
-          srgb: false,
-          source: 'texture',
-          channel: 'r',
-          sourceTexture: material.getOcclusionTexture()?.getName() || 'occlusionTexture',
-          factorApplied: strength,
-        });
+        if (occlusion) {
+          // Occlusion does NOT multiply. glTF defines the effective value as
+          // 1 + strength * (sampled - 1), which fades toward unoccluded white as
+          // strength falls, rather than toward black. Dropped entirely until now,
+          // like every other factor in this function.
+          const strength = material.getOcclusionStrength();
+          await emit('occlusion', applyOcclusionStrength(extractChannel(occlusion, 'r'), strength), {
+            srgb: false,
+            source: 'texture',
+            channel: 'r',
+            sourceTexture: material.getOcclusionTexture()?.getName() || 'occlusionTexture',
+            factorApplied: strength,
+          });
+        }
+      } catch (err) {
+        await discardCreated();
+        throw err;
       }
 
       const trio = ['albedo', 'normal', 'roughness'] as const;
@@ -390,13 +460,35 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
         });
       }
 
+      // "the rest are flat constants" was false for the normal plane, which has
+      // no factor fallback and is simply NOT EMITTED when the material has no
+      // normal texture. The message named a file that does not exist on disk.
+      // Absent and constant are different answers and the caller acts on them
+      // differently, so they are now reported separately.
+      const missing = trio.filter((name) => !planes.some((plane) => plane.plane === name));
+      const constant = trio.filter(
+        (name) => planes.find((plane) => plane.plane === name)?.source === 'factor',
+      );
+
       return ok({
         ...receipt,
         receiptPath,
+        missingPlanes: missing,
         nextStep: receipt.trioComplete
           ? 'All three planes came from real texture data.'
-          : `Only ${measured.join(', ') || 'no'} plane(s) came from texture data; the rest are flat ` +
-            'constants derived from material factors and are NOT measured detail.',
+          : [
+              `Only ${measured.join(', ') || 'no'} plane(s) came from texture data.`,
+              constant.length > 0
+                ? `${constant.join(', ')} are flat constants derived from material factors and ` +
+                  'are NOT measured detail.'
+                : '',
+              missing.length > 0
+                ? `${missing.join(', ')} was not written at all: the material declares no such ` +
+                  'texture and there is no factor to stand in for one.'
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' '),
       });
     }),
   );
