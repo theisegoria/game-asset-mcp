@@ -106,7 +106,16 @@ export async function extractTextures(
   const textures = document.getRoot().listTextures();
   for (const [index, texture] of textures.entries()) {
     const image = texture.getImage();
-    if (!image) continue;
+    if (!image) {
+      // Named rather than silently skipped. A texture whose image data is
+      // missing — an external file a .gltf references and that did not come
+      // with it — otherwise vanished from textureCount with nothing said,
+      // which is the same "indistinguishable from having none" defect as the
+      // unreadable-container path, one loop iteration down.
+      const label = sanitizeFileName(texture.getName() || `texture_${index + 1}`, `texture_${index + 1}`);
+      failures.push(`${label}: texture has no image data (an external file referenced by the glTF is missing)`);
+      continue;
+    }
     const mime = texture.getMimeType();
     const ext = mime === 'image/png' ? '.png' : mime === 'image/webp' ? '.webp' : '.jpg';
     const base = sanitizeFileName(texture.getName() || `texture_${index + 1}`, `texture_${index + 1}`);

@@ -19,6 +19,8 @@ import os from 'node:os';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { inspectGltf } from '../src/inspection/gltf.js';
 import { encodePNG } from '../src/inspection/image.js';
+import { registerInspectionTools } from '../src/tools/inspection.js';
+import { connectTools, type ToolClient } from './helpers/tool-harness.js';
 
 let work: string;
 
@@ -325,5 +327,53 @@ describe('an undrawn material cannot change the verdict on a drawn one', () => {
     expect(inspected.pbr.hasBaseColorTexture).toBe(false);
     expect(inspected.materialCount).toBe(1);
     expect(inspected.textureCount).toBe(0);
+  });
+});
+
+/**
+ * The fields must survive the hop this repo keeps losing them on.
+ *
+ * `weldSkipped`, `factorApplied`, `stdoutTruncated` and the undrawn counters
+ * were every one of them computed correctly and lost between the interface and
+ * the client. `ok(payload: unknown)` erases the type at that boundary, so the
+ * compiler guards summarizer -> interface and nothing guards interface ->
+ * client. Every other test in this file calls `inspectGltf` directly and would
+ * stay green if the fields were dropped on the way out.
+ *
+ * So this one goes through a real MCP client, which is what the harness in
+ * tests/helpers exists for — and which the release that needed it did not use.
+ */
+describe('the undrawn counters reach an actual client', () => {
+  let tools: ToolClient;
+
+  beforeEach(async () => {
+    tools = await connectTools(registerInspectionTools, work);
+  });
+  afterEach(async () => {
+    await tools.close();
+  });
+
+  it('includes every undrawn field in the inspect_asset response', async () => {
+    const model = await writePlate(path.join(work, 'client.glb'), true);
+
+    const { isError, payload, text } = await tools.call('inspect_asset', { modelPath: model });
+    expect(isError, text).toBe(false);
+
+    // Presence, not just value: an omitted optional field is not a type error,
+    // and `undefined === undefined` is how three releases of this shipped.
+    for (const field of [
+      'undrawnMeshCount',
+      'undrawnPrimitiveCount',
+      'undrawnTriangleCount',
+      'sceneGraphFallback',
+    ]) {
+      expect(Object.hasOwn(payload, field), `${field} missing from the client response`).toBe(true);
+    }
+
+    expect(payload.undrawnMeshCount).toBe(1);
+    expect(payload.undrawnPrimitiveCount).toBe(1);
+    expect(payload.undrawnTriangleCount).toBe(1);
+    expect(payload.sceneGraphFallback).toBe(false);
+    expect(payload.triangleCount).toBe(1);
   });
 });

@@ -476,6 +476,11 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
           if (entry) {
             entry.dev = settled.dev;
             entry.ino = settled.ino;
+          } else {
+            // Mirrors the plane path. Unreachable today, since the reservation
+            // above always records — but the two sites diverging is precisely
+            // how every one-call-site-over defect in this repo started.
+            created.push({ path: receiptPath, dev: settled.dev, ino: settled.ino });
           }
         } catch {
           // See the plane write: the atomic rename changes the inode, and a

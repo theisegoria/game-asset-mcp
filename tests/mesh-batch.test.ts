@@ -783,3 +783,25 @@ describe('the batch carries every honesty flag the normalizer sets', () => {
     expect(result.items[0]?.errorDetail).toContain('RuntimeError: no active object');
   });
 });
+
+describe('the batch carries the dissolve flag too', () => {
+  it('copies dissolveSkipped, so a skipped degenerate repair is visible', async () => {
+    // Fourth consecutive release in which this seam dropped a flag the layer
+    // below computed. The batch hardcodes mergeDistance 0.0001, so this fires
+    // on any object whose world-scale divisor exceeds 100.
+    const h = harness({
+      broken: ['/a/one.glb'],
+      receiptExtra: { objectsDissolveSkippedThresholdUnrepresentable: 1 },
+    });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.dissolveSkipped).toBe(true);
+  });
+
+  it('leaves dissolveSkipped unset when the repair ran', async () => {
+    const h = harness({ broken: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.dissolveSkipped).toBeUndefined();
+  });
+});

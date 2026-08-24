@@ -32,6 +32,17 @@ export interface MeshBatchItem {
   /** True when welding was skipped because the requested threshold was unrepresentable. */
   weldSkipped?: boolean;
   /**
+   * True when the degenerate-face repair was skipped as unrepresentable.
+   *
+   * The FOURTH consecutive release in which this seam dropped a flag the layer
+   * below computed. The comment beside the previous one already asked the right
+   * question — "which OTHER flags does the layer below compute that this one
+   * drops?" — and the next release added one without asking it. The batch
+   * hardcodes mergeDistance 0.0001, so this fires on any object whose world
+   * scale divisor exceeds 100, and no caller could learn the repair never ran.
+   */
+  dissolveSkipped?: boolean;
+  /**
    * True when Blender's stdout exceeded the capture cap on this item.
    *
    * Carried for the same reason `weldSkipped` is: a flag the item does not copy
@@ -243,6 +254,9 @@ async function prepareOne(
   // which OTHER flags does the layer below compute that this one drops?
   if ((receipt.stdoutTruncated ?? 0) > 0) {
     item.stdoutTruncated = true;
+  }
+  if ((receipt.objectsDissolveSkippedThresholdUnrepresentable ?? 0) > 0) {
+    item.dissolveSkipped = true;
   }
   item.trianglesBefore = receipt.trianglesBefore ?? 0;
   item.trianglesAfter = receipt.trianglesAfter ?? 0;
