@@ -281,7 +281,20 @@ interface GeometrySummary {
   meshCount: number;
   primitiveCount: number;
   vertexCount: number;
+  /** Triangles a renderer actually draws: the default scene, instances counted. */
   triangleCount: number;
+  /**
+   * Meshes present in the file but never drawn — orphans, and meshes that live
+   * only in a NON-default scene.
+   *
+   * Split out rather than folded into `triangleCount`, because "how big is the
+   * download" and "how much does the renderer draw" are different budgets and
+   * conflating them made both wrong. Undrawn meshes used to be counted once
+   * each, indistinguishably from drawn ones, so a three-LOD file reported 3x
+   * the triangles a renderer submits.
+   */
+  undrawnMeshCount: number;
+  undrawnTriangleCount: number;
   missingUv: number;
   missingNormal: number;
   missingTangent: number;
@@ -327,6 +340,8 @@ function summarizeGeometry(root: Root): GeometrySummary {
     triangleCount: 0,
     missingUv: 0,
     missingNormal: 0,
+    undrawnMeshCount: 0,
+    undrawnTriangleCount: 0,
     missingTangent: 0,
     nonTriangleCount: 0,
   };
@@ -356,11 +371,20 @@ function summarizeGeometry(root: Root): GeometrySummary {
 
   for (const mesh of meshes) {
     const key = String(mesh.getName() ?? '') + ':' + String(meshes.indexOf(mesh));
-    // A mesh referenced by no node is still counted once: it is in the file,
-    // and reporting zero for it would understate just as badly.
-    const instances = Math.max(1, instancesPerMesh.get(key) ?? 0);
+    // Zero means "not in the drawn scene" — either an orphan or a mesh that
+    // lives only in a non-default scene. Both used to be forced to 1 by a
+    // Math.max, which made an undrawn LOD variant indistinguishable from drawn
+    // geometry and inflated the budget a renderer is checked against.
+    const instances = instancesPerMesh.get(key) ?? 0;
+    const drawn = instances > 0;
+    if (!drawn) summary.undrawnMeshCount += 1;
     for (const primitive of mesh.listPrimitives()) {
       summary.primitiveCount += 1;
+      if (!drawn) {
+        // Reported, not discarded: it is still bytes in the file, and silently
+        // dropping it would understate as badly as counting it drawn.
+        summary.undrawnTriangleCount += trianglesInPrimitive(primitive);
+      }
       summary.vertexCount += (primitive.getAttribute('POSITION')?.getCount() ?? 0) * instances;
       summary.triangleCount += trianglesInPrimitive(primitive) * instances;
 
@@ -437,8 +461,22 @@ function computeBoundingBox(root: Root): {
     Number.isFinite(maxY) &&
     Number.isFinite(maxZ);
 
-  for (const scene of root.listScenes()) {
-    const sceneBounds = getBounds(scene);
+  // The DRAWN scene only — the same one summarizeGeometry walks.
+  //
+  // This iterated every scene while the triangle counter iterated one, and the
+  // two doc comments contradicted each other a hundred lines apart. glTF
+  // `scenes` are alternatives: a renderer draws `scene`, and the others are
+  // variants, LODs or authoring leftovers. Unioning them makes an undrawn
+  // variant enlarge the reported size of the drawn model.
+  //
+  // This is not cosmetic. `boundingBox.sizeMeters` feeds the `min_dimension`
+  // check, whose severity is `error`. Measured: a default scene containing a
+  // completely FLAT plate (zero Y extent) correctly failed min_dimension and was
+  // refused; adding one unrelated second scene that no renderer draws made the
+  // union non-flat and the same flat plate was reported SHIPPABLE.
+  const bounded = root.getDefaultScene() ?? root.listScenes()[0];
+  if (bounded) {
+    const sceneBounds = getBounds(bounded);
     expand(sceneBounds.min, sceneBounds.max);
   }
 

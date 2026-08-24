@@ -388,6 +388,17 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         readyToTexture: produced.hasUVs && produced.triangleCount > 0,
         trianglesMeasured: produced.triangleCount,
         hasUVsMeasured: produced.hasUVs,
+        /**
+         * Whether Blender's stdout exceeded the capture cap.
+         *
+         * Computed correctly in blender.ts and, until now, read by nothing
+         * outside its own unit test — so no caller could learn that output had
+         * been dropped. That matters here specifically: the receipt is the LAST
+         * line of stdout, and a dropped tail is exactly how a forged receipt
+         * near byte 0 wins. Surfaced so a truncated run is visibly different
+         * from a quiet one.
+         */
+        stdoutTruncated: result.stdoutTruncated,
         nextStep: produced.hasUVs
           ? uvsBefore > 0
             ? `Generated UVs for ${uvsBefore} object(s); the mesh can now be textured.`

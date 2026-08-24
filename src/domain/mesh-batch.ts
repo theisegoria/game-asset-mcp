@@ -31,6 +31,13 @@ export interface MeshBatchItem {
   trianglesAfterMeasured?: number;
   /** True when welding was skipped because the requested threshold was unrepresentable. */
   weldSkipped?: boolean;
+  /**
+   * True when Blender's stdout exceeded the capture cap on this item.
+   *
+   * Carried for the same reason `weldSkipped` is: a flag the item does not copy
+   * is a flag no caller can read, however correctly the layer below computed it.
+   */
+  stdoutTruncated?: boolean;
   /** The tail of the normalizer's stderr, when it failed and said why. */
   errorDetail?: string;
   /**
@@ -231,6 +238,11 @@ async function prepareOne(
   // came back "game-ready" with no indication a repair had not run.
   if ((receipt.objectsWeldSkippedThresholdUnrepresentable ?? 0) > 0) {
     item.weldSkipped = true;
+  }
+  // Same class, found by asking the question round 10 should have asked here:
+  // which OTHER flags does the layer below compute that this one drops?
+  if ((receipt.stdoutTruncated ?? 0) > 0) {
+    item.stdoutTruncated = true;
   }
   item.trianglesBefore = receipt.trianglesBefore ?? 0;
   item.trianglesAfter = receipt.trianglesAfter ?? 0;

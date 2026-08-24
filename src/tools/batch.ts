@@ -84,7 +84,16 @@ export function createMeshBatchDeps(options: {
         },
         { timeoutMs: options.timeoutMs },
       );
-      return result.receipt as Record<string, number>;
+      // The truncation flag is folded INTO the receipt rather than discarded.
+      // It was computed correctly in blender.ts and read by nothing outside its
+      // own unit test — a caller could never learn that megabytes of Blender
+      // output had been dropped, which matters precisely because the receipt is
+      // the last line of that output and a dropped tail is how a forged one
+      // wins. Built, never bound.
+      return {
+        ...(result.receipt as Record<string, number>),
+        ...(result.stdoutTruncated ? { stdoutTruncated: 1 } : {}),
+      };
     },
     blenderAvailable: options.blenderAvailable,
   };
