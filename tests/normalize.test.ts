@@ -246,6 +246,38 @@ describe('choosing the output path', () => {
     await expect(resolve(link)).rejects.not.toThrow(/Pass overwrite:true/);
   });
 
+  // Blender's exporter REWRITES the extension: given ".../crate" it writes
+  // ".../crate.glb". Checking the literal argument therefore guarded a file
+  // nobody was going to touch, while the write landed on the source and
+  // destroyed it. These join the check to the writer's actual behaviour — the
+  // seam no test crossed, which is exactly where the defect lived.
+  it('refuses an extensionless outputPath that resolves onto the source', async () => {
+    // "crate" becomes "crate.glb", which IS the source.
+    await expect(resolve(pathModule.join(work, 'crate'))).rejects.toThrow(/destroy the original/);
+  });
+
+  it('refuses a .gltf outputPath rather than silently rewriting it to .glb', async () => {
+    await expect(resolve(pathModule.join(work, 'crate.gltf'))).rejects.toThrow(/must end in \.glb/);
+  });
+
+  it('refuses any non-glb extension', async () => {
+    await expect(resolve(pathModule.join(work, 'out.fbx'))).rejects.toThrow(/must end in \.glb/);
+    await expect(resolve(pathModule.join(work, 'out.txt'))).rejects.toThrow(/must end in \.glb/);
+  });
+
+  it('appends .glb to an extensionless path and returns the real write target', async () => {
+    // The returned path must be what Blender writes, or the read-back that
+    // proves the file exists is looking at the wrong file.
+    await expect(resolve(pathModule.join(work, 'fresh'))).resolves.toBe(pathModule.join(work, 'fresh.glb'));
+  });
+
+  it('protects an existing file reached only through the extension rewrite', async () => {
+    const precious = pathModule.join(work, 'precious.glb');
+    writeFileSync(precious, 'REVIEWED-RESULT');
+    // overwrite defaults to false, and "precious" resolves onto precious.glb.
+    await expect(resolve(pathModule.join(work, 'precious'))).rejects.toThrow(/refusing to overwrite/);
+  });
+
   it('refuses to silently replace a genuinely different existing file', async () => {
     const other = pathModule.join(work, 'reviewed.glb');
     writeFileSync(other, 'REVIEWED');

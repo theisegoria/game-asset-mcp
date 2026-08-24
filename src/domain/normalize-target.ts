@@ -66,7 +66,29 @@ export async function resolveNormalizeTarget(
     return deps.reserve(request.outputDir, `${stem}_normalized.glb`);
   }
 
-  const target = path.resolve(request.outputPath);
+  // Check the path Blender will WRITE, not the path we were handed.
+  //
+  // The exporter normalises the extension: given ".../crate" it writes
+  // ".../crate.glb". So an identity check against the literal argument passed
+  // — "crate" is not "crate.glb" — while the write landed on the source and
+  // destroyed it. The guard was correct about a file nobody was going to touch.
+  // Modelling that normalisation here, once, is what makes every downstream
+  // step (identity, overwrite, reservation, read-back) talk about the same file.
+  const requested = path.resolve(request.outputPath);
+  const requestedExt = path.extname(requested);
+  if (requestedExt === '') {
+    // No extension: Blender appends .glb, so we say so explicitly.
+  } else if (requestedExt.toLowerCase() !== '.glb') {
+    throw invalidInput(
+      `outputPath must end in .glb (or have no extension); received "${requestedExt}". This tool ` +
+      'always writes a GLB, and the exporter rewrites the extension — so a path like ' +
+      '"mesh.gltf" would silently become "mesh.glb", which may be a DIFFERENT file from the one ' +
+      'you named and has overwritten an input mesh in exactly that way.',
+      { outputPath: requested },
+    );
+  }
+  const target = requestedExt === '' ? `${requested}.glb` : requested;
+
   const [sourceIdentity, targetIdentity] = await Promise.all([
     deps.fileIdentity(request.source),
     deps.fileIdentity(target),

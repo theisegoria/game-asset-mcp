@@ -500,3 +500,32 @@ describe('a normalized mesh that fails policy is kept, and counted', () => {
     expect(result.outputsWritten).toBe(0);
   });
 });
+
+describe('a cleanup that FAILS is still accounted for', () => {
+  it('counts the orphan in outputsWritten and names it on the item', async () => {
+    const h = harness({ broken: ['/a/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const cannotClean: MeshBatchDeps = {
+      ...h.deps,
+      discardReservation: async () => {
+        throw new Error('EACCES: read-only output directory');
+      },
+    };
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, cannotClean);
+
+    // The reservation created the file; the unlink failed; the file is on disk.
+    // Swallowing the cleanup error keeps the real cause visible — but the count
+    // must not then disagree with the filesystem.
+    expect(result.items[0]?.status).toBe('failed');
+    expect(result.items[0]?.error).toContain('Blender exited non-zero');
+    expect(result.items[0]?.orphanedOutput).toContain('one_normalized.glb');
+    expect(result.outputsWritten).toBe(1);
+  });
+
+  it('reports no orphan when the cleanup succeeds', async () => {
+    const h = harness({ broken: ['/a/one.glb'], normalizeThrows: ['/a/one.glb'] });
+    const result = await runMeshBatch(['/a/one.glb'], OPTIONS, h.deps);
+
+    expect(result.items[0]?.orphanedOutput).toBeUndefined();
+    expect(result.outputsWritten).toBe(0);
+  });
+});

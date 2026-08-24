@@ -27,6 +27,12 @@ export interface MeshBatchItem {
   failures?: string[];
   /** True when a normalized file was produced but did not clear the policy. */
   outputKept?: boolean;
+  /**
+   * A reserved file that could NOT be removed after the item failed. It is
+   * still on disk, so it is counted in outputsWritten — a cleanup that failed
+   * must never make the count and the filesystem disagree silently.
+   */
+  orphanedOutput?: string;
   error?: string;
 }
 
@@ -98,12 +104,16 @@ function errorIds(report: ReturnType<typeof evaluateAsset>): string[] {
 /**
  * Releases a reservation without letting the cleanup become the reported error.
  */
-async function release(deps: MeshBatchDeps, target: string): Promise<void> {
+async function release(deps: MeshBatchDeps, target: string): Promise<boolean> {
   try {
     await deps.discardReservation(target);
+    return true;
   } catch {
-    // Swallowed on purpose. A failure to tidy up is strictly less interesting
-    // than whatever made the item fail, and must never displace it.
+    // Swallowed as the REPORTED cause — a failure to tidy up is strictly less
+    // interesting than whatever made the item fail. But it is returned, because
+    // a release that failed leaves a file on disk, and outputsWritten must not
+    // silently disagree with the filesystem.
+    return false;
   }
 }
 
@@ -158,8 +168,10 @@ async function prepareOne(
     // could: an EPERM from the cleanup threw first, so a caller whose Blender
     // had segfaulted was told only "EPERM_cleanup_failed" and the real cause
     // was gone.
-    await release(deps, target);
-    throw err;
+    if (!(await release(deps, target))) item.orphanedOutput = target;
+    throw Object.assign(err instanceof Error ? err : new Error(String(err)), {
+      meshBatchOrphan: item.orphanedOutput,
+    });
   }
   item.normalizedPath = target;
   item.unwrapped = receipt.objectsUnwrapped ?? 0;
@@ -170,9 +182,11 @@ async function prepareOne(
   try {
     after = evaluateAsset(await deps.inspect(target), options.policy);
   } catch (err) {
-    await release(deps, target);
+    if (!(await release(deps, target))) item.orphanedOutput = target;
     delete item.normalizedPath;
-    throw err;
+    throw Object.assign(err instanceof Error ? err : new Error(String(err)), {
+      meshBatchOrphan: item.orphanedOutput,
+    });
   }
   item.passedAfter = after.passed;
   item.status = after.passed ? 'prepared' : 'failed';
@@ -208,10 +222,12 @@ export async function runMeshBatch(
     } catch (err) {
       // One bad file must not stall a forty-item run. The error is reported
       // against its own item and the loop moves on.
+      const orphan = (err as { meshBatchOrphan?: string } | null)?.meshBatchOrphan;
       items.push({
         input: source,
         status: 'failed',
         error: err instanceof Error ? err.message : String(err),
+        ...(orphan !== undefined ? { orphanedOutput: orphan } : {}),
       });
     }
   }
@@ -221,7 +237,9 @@ export async function runMeshBatch(
     prepared: items.filter((item) => item.status === 'prepared').length,
     alreadyValid: items.filter((item) => item.status === 'already_valid').length,
     failed: items.filter((item) => item.status === 'failed').length,
-    outputsWritten: items.filter((item) => item.normalizedPath !== undefined).length,
+    outputsWritten: items.filter(
+      (item) => item.normalizedPath !== undefined || item.orphanedOutput !== undefined,
+    ).length,
     blenderAvailable: deps.blenderAvailable,
     items,
   };

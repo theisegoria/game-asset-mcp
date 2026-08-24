@@ -60,8 +60,8 @@ Set these in your MCP client's `env` block — see the snippets below. **There i
 | `ASSET_HTTP_TIMEOUT_MS` | no | `60000` | Per-request HTTP timeout. |
 | `ASSET_LOG_LEVEL` | no | `info` | `silent` \| `error` \| `warn` \| `info` \| `debug`. |
 | `BLENDER_PATH` | no | auto-detected | Blender executable for `normalize_mesh` and `batch_prepare_meshes`. Overrides discovery. |
-| `TRIPO_BASE_URL` | no | Tripo v3 endpoint | Retarget the 3D provider. Must be `https://` — refused at startup otherwise, because the upload carries your API key. |
-| `LEONARDO_BASE_URL` | no | Leonardo endpoint | Retarget the image/audio provider. Must be `https://`, same reason. |
+| `TRIPO_BASE_URL` | no | Tripo v3 endpoint | Retarget the 3D provider. Must be `https://`; an `http://` value is refused when the provider is first used, not at startup, because providers are constructed lazily. |
+| `LEONARDO_BASE_URL` | no | Leonardo endpoint | Retarget the image/audio provider. Must be `https://`, refused on first use, same reason. |
 | `ASSET_SPEND_LIMIT_CENTS` | no | unlimited | Session spend ceiling in **US cents**. Credit-consuming tools refuse once it is reached, before contacting the provider. |
 
 ### ⚠️ Tripo API credits are billed separately from a Tripo Studio subscription
@@ -156,7 +156,7 @@ Only nine tools can cost you money, and each one says so in its description befo
 
 ## The free local half (no API keys, no network)
 
-Eleven of the twenty tools never spend a credit. **Five of those never touch the network at all** — the ones below. (The other six are free but still talk to the provider or the filesystem: polling a job and downloading its result cost nothing, but they are network calls.) If you already have meshes, these five are the whole product and you can stop reading at the end of this section.
+Eleven of the twenty tools never spend a credit, and only **two of those eleven use the network at all** — `get_asset_job` polls, and `download_asset` fetches; both are free but are network calls. The other nine work offline. The five below are the mesh pipeline, and if you already have meshes they are the whole product.
 
 | Tool | What it answers |
 | --- | --- |
@@ -229,7 +229,7 @@ Other side effects worth knowing:
 - **Files are written to disk.** *Downloaded* assets land under `ASSET_OUTPUT_DIR`, and a download path that escapes the workspace root is refused. Three tools are different and deliberately so: `extract_pbr_trio`, `normalize_mesh` and `batch_prepare_meshes` write where **you** tell them to, including outside the workspace, because they operate on meshes you already own and those do not live in an asset-generation directory. Give them a destination you meant.
 - **`download_asset` and `generate_sound_effect` accept a `destination`** that overrides `ASSET_OUTPUT_DIR` for that one call. It is still contained: a path escaping the given root is refused.
 - **`ASSET_OUTPUT_DIR` should be absolute.** A relative value resolves against the *server's* working directory, which your MCP client chooses — several spawn from `/`. The server refuses to start with a message naming the resolved path and the working directory it came from. That diagnosis covers the eight errnos this can realistically produce — ENOENT, EACCES, EPERM, EROFS, ENOTDIR, ELOOP, ENAMETOOLONG and ENOSPC, including ASSET_OUTPUT_DIR pointing at a file rather than a directory. Anything else still propagates raw.
-- **Nothing is silently overwritten.** A colliding output name gets a numeric suffix (`crate`, `crate_2`, …) rather than destroying a result you may already have reviewed. The name is claimed by exclusive create, so two items in one batch cannot race for it — a batch is exactly where two sources share a basename.
+- **Nothing is silently overwritten.** A derived output name gets a numeric suffix (`crate`, `crate_2`, …) rather than destroying a result you may already have reviewed, and the name is claimed by exclusive create so two items in one batch cannot race for it. An **explicit** `outputPath` is refused outright if a file is already there, unless you pass `overwrite: true` — and it is refused unconditionally, with no opt-out, if it resolves onto the input mesh. That resolution accounts for symlinks, hardlinks, case-insensitive volumes, and the exporter's habit of rewriting the extension, because every one of those has destroyed a source mesh here.
 - **Downloads are capped** at `ASSET_MAX_DOWNLOAD_BYTES` and the cap is enforced while streaming, not from the `Content-Length` header — a server that lies about the size cannot exhaust your memory.
 - **Only HTTPS.** Non-HTTPS URLs are refused outright, including ones that arrive inside a provider's response.
 - **API keys are redacted from logs** centrally, so no individual log call site can leak one.
@@ -306,7 +306,7 @@ This is early software, and the parts most likely to drift are marked as such ra
 
 **Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. If they are wrong you will see a 404 that looks exactly like a bad API key, so check the path before the key.
 
-**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 279 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
+**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 305 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
 
 Concretely, these remain **unverified**:
 

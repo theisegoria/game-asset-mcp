@@ -41,7 +41,12 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         outputPath: z
           .string()
           .optional()
-          .describe('Where to write the GLB. Defaults to <input>_normalized.glb beside the source.'),
+          .describe(
+            'Where to write the GLB. Must end in .glb, or have no extension (in which case .glb ' +
+            'is appended) — the exporter rewrites the extension, so a .gltf path would silently ' +
+            'become .glb and could land on a different file. Refused if it resolves onto the ' +
+            'input mesh. Defaults to <input>_normalized.glb beside the source.',
+          ),
         overwrite: z
           .boolean()
           .default(false)
@@ -139,7 +144,27 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
         },
       );
 
-      const result = await runBlenderScript(
+      // The reservation CREATED the file to claim the name, and nothing released
+      // it when the work failed — so three failed calls left three zero-byte
+      // .glb files, the canonical name permanently taken by an empty one that
+      // sorts first in any glob, and the caller never told a file was written.
+      // mesh-batch.ts documents and fixes exactly this; the single-mesh tool
+      // shares the same reservation primitive and did not.
+      let reservationHeld = args.outputPath === undefined;
+      const releaseReservation = async (): Promise<boolean> => {
+        if (!reservationHeld) return true;
+        reservationHeld = false;
+        try {
+          await fs.rm(output, { force: true });
+          return true;
+        } catch {
+          return false; // Reported, never thrown: it must not displace the cause.
+        }
+      };
+
+      let result;
+      try {
+        result = await runBlenderScript(
         packagedScript('blender_normalize.py'),
         {
           input: source,
@@ -153,7 +178,17 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
           ...(args.targetTriangles !== undefined ? { targetTriangles: args.targetTriangles } : {}),
         },
         { timeoutMs: args.timeoutSeconds * 1000 },
-      );
+        );
+      } catch (err) {
+        const cleaned = await releaseReservation();
+        if (!cleaned) {
+          throw invalidState(
+            `${err instanceof Error ? err.message : String(err)} ` +
+            `(a zero-byte placeholder was left at ${output}; the cleanup itself failed)`,
+          );
+        }
+        throw err;
+      }
 
       // Confirm the file exists and hash it: a receipt printed by a subprocess
       // is a claim, and the bytes on disk are the evidence.
@@ -161,8 +196,14 @@ export function registerNormalizeTools(server: McpServer, ctx: ToolContext): voi
       try {
         bytes = new Uint8Array(await fs.readFile(output));
       } catch {
+        await releaseReservation();
         throw invalidState(`Blender reported success but ${output} was not written`);
       }
+      if (bytes.byteLength === 0) {
+        await releaseReservation();
+        throw invalidState(`Blender reported success but ${output} is empty`);
+      }
+      reservationHeld = false;
 
       const receipt = result.receipt as Record<string, number | string>;
       const uvsBefore = Number(receipt.objectsMissingUVsBefore ?? 0);
