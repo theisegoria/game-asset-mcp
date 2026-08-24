@@ -30,6 +30,7 @@ const EXPECTED_TOOLS = [
   'list_asset_jobs',
   'download_asset',
   'inspect_asset',
+  'extract_pbr_trio',
 ];
 
 async function main() {
