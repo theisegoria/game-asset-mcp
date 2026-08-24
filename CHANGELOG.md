@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.3.6
+
+A twelfth review. Two of these are mine from 0.3.5 — one a regression, one the
+same defect class for the third consecutive release.
+
+### I claimed to ship two fields that reached no caller
+
+`undrawnMeshCount` and `undrawnTriangleCount` were declared, computed,
+documented in the source as "Reported, not discarded", and headlined in 0.3.5's
+release note. **They were in no response.** They were never added to the output
+interface, so `tsc` had nothing to object to — a field that exists nowhere
+cannot be a type error. The test meant to pin them is titled "and reports the
+rest separately" and asserts neither.
+
+This is the third consecutive instance of one class: `weldSkipped` (0.3.4),
+`factorApplied` (0.3.5), these (0.3.5). The rule that actually prevents it:
+**put the field on the output type first.** The moment they were added there,
+the compiler named both missing sites immediately.
+
+### A regression 0.3.5 introduced
+
+Narrowing every count to the drawn scene turned a **mesh library** — meshes
+present with no scene graph referencing them, valid glTF that real exporters
+emit — into `0 triangles`, which `validate_game_asset` refuses at severity
+`error`. The report contradicted itself: "nothing renders as a solid surface"
+beside a real bounding box, because `computeBoundingBox` carries a documented
+fallback for exactly that shape and the triangle counter had none. Two readers
+of one fact disagreeing, which is the same shape as the defect 0.3.5 fixed.
+
+### Half-applied fixes, again
+
+- **The drawn-scene narrowing reached `triangleCount` and the bounding box, and
+  not the attribute counters.** `hasUVs` derives from `missingUv`, and
+  `uvs_present` is severity `error` — so a never-drawn, unwrapped collision
+  proxy in a second scene FAILED a model whose drawn mesh is perfectly
+  unwrapped. The exact mirror of the bug 0.3.5 fixed, in the same function.
+- **The reservation cleanup wrapped only the plane loop** and stopped one
+  statement short of the receipt write. Both of its tests fail *inside* the
+  loop, so neither could see it — and the leak was worse than the one it fixed:
+  four **fully written** planes holding the canonical names after a call the
+  caller was told had failed.
+- **`mergeDistance: 0` meant "repair nothing".** The weld gate and the dissolve
+  gate were one flag, folding together "the caller asked for zero welding" and
+  "the threshold cannot be expressed". Only the second is a reason to skip the
+  dissolve: a zero-area face is degenerate at any threshold, including
+  Blender's 1e-6 floor. Measured on a quad plus five zero-area triangles:
+  7 to 2 at the default, 7 to 7 at zero, both reporting `objectsCleaned: 1`.
+  The caller most likely to pass 0 is the one protecting screws, gems and PCB
+  detail — exactly who most needs the repair.
+- **An unreadable container reported `textureCount: 0`** with no failure named,
+  indistinguishable from "no embedded textures". Draco/meshopt/KTX2 GLBs land
+  there and providers do return them. The per-texture half was fixed in 0.3.5;
+  this sibling path was not.
+
+### Verification
+
+0.3.5's verification claim was independently re-checked this round and found
+**accurate** — all ten of its fixes were confirmed pinned, each mutant verified
+to compile and to have actually applied. That is the first release note here
+whose verification claim survived review.
+
 ## 0.3.5
 
 An eleventh review found nine defects. One destroys geometry; one is a false
