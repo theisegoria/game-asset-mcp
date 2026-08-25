@@ -54,3 +54,74 @@ jobs:
         # Node in the matrix, including 18.17, so the engines floor is backed by
         # the server actually starting there rather than by assertion.
         run: node scripts/verify-install.mjs
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # The Blender-backed tests, actually executed.
+  #
+  # WHY THIS JOB EXISTS. Every test touching scripts/blender_normalize.py is
+  # `describe.skipIf(!haveBlender)`, and no runner above has Blender — so the
+  # matrix reported green while never executing a single line of that script.
+  # That script is where every data-destruction defect in this project's history
+  # has lived: a threshold that ate 98% of a mesh and reported it ready, an
+  # inverted scale divisor, a repair silently skipped on any object scaled above
+  # 1.0. The suite's most important guards ran only on one developer's laptop.
+  #
+  # A green CI that never runs the dangerous code is precisely the failure mode
+  # this project keeps finding, so this job installs Blender and REFUSES to pass
+  # by skipping.
+  # ────────────────────────────────────────────────────────────────────────────
+  blender:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Install Blender
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends blender
+          blender --version | head -1
+
+      - name: Refuse to continue if Blender is not discoverable
+        # Without this the job would pass BY SKIPPING, which is the exact
+        # failure it exists to prevent. findBlender is the same discovery the
+        # tests use, so this asserts on the thing that actually gates them.
+        run: |
+          node -e "
+          import('./dist/util/blender.js').then(({ findBlender }) => {
+            const found = findBlender();
+            if (!found) {
+              console.error('Blender not discoverable - the gated tests would silently skip');
+              process.exit(1);
+            }
+            console.log('Blender discovered at ' + found);
+          });
+          "
+
+      - name: Run the Blender-backed tests, and prove they ran
+        # A COUNT, not a status string. Zero tests run means this job proved
+        # nothing, and it must fail rather than report success.
+        run: |
+          npx vitest run tests/normalize.test.ts --reporter=json --outputFile=blender-results.json
+          node -e "
+          const r = require('./blender-results.json');
+          const passed = r.numPassedTests ?? 0;
+          const skipped = r.numPendingTests ?? 0;
+          console.log('passed=' + passed + ' skipped=' + skipped);
+          if (skipped > 0) {
+            console.error('Blender tests SKIPPED in the job that exists to run them');
+            process.exit(1);
+          }
+          if (passed === 0) {
+            console.error('No Blender tests ran at all');
+            process.exit(1);
+          }
+          "
