@@ -96,12 +96,44 @@ def select_only(obj):
 # bpy.ops.mesh.remove_doubles' RNA, not assumed.
 BLENDER_MIN_THRESHOLD = 1e-6
 
-# glTF units are metres by specification. One micrometre is below any feature a
-# real asset carries, so it is the widest WORLD radius we are willing to treat
-# as "degenerate only" when the caller asks for mergeDistance 0. Stated in world
-# space deliberately: the defect this replaces stated it in LOCAL space, where
-# its real size depended on the object's scale.
-DEGENERATE_WORLD_EPSILON = 1e-6
+# How much larger the mesh's own smallest real feature must be than Blender's
+# threshold floor before we will dissolve at that floor.
+#
+# `mergeDistance: 0` is a SENTINEL, not a distance: it means "merge nothing, but
+# still remove faces that are degenerate at any scale". The only threshold
+# Blender can express for that is its 1e-6 floor, and whether 1e-6 is safe
+# depends on the mesh's LOCAL feature size — nothing else.
+#
+# Two previous attempts framed this in world space and both were wrong at some
+# scale, in opposite directions. Framing it as `1e-6 LOCAL` destroyed a mesh
+# whose own local features were 4e-7. Framing it as `1e-6 WORLD / divisor` made
+# the gate reduce to `divisor <= 1`, so every object scaled above 1.0 silently
+# stopped being repaired — and both fixtures sat at divisor exactly 1.0, which
+# is the one value where each bug is invisible.
+#
+# The question was never about world scale. The dissolve runs on LOCAL
+# coordinates, so it is safe exactly when the mesh's smallest real local edge is
+# comfortably above the floor. That is scale-independent by construction, which
+# is the property the previous two framings lacked.
+DEGENERATE_SAFETY_FACTOR = 10.0
+
+
+def smallest_local_edge(obj):
+    """Shortest NON-ZERO edge in local space, or None when there is none.
+
+    Zero-length edges are excluded deliberately: they are exactly what the
+    dissolve exists to remove, so counting them would make the mesh look finer
+    than it is and suppress its own repair.
+    """
+    mesh = obj.data
+    shortest = None
+    for edge in mesh.edges:
+        first = mesh.vertices[edge.vertices[0]].co
+        second = mesh.vertices[edge.vertices[1]].co
+        length = (first - second).length
+        if length > 0.0 and (shortest is None or length < shortest):
+            shortest = length
+    return shortest
 
 
 def world_threshold_divisor(obj):
@@ -134,10 +166,12 @@ def clean_geometry(obj, merge_distance, weld=True, dissolve_threshold=None):
     `merge_distance` arrives in LOCAL units — the caller divides the documented
     scene-unit value by the object's world scale.
 
-    `weld=False` means the requested threshold CANNOT BE EXPRESSED (either the
-    caller asked for 0, or division by the world scale put it under Blender's
-    1e-6 floor). Both thresholded operations are skipped in that case; only the
-    unthresholded repair below still runs.
+    `weld=False` means the WELD threshold cannot be expressed — the caller asked
+    for 0, or dividing by the world scale put it under Blender's 1e-6 floor.
+
+    `dissolve_threshold=None` means the same about the DISSOLVE, which is a
+    separate decision the caller makes: the two share no flag, because "merge
+    nothing" and "this distance is inexpressible" are different requests.
     """
     select_only(obj)
     bpy.ops.object.mode_set(mode="EDIT")
@@ -154,21 +188,24 @@ def clean_geometry(obj, merge_distance, weld=True, dissolve_threshold=None):
     # true scale went from 3042 triangles to ZERO even at mergeDistance 0, and
     # the refusal named the one knob that could not fix it.
     #
-    # Dissolve is gated SEPARATELY from the weld, because the two conditions
-    # that used to share one flag are different questions:
+    # Gated SEPARATELY from the weld and decided by the caller, because the two
+    # questions genuinely differ:
     #
-    #   "the caller asked for zero welding"  -> still wants zero-area faces
-    #                                           repaired; a zero-area face is
-    #                                           degenerate at ANY threshold,
-    #                                           including Blender's 1e-6 floor,
-    #                                           so skipping protects nothing.
-    #   "the threshold is unrepresentable"   -> must skip, because the clamp to
-    #                                           1e-6 would be WIDER than asked.
+    #   "merge nothing, but still repair"  -> dissolve at Blender's floor, but
+    #                                         ONLY when this mesh's own smallest
+    #                                         real local edge is far enough above
+    #                                         that floor for it to reach nothing
+    #                                         but genuinely degenerate geometry.
+    #   "this distance is inexpressible"   -> skip, because the clamp to the
+    #                                         floor would be WIDER than asked.
     #
-    # Folding them together meant `mergeDistance: 0` silently left degenerate
-    # faces intact while the receipt still counted the object as cleaned.
-    # Measured on a cube plus five zero-area faces: 17 -> 12 at the default, and
-    # 17 -> 17 at mergeDistance 0, both reporting objectsCleaned 1.
+    # ⚠ The first comment here claimed "a zero-area face is degenerate at ANY
+    # threshold, so skipping protects nothing". That is true of the FACE and
+    # false of the THRESHOLD: the floor also reaches real geometry finer than
+    # itself, which is how a mesh with 4e-7 local features lost 98% of itself.
+    # The prose outlived two rewrites of the code beneath it and contradicted
+    # what that code did — which is its own kind of defect, because the next
+    # person reads the comment.
     if dissolve_threshold is not None:
         bpy.ops.mesh.dissolve_degenerate(threshold=min(dissolve_threshold, 1.0))
 
@@ -315,17 +352,29 @@ def main():
             # it is expressed as one: the narrowest world radius we are willing
             # to call degenerate-only. Everything then flows through the single
             # divisor rule, which is monotonic by construction.
-            effective_merge = (
-                requested_merge if requested_merge > 0.0 else DEGENERATE_WORLD_EPSILON
-            )
-            dissolve_local = effective_merge / divisor
-            if dissolve_local >= BLENDER_MIN_THRESHOLD:
-                dissolve_threshold = dissolve_local
+            if requested_merge <= 0.0:
+                # The sentinel. Dissolve at Blender's floor, but only when this
+                # mesh's own smallest real edge is far enough above it that the
+                # floor can only reach genuinely degenerate geometry.
+                shortest = smallest_local_edge(obj)
+                if (
+                    shortest is not None
+                    and shortest >= BLENDER_MIN_THRESHOLD * DEGENERATE_SAFETY_FACTOR
+                ):
+                    dissolve_threshold = BLENDER_MIN_THRESHOLD
+                else:
+                    dissolve_threshold = None
+                    dissolve_skipped += 1
             else:
-                # Unrepresentable: the clamp to Blender's floor would exceed the
-                # world threshold asked for. Skipping destroys nothing.
-                dissolve_threshold = None
-                dissolve_skipped += 1
+                # A real distance, in world units: express it locally and refuse
+                # if Blender cannot, because the clamp to its floor would be
+                # WIDER than what was asked for.
+                dissolve_local = requested_merge / divisor
+                if dissolve_local >= BLENDER_MIN_THRESHOLD:
+                    dissolve_threshold = dissolve_local
+                else:
+                    dissolve_threshold = None
+                    dissolve_skipped += 1
 
             clean_geometry(
                 obj,

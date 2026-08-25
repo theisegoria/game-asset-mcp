@@ -83,7 +83,16 @@ export function evaluateAsset(
     checks.push(check);
   };
 
-  if (policy.requireUVs) {
+  // The attribute checks answer "do the DRAWN primitives carry this?", so with
+  // no drawn primitive there is nothing to answer about. Evaluating anyway made
+  // the report state something FALSE about the file: `hasUVs` is
+  // `primitiveCount > 0 && missingUv === 0`, so zero drawn primitives produced
+  // "at least one primitive has no TEXCOORD_0" for a file whose every primitive
+  // is fully unwrapped. `has_geometry` below already names the real cause once;
+  // three errors for one cause, two of them untrue, is worse than one that is.
+  const anythingDrawn = inspection.primitiveCount > 0;
+
+  if (policy.requireUVs && anythingDrawn) {
     add({
       id: 'uvs_present',
       severity: 'error',
@@ -94,7 +103,7 @@ export function evaluateAsset(
     });
   }
 
-  if (policy.requireNormals) {
+  if (policy.requireNormals && anythingDrawn) {
     add({
       id: 'normals_present',
       severity: 'error',

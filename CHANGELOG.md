@@ -18,8 +18,14 @@ same defect that release's own comment quotes while introducing it.
 
   The test could not see it: hardcoded to one merge distance, against a fixture
   at scale `[1,1,1]` — divisor 1 is the single value at which it is invisible.
-  Fixed by deleting the special case rather than patching it, so every path runs
-  the one divisor rule and is monotonic by construction.
+
+  > ⚠️ **CORRECTED in 0.3.8.** This release's replacement was wrong too, in the
+  > opposite direction: framed as `1e-6 world / divisor`, the gate reduced to
+  > `divisor <= 1`, so every object scaled above 1.0 silently stopped being
+  > repaired — and the fixture was *still* at scale `[1,1,1]`, with the cliff at
+  > 1.0001. The claim "monotonic by construction" was also false. Both framings
+  > asked about WORLD scale; the dissolve runs on LOCAL coordinates, so the
+  > safety question is the mesh's own local feature size and nothing else.
 
 ### Wrong verdicts, at severity `error`
 

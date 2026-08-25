@@ -15,6 +15,7 @@ import path from 'node:path';
 import pathModule from 'node:path';
 import { existsSync as existsSyncFs, linkSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { Document, NodeIO } from '@gltf-transform/core';
 import { resolveNormalizeTarget } from '../src/domain/normalize-target.js';
 import os from 'node:os';
 import { findBlender, packagedScript, requireBlender, runBlenderScript } from '../src/util/blender.js';
@@ -957,4 +958,109 @@ describe.skipIf(!haveBlender)('merging nothing still repairs degenerate faces', 
     expect(atZero.objectsWeldSkippedThresholdUnrepresentable).toBe(1);
     expect(atZero.objectsDissolveSkippedThresholdUnrepresentable).toBe(0);
   }, 600_000);
+});
+
+/**
+ * `mergeDistance: 0` must behave the same at EVERY object scale.
+ *
+ * ⚠ THIS TEST EXISTS BECAUSE THE SAME MISTAKE WAS MADE THREE TIMES, and each
+ * time the fixture sat at the one scale where the current bug was invisible:
+ *
+ *   r13  threshold framed as `1e-6 LOCAL`  -> world radius grew with scale, and
+ *        a mesh whose local features were 4e-7 lost 98% of itself, reported
+ *        readyToTexture. Fixture was scale [1,1,1].
+ *   r14  reframed as `1e-6 WORLD / divisor` -> the gate reduced to
+ *        `divisor <= 1`, so every object scaled ABOVE 1.0 silently stopped
+ *        being repaired. Fixture was still scale [1,1,1]; the cliff sat at
+ *        1.0001.
+ *
+ * Both framings asked about WORLD scale. The dissolve runs on LOCAL
+ * coordinates, so the safety question is the mesh's own local feature size and
+ * nothing else — which is why the current rule is scale-independent, and why
+ * this test sweeps scale rather than merge distance.
+ */
+describe.skipIf(!haveBlender)('mergeDistance 0 repairs degenerate faces at any scale', () => {
+  /** A quad plus five ZERO-AREA triangles, at a given node scale. */
+  async function degenerateAt(file: string, nodeScale: number): Promise<string> {
+    const doc = new Document();
+    doc.createBuffer();
+    const verts = [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0];
+    const indices = [0, 1, 2, 1, 3, 2];
+    let next = 4;
+    for (let k = 0; k < 5; k += 1) {
+      const x = 0.2 * k;
+      verts.push(x, 0, 0, x, 0, 0, x, 0, 0);
+      indices.push(next, next + 1, next + 2);
+      next += 3;
+    }
+    const position = doc.createAccessor().setType('VEC3').setArray(new Float32Array(verts));
+    const prim = doc
+      .createPrimitive()
+      .setAttribute('POSITION', position)
+      .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(indices)));
+    const node = doc
+      .createNode('n')
+      .setMesh(doc.createMesh('m').addPrimitive(prim))
+      .setScale([nodeScale, nodeScale, nodeScale]);
+    doc.createScene('s').addChild(node);
+    await new NodeIO().write(file, doc);
+    return file;
+  }
+
+  // 1.0001 is deliberate: it is where the r14 cliff sat, one ten-thousandth
+  // above the value both previous fixtures used.
+  it.each([0.001, 1, 1.0001, 2, 1000])(
+    'removes the five zero-area faces at node scale %p',
+    async (nodeScale) => {
+      const dir = await tmpDir();
+      const result = await runBlenderScript(
+        packagedScript('blender_normalize.py'),
+        {
+          input: await degenerateAt(path.join(dir, `deg_${nodeScale}.glb`), nodeScale),
+          output: path.join(dir, `deg_${nodeScale}_out.glb`),
+          unwrapMissingUVs: false,
+          cleanGeometry: true,
+          mergeDistance: 0,
+          normalizeMaterials: true,
+          angleLimitDegrees: 66,
+          islandMargin: 0.002,
+        },
+        { timeoutMs: 300_000 },
+      );
+      const receipt = result.receipt as Record<string, number>;
+
+      // 7 in, 2 out, at every scale. Under the r14 framing this was 7 -> 7 for
+      // every scale above 1.0, while still reporting objectsCleaned: 1.
+      expect(receipt.trianglesBefore).toBe(7);
+      expect(receipt.trianglesAfter).toBe(2);
+      expect(receipt.objectsDissolveSkippedThresholdUnrepresentable).toBe(0);
+    },
+    300_000,
+  );
+
+  it('still refuses to dissolve a mesh whose own features are below the floor', async () => {
+    // The r13 data-destruction case, which the scale-independent rule must NOT
+    // reopen: local edges of 4e-7 are finer than Blender's expressible floor,
+    // so the repair is skipped and SAID to be skipped rather than eating 98%
+    // of the mesh.
+    const dir = await tmpDir();
+    const result = await runBlenderScript(
+      packagedScript('blender_normalize.py'),
+      {
+        input: fileURLToPath(new URL('./fixtures/real/tiny_parts_node_scaled.glb', import.meta.url)),
+        output: path.join(dir, 'tiny_zero.glb'),
+        unwrapMissingUVs: false,
+        cleanGeometry: true,
+        mergeDistance: 0,
+        normalizeMaterials: true,
+        angleLimitDegrees: 66,
+        islandMargin: 0.002,
+      },
+      { timeoutMs: 300_000 },
+    );
+    const receipt = result.receipt as Record<string, number>;
+
+    expect(receipt.trianglesAfter).toBe(receipt.trianglesBefore);
+    expect(receipt.objectsDissolveSkippedThresholdUnrepresentable).toBe(1);
+  }, 300_000);
 });

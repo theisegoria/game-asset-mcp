@@ -168,7 +168,7 @@ export async function inspectGltf(filePath: string): Promise<AssetInspection> {
   const materials = geometry.drawnMaterials;
   const drawnTextures = texturesOf(materials);
   const textures = summarizeTextures(drawnTextures);
-  const bounds = computeBoundingBox(root);
+  const bounds = computeBoundingBox(root, geometry.sceneGraphFallback);
   const pbr = summarizePbr(materials);
 
   const hasUVs = geometry.primitiveCount > 0 && geometry.missingUv === 0;
@@ -558,7 +558,7 @@ function largestExtent(box: BoundingBox): number {
  * rotated part, and an overstated size is exactly the mistake this report is
  * supposed to catch.
  */
-function computeBoundingBox(root: Root): {
+function computeBoundingBox(root: Root, sceneGraphFallback: boolean): {
   box: BoundingBox;
   localSpaceFallback: boolean;
   empty: boolean;
@@ -600,14 +600,29 @@ function computeBoundingBox(root: Root): {
   // completely FLAT plate (zero Y extent) correctly failed min_dimension and was
   // refused; adding one unrelated second scene that no renderer draws made the
   // union non-flat and the same flat plate was reported SHIPPABLE.
-  const bounded = root.getDefaultScene() ?? root.listScenes()[0];
+  // Skipped entirely under the mesh-library fallback: there is no scene to take
+  // bounds from, and asking anyway produced a NON-finite box that then silently
+  // took the local-space path below — under a DIFFERENT predicate from
+  // sceneGraphFallback.
+  //
+  // That divergence is the one-call-site-over defect again, introduced by the
+  // release that fixed the previous instance. A file whose default scene holds
+  // only a camera reported `sceneGraphFallback: false` beside the warning "no
+  // scene references the meshes, so the bounding box is local-space" — the
+  // boolean and the warning contradicting each other in one response, with
+  // min_dimension (severity `error`) evaluated against geometry the same report
+  // said was not drawn.
+  const bounded = sceneGraphFallback ? undefined : (root.getDefaultScene() ?? root.listScenes()[0]);
   if (bounded) {
     const sceneBounds = getBounds(bounded);
     expand(sceneBounds.min, sceneBounds.max);
   }
 
   let localSpaceFallback = false;
-  if (!finite()) {
+  // Local-space bounds are for the mesh-library shape ONLY. A file that HAS a
+  // scene graph but whose drawn scene is empty draws nothing, and inventing
+  // bounds for it is what fed a dimension check geometry no renderer submits.
+  if (!finite() && sceneGraphFallback) {
     for (const mesh of root.listMeshes()) {
       for (const primitive of mesh.listPrimitives()) {
         const position = primitive.getAttribute('POSITION');

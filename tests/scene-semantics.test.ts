@@ -18,6 +18,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { inspectGltf } from '../src/inspection/gltf.js';
+import { registerValidateTools } from '../src/tools/validate.js';
 import { encodePNG } from '../src/inspection/image.js';
 import { registerInspectionTools } from '../src/tools/inspection.js';
 import { connectTools, type ToolClient } from './helpers/tool-harness.js';
@@ -375,5 +376,78 @@ describe('the undrawn counters reach an actual client', () => {
     expect(payload.undrawnTriangleCount).toBe(1);
     expect(payload.sceneGraphFallback).toBe(false);
     expect(payload.triangleCount).toBe(1);
+  });
+});
+
+/**
+ * A report must not state things about the file that are false.
+ *
+ * With an empty default scene, `hasUVs` is `primitiveCount > 0 && missingUv === 0`
+ * — false because nothing is DRAWN, not because anything lacks UVs. The policy
+ * then rendered that as "at least one primitive has no TEXCOORD_0" for a file
+ * whose every primitive is fully unwrapped, and did the same for normals. Three
+ * errors for one cause, two of them untrue.
+ *
+ * And the bounding box answered to a DIFFERENT predicate from
+ * sceneGraphFallback, so one response carried `sceneGraphFallback: false`
+ * beside the warning "no scene references the meshes" — the boolean and the
+ * warning contradicting each other, with min_dimension (severity `error`)
+ * judged against geometry the same report said was not drawn.
+ */
+describe('a draws-nothing file is described honestly', () => {
+  async function emptyDefaultWithGoodMesh(file: string): Promise<string> {
+    const doc = new Document();
+    doc.createBuffer();
+    const position = doc
+      .createAccessor()
+      .setType('VEC3')
+      .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]));
+    const uv = doc.createAccessor().setType('VEC2').setArray(new Float32Array([0, 0, 1, 0, 0, 1]));
+    const normal = doc
+      .createAccessor()
+      .setType('VEC3')
+      .setArray(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]));
+    const prim = doc
+      .createPrimitive()
+      .setAttribute('POSITION', position)
+      .setAttribute('TEXCOORD_0', uv)
+      .setAttribute('NORMAL', normal);
+    doc.createScene('offstage').addChild(
+      doc.createNode('m').setMesh(doc.createMesh('m').addPrimitive(prim)),
+    );
+    doc.getRoot().setDefaultScene(doc.createScene('main').addChild(doc.createNode('camera')));
+    await new NodeIO().write(file, doc);
+    return file;
+  }
+
+  it('does not claim a primitive lacks UVs when none is drawn', async () => {
+    const model = await emptyDefaultWithGoodMesh(path.join(work, 'honest.glb'));
+    const tools = await connectTools(registerValidateTools, work);
+    try {
+      const { isError, payload, text } = await tools.call('validate_game_asset', { modelPath: model });
+      expect(isError, text).toBe(false);
+      const failed = (payload.failures as Array<Record<string, unknown>>).map((f) => f.id);
+
+      // The real cause, named. `min_dimension` is also true of a file that
+      // draws nothing, so it is allowed to stand.
+      expect(failed).toContain('has_geometry');
+      // NOT these — every primitive in this file carries both. Before the fix
+      // they failed with "at least one primitive has no TEXCOORD_0", which is
+      // simply untrue about the file.
+      expect(failed).not.toContain('uvs_present');
+      expect(failed).not.toContain('normals_present');
+    } finally {
+      await tools.close();
+    }
+  });
+
+  it('does not contradict itself about whether a scene graph exists', async () => {
+    const inspected = await inspectGltf(await emptyDefaultWithGoodMesh(path.join(work, 'nocontra.glb')));
+
+    // The file HAS a scene graph, so no mesh-library fallback — and therefore
+    // no local-space bounding box either. Previously these disagreed.
+    expect(inspected.sceneGraphFallback).toBe(false);
+    expect(inspected.warnings.join(' ')).not.toContain('local-space');
+    expect(inspected.boundingBox.sizeMeters).toEqual([0, 0, 0]);
   });
 });
