@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.3.9
+
+A fifteenth review, six findings. Four are defects that 0.3.8's own fixes
+introduced, and one is in the check written to prevent exactly that.
+
+### A non-strict reader turned a refusal into a stated falsehood
+
+Making `extract_pbr_trio` read non-strictly was right — one broken normal map
+should not cost you the albedo and roughness you could still have had. But it
+converted a loud, correct refusal into a **success that asserts something
+untrue**:
+
+| | result |
+| --- | --- |
+| 0.3.8 (strict) | `isError: true` — `ENOENT … THE_NORMAL_MAP_IS_MISSING.png` |
+| 0.3.8 (non-strict) | success: *"normal was not written at all: the material declares no such texture"* |
+
+The material **does** declare one. The reader knew precisely what was wrong and
+said so, into a logger constructed inline and never read. There are now three
+states — loaded, **declared but unreadable**, not declared — and the reader's
+diagnostic is surfaced so the caller learns *which file* is missing.
+
+### The guard against false greens had two false greens
+
+`assert-blender-tests-ran.mjs`, added last release to stop CI passing by
+skipping, could itself pass while proving nothing: its suite list was
+hardcoded, so renaming one `describe` made that suite invisible and its tests
+were reported as allowed platform skips; and *"at least one must have passed"*
+was documented but never implemented — the count was used only in a log line.
+The list is now derived from the source, and a suite present in the source but
+absent from the report is a failure.
+
+### Half-applied, again
+
+- **`anythingDrawn` had a third site.** `base_color_texture` reported "no base
+  colour texture" at severity `error` about a material that binds one.
+- **`bounds.empty` reached no consumer** — the fifth instance of that class
+  here. `bounding_box_finite` **passed** while reporting `0.000 x 0.000 x
+  0.000 m` for a file where no finite vertex was found.
+- **An orphan texture is not an extension-bound one.** 0.3.8 counted both,
+  reopening the `texture_resolution` and `power_of_two_textures` warnings that
+  scoping textures to drawn materials exists to suppress — and on one file made
+  `inspect_asset` report *only* the texture nothing samples. The reader's log
+  now decides it, and both directions are pinned.
+- **Reader diagnostics were misattributed.** Drained inside the texture loop,
+  so the first texture with a missing image took every message: with two
+  missing sidecars, one texture was labelled with another's URI and the other
+  named with none. Reported once, unattributed, which is what they are.
+
+### The sentinel refused where refusing protects nothing
+
+A mesh whose faces are **all** zero-area has no non-zero edge, so the safety
+check found nothing to protect and skipped: 6 → 6 triangles while the receipt
+called the object cleaned. "No real geometry" is safe, not unknown.
+
+`"scale-independent by construction"` is retracted — the third overreaching
+claim about this function. Two files with identical world geometry can still be
+answered differently when one is authored so finely that no expressible
+threshold is safe for it; that asymmetry is forced, and the honest response is
+to skip and say so. The 10× factor's justification is also corrected: the
+dissolve removes faces by **altitude**, not shortest edge, so the factor is a
+sound proxy rather than the proof the comment claimed.
+
+### Verification
+
+The node-scale sweep added last release **could not see its own rule** — its
+fixture holds vertices at 0…1 whatever the node scale, so all five cases ran
+the identical branch. It swept the axis the rule ignores. There is now a sweep
+over local edge length, across the threshold where the answer must change.
+
+Three tests written this release passed for the wrong reason before they were
+real: one insertion silently matched nothing, one passed a policy flag nested
+where the schema is flat, and one asserted a field that does not exist. Each
+was caught by reverting the fix and watching the test stay green.
+
 ## 0.3.8
 
 A fourteenth review, six findings. The first is the same mistake for the third
