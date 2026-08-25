@@ -1,6 +1,6 @@
 {
   "name": "@theisegoria/game-asset-mcp",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "description": "MCP server for an agentic game-asset generation pipeline: reference images to 3D models with PBR textures, plus retexturing meshes you already own.",
   "keywords": [
     "mcp",

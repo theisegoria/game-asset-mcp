@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.4.0
+
+No defect fixes. Two additions, one of them the first proof of something that
+had only ever been asserted.
+
+### `generate_sound_effect` is now proven built, end to end
+
+It has always registered, and its provider layer was thoroughly tested —
+request contract, credit safety, undocumented response shapes, URL recognition,
+retrieval discovery. The **tool** was tested by nothing, so "it registers" was
+the only claim anyone could honestly make about it.
+
+It is now driven end to end with the provider stubbed and everything else real:
+the spend ledger, the job store, the bounded poll, the HTTPS download, the
+atomic write, the workspace layout, `asset.json`, and the JSON a client
+receives. Five properties, each falsified against a reverted fix:
+
+- clips land on disk carrying the **bytes** the server sent, not just a path in
+  a response
+- `asset.json` records prompt, provider, model and generation id — a clip
+  nobody can trace back to a prompt is what this server exists to prevent
+- a `PENDING` poll is retried rather than abandoned
+- a provider failure becomes a **failed job**, not a thrown call: a spent credit
+  with a traceable record beats an exception with none
+- the spend ceiling is charged **before** the provider is contacted, and moving
+  that charge after the call is caught by this test and nothing else
+
+⚠ Still not a substitute for one live call. Leonardo documents the sound-effect
+*request* contract but not its response shape, so the parsing in
+`providers/audio/leonardo.ts` remains unverified against the real API and is
+marked as such below. What is proven is that everything around it is wired up.
+
+The test harness now accepts context overrides, so any provider-backed tool can
+be exercised this way without a credential.
+
+### A Features section in the README
+
+A capability inventory rather than a tool list: what the pipeline does, what the
+offline half answers, the glTF correctness the tools enforce on your behalf, the
+safety properties (and that most of them exist because they were once wrong),
+spend control, provenance, and how it fails. Every number in it was checked
+against the running server rather than recalled.
+
 ## 0.3.9
 
 A fifteenth review, six findings. Four are defects that 0.3.8's own fixes

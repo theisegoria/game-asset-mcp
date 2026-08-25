@@ -10,6 +10,62 @@ The server is provider-agnostic by construction. Today it drives [Tripo](https:/
 
 ---
 
+## Features
+
+### The pipeline
+
+- **Prompt preview before spend** — `preview_asset_prompt` shows the exact prompt and negative prompt a spec would produce, so art direction is corrected before anything is paid for.
+- **Reference images built for reconstruction**, not for looking nice: isolated subject, whole silhouette, flat light, plain background — the conditions a photogrammetry-style reconstructor actually needs.
+- **Variation on one axis at a time** — silhouette, material treatment, detailing, wear, proportions or functional components — while the object's identity is held fixed.
+- **Text-to-3D and reference-to-3D**, with PBR textures, returning a pollable job rather than blocking.
+- **Retexture a mesh you already own** — GLB, GLTF, FBX, OBJ or STL. New materials, geometry untouched. This is the half most tooling skips.
+- **Rigging, animation retargeting and quad retopology** as first-class steps. `animate_asset` refuses an unrigged source rather than billing you for nothing.
+- **Sound effects** — impacts, weapon reports, footsteps, UI blips, or a seamless ambience loop.
+
+### The local half — no API key, no network
+
+Eleven of the twenty tools spend nothing, and nine of those touch no network at all. If you already have meshes, this is the whole product.
+
+- **`inspect_asset`** — what is genuinely inside a glTF: meshes, primitives, materials, texture channels, resolutions, bounds, and specific defects rather than a bare "ok".
+- **`validate_game_asset`** — a shipping verdict with per-check reasons: UVs, normals, tangents where a normal map is bound, triangle budget, material count, texture resolution, power-of-two textures, bounding-box sanity. Every threshold overridable, because failing someone else's house style is not a defect.
+- **`normalize_mesh`** — generates UVs for objects that have **none** (the usual reason a mesh cannot be textured at all), welds coincident vertices, dissolves degenerate faces, names every material, forces opaque blending. Needs a local Blender; every other tool works without one.
+- **`batch_prepare_meshes`** — validate → normalize → validate across up to 500 paths, with a per-item verdict. One bad file is reported against its own item and never stops the run.
+- **`extract_pbr_trio`** — splits a material into independent albedo / normal / roughness (plus metallic and occlusion) images, de-packing glTF's metallicRoughness correctly: roughness is GREEN, metallic is BLUE. Resamples to an exact size, averaging colour in **linear light** and data channels directly.
+
+### Correctness the tools enforce for you
+
+- **glTF factors are applied, not dropped.** The effective value is texture × factor, so `metallicFactor: 0` with a shared metallicRoughness texture exports as non-metallic — and `baseColorFactor`, `occlusionStrength` and `normalScale` are applied too, each reported as `factorApplied`.
+- **Only the drawn scene is measured.** glTF `scenes` are alternatives; a renderer draws one. Triangle counts, bounds, attribute checks, materials and textures all describe the scene that ships. Undrawn LODs and collision proxies are counted separately rather than silently inflating a budget or flipping a verdict.
+- **Instancing counts.** A 12-triangle mesh placed at 50 nodes is 600 triangles against your budget, because that is what gets submitted.
+- **Scale is respected.** `mergeDistance` is documented in scene units and applied in local space, so the threshold is divided by the object's full world scale — parents included — and refused outright when Blender cannot express it, rather than silently widened.
+
+### Safety — the parts that exist because they were once wrong
+
+- **Your input mesh cannot be overwritten.** Identity is decided by device + inode, so a symlink, a hardlink, a symlinked parent, or a different capitalisation on a case-insensitive volume all count as the same file. The refusal never names a flag that would defeat it.
+- **Output is staged, verified, then renamed.** A destination is only ever replaced by a result that parsed and contained geometry. A failed call leaves it untouched and says so truthfully.
+- **Names are claimed by exclusive create**, not by an existence check, so two concurrent calls cannot both believe they own a path.
+- **Cleanup only removes files this call still owns**, compared by device + inode — never a file another tool renamed onto the same name.
+- **A caller-named directory must already exist.** No tool builds a directory tree from a path you typed; a leading `~` is not expanded, because no shell is involved.
+- **Downloads are HTTPS-only**, size-capped while streaming, and refuse redirects on authenticated uploads.
+
+### Spend control
+
+- **A session ceiling in US cents** (`ASSET_SPEND_LIMIT_CENTS`), checked **before any provider contact** — including before a mesh or reference image is uploaded.
+- **`get_spend_report`** shows what went where, by tool and job, and says which figures are published prices and which are deliberately pessimistic placeholders. It is a guard, not an invoice.
+- **Every credit-spending tool says so in its own description**, before an agent calls it. Nine of twenty spend; the rest never can.
+
+### Provenance
+
+Every job records the prompt, the seed, the provider model version, the provider task id, and a **SHA-256 for every downloaded byte**, written to `asset.json` beside the files. Six months later you can still answer "what produced this?"
+
+### How it fails
+
+- **Loudly, and by naming the cause.** Errors carry a code, a message that says what to change, and the provider's raw status alongside the normalized one.
+- **A partial result is reported as partial.** A texture that could not be written is named; the ones that succeeded are still recorded. A missing sidecar costs only itself.
+- **Repairs that were skipped are reported as skipped**, so a mesh never comes back "game-ready" because a check quietly did nothing.
+
+---
+
 ## Requirements
 
 - **Node.js >= 18.17** — the server uses global `fetch`, `FormData`, `Blob` and `AbortController`.
@@ -31,10 +87,10 @@ npx github:theisegoria/game-asset-mcp
 npm install github:theisegoria/game-asset-mcp
 
 # pin a specific version — recommended for anything you depend on
-npm install github:theisegoria/game-asset-mcp#v0.3.9
+npm install github:theisegoria/game-asset-mcp#v0.4.0
 ```
 
-**Pin the version.** Without a `#vX.Y.Z` suffix both forms resolve to whatever `main` is at that moment, which is not a stable dependency. Every release is tagged, so `#v0.3.9` gets you exactly that tree. Releases are listed at [github.com/theisegoria/game-asset-mcp/releases](https://github.com/theisegoria/game-asset-mcp/releases), each carrying the defects that release fixed.
+**Pin the version.** Without a `#vX.Y.Z` suffix both forms resolve to whatever `main` is at that moment, which is not a stable dependency. Every release is tagged, so `#v0.4.0` gets you exactly that tree. Releases are listed at [github.com/theisegoria/game-asset-mcp/releases](https://github.com/theisegoria/game-asset-mcp/releases), each carrying the defects that release fixed.
 
 > ⛔ **Do not pin v0.3.0, v0.3.1 or v0.3.2.** Later review found live paths in those that destroy the mesh you pass them and report success. They are tagged only so the history is complete. Their release pages say so too.
 
@@ -313,7 +369,7 @@ This is early software, and the parts most likely to drift are marked as such ra
 
 **Tripo's v3 endpoint paths are pinned in exactly one module** (`src/providers/model3d/tripo.ts`) and documented in a comment at the top of it. Tripo's public docs describe the v3 surface two different ways — a generic task endpoint and per-operation paths — and both appear in current documentation. This client implements the task form, which matches the observable behaviour that every generation returns a `task_id` to poll, and exposes `TRIPO_BASE_URL` so you can retarget without editing code. If they are wrong you will see a 404 that looks exactly like a bad API key, so check the path before the key.
 
-**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 408 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
+**No call has ever been made to a live provider API.** This is the most important caveat here, so it is stated plainly rather than buried. Every one of the 413 tests runs against mocks or the local filesystem. They cover prompt construction, status mapping, path safety, the job store, the HTTP layer's retry and redirect rules, and glTF inspection against real files — but a green suite says nothing about whether Leonardo and Tripo behave the way this client assumes.
 
 Concretely, these remain **unverified**:
 
