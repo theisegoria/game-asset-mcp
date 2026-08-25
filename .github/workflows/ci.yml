@@ -138,22 +138,12 @@ jobs:
         # this job caught was invisible. Visible failures first, counting second.
         run: npx vitest run tests/normalize.test.ts
 
-      - name: Prove they did not skip
-        # A COUNT, not a status string. A suite that skipped everything exits 0,
-        # which is exactly the false green this job exists to prevent.
+      - name: Prove the Blender-gated tests actually ran
+        # By NAME, not by a blanket pending count. The first version failed a
+        # job whose Blender tests had all passed, because
+        # `it.skipIf(!caseInsensitive)` correctly skips on Linux ext4 and runs on
+        # macOS APFS — one legitimate platform skip, read as the very failure the
+        # check exists to catch.
         run: |
           npx vitest run tests/normalize.test.ts --reporter=json --outputFile=blender-results.json
-          node -e "
-          const r = require('./blender-results.json');
-          const passed = r.numPassedTests ?? 0;
-          const skipped = r.numPendingTests ?? 0;
-          console.log('passed=' + passed + ' skipped=' + skipped);
-          if (skipped > 0) {
-            console.error('Blender tests SKIPPED in the job that exists to run them');
-            process.exit(1);
-          }
-          if (passed === 0) {
-            console.error('No Blender tests ran at all');
-            process.exit(1);
-          }
-          "
+          node .github/scripts/assert-blender-tests-ran.mjs blender-results.json
