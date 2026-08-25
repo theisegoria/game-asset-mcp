@@ -87,7 +87,13 @@ jobs:
       - name: Install Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends blender
+          # python3-numpy is NOT optional. Ubuntu's blender package runs against
+          # the SYSTEM python and only RECOMMENDS numpy, which
+          # --no-install-recommends duly stripped — and Blender's glTF importer
+          # imports numpy at module load. Every import then died with
+          # "ModuleNotFoundError: No module named 'numpy'" inside the addon,
+          # which the tool surfaced as a full traceback via stderrTail.
+          sudo apt-get install -y --no-install-recommends blender python3-numpy
           blender --version | head -1
           echo "blender package version: $(dpkg -s blender | grep ^Version || true)"
 
@@ -106,6 +112,24 @@ jobs:
             console.log('Blender discovered at ' + found);
           });
           "
+
+      - name: Prove Blender can actually import glTF
+        # An environment check, kept separate on purpose. Without it a broken
+        # Blender install arrives as fifteen failing tests with tracebacks
+        # buried in serialized errors, and reads like a code regression. This
+        # names it as what it is, before the suite runs.
+        run: |
+          cat > /tmp/import_probe.py <<'PY'
+          import bpy, sys
+          try:
+              bpy.ops.import_scene.gltf
+              import numpy  # noqa: F401  the glTF addon imports this at load
+              print("glTF importer and numpy are both available")
+          except Exception as exc:
+              print("Blender cannot import glTF: %s" % exc, file=sys.stderr)
+              sys.exit(1)
+          PY
+          blender --background --factory-startup --python /tmp/import_probe.py
 
       - name: Run the Blender-backed tests
         # DEFAULT reporter, deliberately: the JSON reporter swallows failure
