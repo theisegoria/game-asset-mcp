@@ -14,6 +14,7 @@
 import path from 'node:path';
 import { z } from 'zod';
 import { NodeIO } from '@gltf-transform/core';
+import { CollectingLogger } from '../inspection/gltf.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AssetJob, DownloadedFile } from '../domain/asset-job.js';
 import { summarizeAssetJob } from '../domain/asset-job.js';
@@ -95,7 +96,33 @@ export async function extractTextures(
   modelPath: string,
   texturesDir: string,
 ): Promise<TextureExtraction> {
-  const io = new NodeIO();
+  // NON-strict, matching src/inspection/gltf.ts, whose comment already states
+  // the rule: "a .gltf whose sidecar texture is missing is a defect worth
+  // REPORTING, not a reason to abandon everything else we could have said".
+  //
+  // Strict reading here meant ONE missing sidecar threw before the loop began,
+  // so every OTHER texture in the file — embedded, perfectly extractable — was
+  // lost and the response said `textureCount: 0`. That is the 0.3.5 partial
+  // extraction defect ("a failure on texture 3 of 5 discarded 1 and 2") one
+  // level up, at the reader instead of the loop, and the fix had been applied
+  // to only one of the two readers.
+  // A logger, for two measured reasons.
+  //
+  // 1. glTF-Transform's default logger routes `info` through console.info, which
+  //    lands on STDOUT — the channel the MCP transport owns, where one stray
+  //    line corrupts the session. gltf.ts carries this warning already.
+  // 2. Non-strict reading makes the reader talk: "Failed to load image URI …"
+  //    names the file that is actually missing, which is the actionable half of
+  //    the diagnostic. Measured: without a logger that line goes to stderr and
+  //    the CALLER never sees it; with one it is captured and surfaced below.
+  //
+  // (Measured rather than assumed: this particular message is a `warn` and goes
+  // to stderr, not stdout. The stdout hazard in (1) is real but belongs to
+  // `info`-level messages — an earlier version of this comment claimed this
+  // line hit stdout, which is the same "comment contradicts the code" defect
+  // being fixed elsewhere in this release.)
+  const readerLog = new CollectingLogger();
+  const io = new NodeIO().setLogger(readerLog).setStrictResources(false);
   // Deliberately OUTSIDE the per-texture guard: if the container itself cannot
   // be opened there are no textures to be partial about, and that is the
   // caller's existing "warn, keep the download" case.
@@ -114,6 +141,9 @@ export async function extractTextures(
       // unreadable-container path, one loop iteration down.
       const label = sanitizeFileName(texture.getName() || `texture_${index + 1}`, `texture_${index + 1}`);
       failures.push(`${label}: texture has no image data (an external file referenced by the glTF is missing)`);
+      // The reader's own diagnostic names the URI it could not open, which is
+      // the actionable half. Captured rather than left on stdout.
+      for (const message of readerLog.messages.splice(0)) failures.push(`glTF reader: ${message}`);
       continue;
     }
     const mime = texture.getMimeType();

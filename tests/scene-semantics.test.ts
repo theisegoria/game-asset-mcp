@@ -451,3 +451,71 @@ describe('a draws-nothing file is described honestly', () => {
     expect(inspected.boundingBox.sizeMeters).toEqual([0, 0, 0]);
   });
 });
+
+/**
+ * A texture bound through an extension is still a texture.
+ *
+ * Scoping textures to the drawn materials was done by ENUMERATING the five core
+ * PBR slots, which cannot see a binding that lives in an extension —
+ * KHR_materials_clearcoat, sheen, transmission, specular, volume, iridescence,
+ * anisotropy — all routine in provider and marketplace exports. A real clearcoat
+ * map vanished from `textureCount` and from both texture checks, and
+ * `inspect_asset` and `download_asset` then reported different counts for the
+ * same file.
+ *
+ * The distinction that fixes it: a texture bound by an UNDRAWN material is
+ * genuinely excluded, but a texture whose binding this reader could not parse is
+ * INDETERMINATE, and dropping it silently is the worse error.
+ */
+describe('an extension-bound texture is not silently dropped', () => {
+  async function withClearcoat(dir: string): Promise<string> {
+    const png = encodePNG({ width: 4, height: 4, data: new Uint8Array(4 * 4 * 4).fill(180) });
+    const uri = `data:image/png;base64,${Buffer.from(png).toString('base64')}`;
+    const gltf = {
+      asset: { version: '2.0' },
+      scenes: [{ nodes: [0] }],
+      scene: 0,
+      nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 1 }, material: 0 }] }],
+      materials: [
+        {
+          pbrMetallicRoughness: { baseColorTexture: { index: 0 } },
+          extensions: { KHR_materials_clearcoat: { clearcoatNormalTexture: { index: 1 } } },
+        },
+      ],
+      extensionsUsed: ['KHR_materials_clearcoat'],
+      textures: [{ source: 0 }, { source: 1 }],
+      images: [
+        { uri, mimeType: 'image/png' },
+        { uri, mimeType: 'image/png' },
+      ],
+      accessors: [
+        { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+        { bufferView: 1, componentType: 5126, count: 3, type: 'VEC2', min: [0, 0], max: [1, 1] },
+      ],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 36 },
+        { buffer: 0, byteOffset: 36, byteLength: 24 },
+      ],
+      buffers: [
+        {
+          byteLength: 60,
+          uri: `data:application/octet-stream;base64,${Buffer.alloc(60).toString('base64')}`,
+        },
+      ],
+    };
+    const file = path.join(dir, 'clearcoat.gltf');
+    await fs.writeFile(file, JSON.stringify(gltf));
+    return file;
+  }
+
+  it('counts a clearcoat map whose binding this reader cannot parse', async () => {
+    const inspected = await inspectGltf(await withClearcoat(work));
+
+    // Two textures in the file, both reachable from the one drawn material —
+    // one through a core slot, one through an extension. Enumerating slots saw
+    // only the first.
+    expect(inspected.textureCount).toBe(2);
+    expect(inspected.textureResolutions).toHaveLength(2);
+  });
+});

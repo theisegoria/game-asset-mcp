@@ -95,3 +95,76 @@ describe('one unwritable texture costs exactly itself', () => {
     expect(result.failures).toEqual([]);
   }, 60_000);
 });
+
+/**
+ * One missing sidecar must not discard every OTHER texture in the file.
+ *
+ * `extractTextures` read with a strict `NodeIO` while `inspectGltf` read the
+ * same files with `setStrictResources(false)` — and the comment beside that one
+ * already stated the rule: "a .gltf whose sidecar texture is missing is a
+ * defect worth REPORTING, not a reason to abandon everything else we could have
+ * said about the file". Applied at one reader, not the other two.
+ *
+ * Strict reading threw before the loop began, so a perfectly extractable
+ * embedded texture was lost and `download_asset` reported `textureCount: 0`.
+ * That is the 0.3.5 partial-extraction defect one level up: at the reader
+ * rather than inside the loop.
+ */
+describe('a missing sidecar costs only itself', () => {
+  /** A .gltf with one EMBEDDED image and one MISSING external sidecar. */
+  async function withMissingSidecar(dir: string): Promise<string> {
+    const png = encodePNG({ width: 4, height: 4, data: new Uint8Array(4 * 4 * 4).fill(200) });
+    const gltf = {
+      asset: { version: '2.0' },
+      scenes: [{ nodes: [0] }],
+      scene: 0,
+      nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 1 }, material: 0 }] }],
+      materials: [
+        { pbrMetallicRoughness: { baseColorTexture: { index: 0 } }, normalTexture: { index: 1 } },
+      ],
+      textures: [{ source: 0 }, { source: 1 }],
+      images: [
+        { uri: `data:image/png;base64,${Buffer.from(png).toString('base64')}`, mimeType: 'image/png' },
+        { uri: 'missing_sidecar.png' },
+      ],
+      accessors: [
+        { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+        { bufferView: 1, componentType: 5126, count: 3, type: 'VEC2', min: [0, 0], max: [1, 1] },
+      ],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 36 },
+        { buffer: 0, byteOffset: 36, byteLength: 24 },
+      ],
+      buffers: [
+        {
+          byteLength: 60,
+          uri: `data:application/octet-stream;base64,${Buffer.alloc(60).toString('base64')}`,
+        },
+      ],
+    };
+    const file = path.join(dir, 'sidecar.gltf');
+    await fs.writeFile(file, JSON.stringify(gltf));
+    return file;
+  }
+
+  it('extracts the embedded texture and names the missing one', async () => {
+    const model = await withMissingSidecar(work);
+
+    const result = await extractTextures(model, textures);
+
+    // The embedded texture is genuinely extractable. Strict reading lost it.
+    expect(result.written).toHaveLength(1);
+    expect(await fs.readdir(textures)).toHaveLength(1);
+
+    // And the missing one is NAMED. This branch was unreachable dead code under
+    // strict reading — the read threw before it — which is why reverting it
+    // left the whole suite green when it shipped.
+    expect(result.failures.length).toBeGreaterThan(0);
+    expect(result.failures.join(' ')).toMatch(/no image data/);
+    // The reader's own diagnostic names the actual missing file, which is the
+    // actionable half. Without a captured logger it went to stderr and the
+    // caller never saw it.
+    expect(result.failures.join(' ')).toMatch(/missing_sidecar\.png/);
+  }, 60_000);
+});

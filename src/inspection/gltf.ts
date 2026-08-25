@@ -124,7 +124,7 @@ export interface AssetInspection {
  * "unsupported extension" or a malformed-accessor warning is exactly the kind
  * of thing this report exists to surface.
  */
-class CollectingLogger implements ILogger {
+export class CollectingLogger implements ILogger {
   readonly messages: string[] = [];
   debug(): void {}
   info(): void {}
@@ -166,7 +166,7 @@ export async function inspectGltf(filePath: string): Promise<AssetInspection> {
   // counters. Using root.listMaterials() here meant the two halves of one report
   // described two different files.
   const materials = geometry.drawnMaterials;
-  const drawnTextures = texturesOf(materials);
+  const drawnTextures = texturesOf(root, materials);
   const textures = summarizeTextures(drawnTextures);
   const bounds = computeBoundingBox(root, geometry.sceneGraphFallback);
   const pbr = summarizePbr(materials);
@@ -504,27 +504,43 @@ function summarizeGeometry(root: Root): GeometrySummary {
 }
 
 /**
- * Every distinct texture bound by these materials.
+ * Textures a renderer could actually sample, given the DRAWN materials.
  *
- * Deliberately derived from the materials rather than from `root.listTextures()`:
- * a texture present in the file but bound by nothing is not something a renderer
- * samples, and it used to raise `texture_resolution` and `power_of_two_textures`
- * warnings against models whose drawn textures were fine.
+ * Three cases, deliberately distinguished — collapsing the last two is what
+ * made a real clearcoat map disappear:
+ *
+ *   bound by a drawn material    -> counted
+ *   bound by an UNDRAWN material -> excluded; nothing submits it, and counting
+ *                                   it raised `texture_resolution` and
+ *                                   `power_of_two_textures` warnings against
+ *                                   models whose drawn textures were fine
+ *   binding NOT PARSEABLE        -> counted, because we do not know it is
+ *                                   unused and silently dropping it is the
+ *                                   worse error
+ *
+ * The third case is not hypothetical. An enumeration of the five core PBR slots
+ * cannot see a texture bound through an unregistered extension —
+ * KHR_materials_clearcoat, sheen, transmission, specular, volume, iridescence,
+ * anisotropy, all routine in provider and marketplace exports. Measured: such a
+ * texture has `Root` as its only parent, where a core-bound one has `Material`.
+ * It vanished from `textureCount` and from both texture checks, and the two
+ * tools then reported different counts for the same file.
  */
-function texturesOf(materials: Material[]): Texture[] {
-  const seen: Texture[] = [];
-  for (const material of materials) {
-    for (const texture of [
-      material.getBaseColorTexture(),
-      material.getMetallicRoughnessTexture(),
-      material.getNormalTexture(),
-      material.getOcclusionTexture(),
-      material.getEmissiveTexture(),
-    ]) {
-      if (texture && !seen.includes(texture)) seen.push(texture);
+function texturesOf(root: Root, drawnMaterials: Material[]): Texture[] {
+  const drawn = new Set<Material>(drawnMaterials);
+  const kept: Texture[] = [];
+  for (const texture of root.listTextures()) {
+    const materialParents = texture
+      .listParents()
+      .filter((parent) => parent.propertyType === 'Material') as Material[];
+    // No material parent at all means the binding lives somewhere this reader
+    // did not parse — indeterminate, not unused.
+    const bindingUnknown = materialParents.length === 0;
+    if (bindingUnknown || materialParents.some((material) => drawn.has(material))) {
+      kept.push(texture);
     }
   }
-  return seen;
+  return kept;
 }
 
 function summarizePbr(materials: Material[]): PbrChannels {

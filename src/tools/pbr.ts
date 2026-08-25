@@ -15,6 +15,7 @@
 import path from 'node:path';
 import { z } from 'zod';
 import { NodeIO } from '@gltf-transform/core';
+import { CollectingLogger } from '../inspection/gltf.js';
 import type { Material } from '@gltf-transform/core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -191,7 +192,16 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
             : path.join(path.dirname(source), 'textures');
       }
 
-      const document = await new NodeIO().read(source);
+      // Non-strict for the same reason as the other two readers: a material
+      // whose normal map is a missing sidecar should still yield its albedo and
+      // roughness, rather than refusing the whole call. The third of three
+      // sites, fixed together this time instead of one per release.
+      // Logger attached for the same reason as the other two readers: the
+      // default one writes to stdout, which the MCP transport owns.
+      const document = await new NodeIO()
+        .setLogger(new CollectingLogger())
+        .setStrictResources(false)
+        .read(source);
       const materials = document.getRoot().listMaterials();
       if (materials.length === 0) {
         throw invalidState(`${path.basename(source)} declares no materials to split`);
