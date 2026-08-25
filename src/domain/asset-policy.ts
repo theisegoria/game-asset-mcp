@@ -126,7 +126,11 @@ export function evaluateAsset(
     });
   }
 
-  if (policy.requireBaseColorTexture) {
+  // The THIRD site of the same gate, and it was missed when the other two were
+  // fixed. On a file that draws nothing this reported "no base colour texture"
+  // at severity `error` about a material that binds one — the identical
+  // falsehood uvs_present and normals_present were gated to stop.
+  if (policy.requireBaseColorTexture && anythingDrawn) {
     add({
       id: 'base_color_texture',
       severity: 'error',
@@ -194,16 +198,27 @@ export function evaluateAsset(
 
   const size = inspection.boundingBox.sizeMeters;
   const finite = size.every((value) => Number.isFinite(value));
+  // An all-zero box from a file with no finite vertex is not a measurement, and
+  // reporting "0.000 x 0.000 x 0.000 m" as a passing bound says otherwise.
+  const measured = finite && !inspection.boundingBoxEmpty;
   add({
     id: 'bounding_box_finite',
     severity: 'error',
-    passed: finite,
-    actual: finite ? `${size.map((v) => v.toFixed(3)).join(' x ')} m` : 'non-finite bounds',
+    passed: measured,
+    actual: !finite
+      ? 'non-finite bounds'
+      : inspection.boundingBoxEmpty
+        ? 'no finite vertex position was found, so there are no bounds to report'
+        : `${size.map((v) => v.toFixed(3)).join(' x ')} m`,
     expected: 'finite bounds',
     consequence: 'Non-finite bounds produce a NaN view matrix in anything that frames the asset.',
   });
 
-  if (finite) {
+  // Dimensions are only asked when something was actually measured. Judging a
+  // placeholder box produced "smallest edge 0.000000 m" at severity `error`
+  // about a file whose real problem — no drawable geometry — has_geometry
+  // already names once.
+  if (measured) {
     const largest = Math.max(...size);
     const smallest = Math.min(...size);
     if (policy.maxDimensionMeters !== undefined) {

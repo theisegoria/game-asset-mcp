@@ -887,7 +887,7 @@ describe.skipIf(!haveBlender)('splitting scale between node and vertices changes
   // one — and these same two fixtures went to 100 and 0 triangles. The
   // invariant is not "at the default"; it is "at every merge distance".
   it.each([0.0001, 0, 0.01])(
-    'produces the same geometry at mergeDistance %p, either scale split',
+    'produces the same geometry at mergeDistance %s, either scale split',
     async (mergeDistance) => {
       const [nodeScaled, baked] = await Promise.all([
         run('tiny_parts_node_scaled', mergeDistance),
@@ -1010,7 +1010,7 @@ describe.skipIf(!haveBlender)('mergeDistance 0 repairs degenerate faces at any s
   // 1.0001 is deliberate: it is where the r14 cliff sat, one ten-thousandth
   // above the value both previous fixtures used.
   it.each([0.001, 1, 1.0001, 2, 1000])(
-    'removes the five zero-area faces at node scale %p',
+    'removes the five zero-area faces at node scale %s',
     async (nodeScale) => {
       const dir = await tmpDir();
       const result = await runBlenderScript(
@@ -1062,5 +1062,100 @@ describe.skipIf(!haveBlender)('mergeDistance 0 repairs degenerate faces at any s
 
     expect(receipt.trianglesAfter).toBe(receipt.trianglesBefore);
     expect(receipt.objectsDissolveSkippedThresholdUnrepresentable).toBe(1);
+  }, 300_000);
+});
+
+/**
+ * The axis the sentinel rule ACTUALLY keys on: local edge length.
+ *
+ * ⚠ The node-scale sweep above cannot see this. `degenerateAt` holds its
+ * vertices at 0…1 whatever the node scale, so `smallest_local_edge` is ~1.0 in
+ * every one of its five cases and all five run the identical branch with
+ * identical numbers. It sweeps the axis the rule ignores.
+ *
+ * That is the same mistake as the three releases before it — a parameterised
+ * test whose parameter does not reach the decision — so this sweeps the local
+ * geometry instead, across the threshold where the answer must change.
+ */
+describe.skipIf(!haveBlender)('the sentinel decides on LOCAL edge length', () => {
+  /** A quad plus five zero-area triangles, authored at a given local scale. */
+  async function atLocalScale(file: string, unit: number): Promise<string> {
+    const doc = new Document();
+    doc.createBuffer();
+    const verts = [0, 0, 0, unit, 0, 0, 0, unit, 0, unit, unit, 0];
+    const indices = [0, 1, 2, 1, 3, 2];
+    let next = 4;
+    for (let k = 0; k < 5; k += 1) {
+      const x = 0.2 * unit * k;
+      verts.push(x, 0, 0, x, 0, 0, x, 0, 0);
+      indices.push(next, next + 1, next + 2);
+      next += 3;
+    }
+    const prim = doc
+      .createPrimitive()
+      .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(verts)))
+      .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint32Array(indices)));
+    doc.createScene('s').addChild(doc.createNode('n').setMesh(doc.createMesh('m').addPrimitive(prim)));
+    await new NodeIO().write(file, doc);
+    return file;
+  }
+
+  const run = async (unit: number): Promise<Record<string, number>> => {
+    const dir = await tmpDir();
+    const result = await runBlenderScript(
+      packagedScript('blender_normalize.py'),
+      {
+        input: await atLocalScale(path.join(dir, `u_${unit}.glb`), unit),
+        output: path.join(dir, `u_${unit}_out.glb`),
+        unwrapMissingUVs: false,
+        cleanGeometry: true,
+        mergeDistance: 0,
+        normalizeMaterials: true,
+        angleLimitDegrees: 66,
+        islandMargin: 0.002,
+      },
+      { timeoutMs: 300_000 },
+    );
+    return result.receipt as Record<string, number>;
+  };
+
+  // Well above Blender's 1e-6 floor: the repair is safe and must happen.
+  it.each([1, 0.01, 0.0001])('repairs a mesh authored at local unit %s', async (unit) => {
+    const receipt = await run(unit);
+    expect(receipt.trianglesAfter).toBe(2);
+    expect(receipt.objectsDissolveSkippedThresholdUnrepresentable).toBe(0);
+  }, 300_000);
+
+  // At or under the floor the repair cannot be expressed narrowly enough, so it
+  // must be REFUSED and reported rather than eating the real geometry.
+  it.each([0.000001, 0.0000001])('refuses, and says so, at local unit %s', async (unit) => {
+    const receipt = await run(unit);
+    expect(receipt.trianglesAfter).toBe(receipt.trianglesBefore);
+    expect(receipt.objectsDissolveSkippedThresholdUnrepresentable).toBe(1);
+  }, 300_000);
+
+  it('repairs a mesh made ENTIRELY of zero-area faces', async () => {
+    // No non-zero edge exists, so there is nothing finer than the floor to
+    // protect — yet the gate refused, and the receipt still called the object
+    // cleaned. It was refusing in the one case where refusing protects nothing.
+    const dir = await tmpDir();
+    const result = await runBlenderScript(
+      packagedScript('blender_normalize.py'),
+      {
+        input: fileURLToPath(new URL('./fixtures/real/all_degenerate.glb', import.meta.url)),
+        output: path.join(dir, 'alldeg.glb'),
+        unwrapMissingUVs: false,
+        cleanGeometry: true,
+        mergeDistance: 0,
+        normalizeMaterials: true,
+        angleLimitDegrees: 66,
+        islandMargin: 0.002,
+      },
+      { timeoutMs: 300_000 },
+    );
+    const receipt = result.receipt as Record<string, number>;
+    expect(receipt.trianglesBefore).toBe(6);
+    expect(receipt.trianglesAfter).toBe(0);
+    expect(receipt.objectsDissolveSkippedThresholdUnrepresentable).toBe(0);
   }, 300_000);
 });

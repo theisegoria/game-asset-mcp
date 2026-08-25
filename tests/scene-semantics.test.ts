@@ -441,6 +441,32 @@ describe('a draws-nothing file is described honestly', () => {
     }
   });
 
+  it('does not claim there is no base colour texture either', async () => {
+    // The THIRD site of the same gate, missed when the other two were fixed —
+    // and it SURVIVED a mutation sweep because it is off by default, so nothing
+    // in the suite ever reached it. The policy has to be switched on explicitly.
+    const model = await emptyDefaultWithGoodMesh(path.join(work, 'basecolor.glb'));
+    const tools = await connectTools(registerValidateTools, work);
+    try {
+      // ⚠ FLAT, not nested under `policy`. The first version of this test
+      // passed `policy: { requireBaseColorTexture: true }`, which the schema
+      // ignores — so the check never ran and the assertion was vacuous. The
+      // mutant survived while the test reported green.
+      const { isError, payload, text } = await tools.call('validate_game_asset', {
+        modelPath: model,
+        requireBaseColorTexture: true,
+      });
+      expect(isError, text).toBe(false);
+      const failed = (payload.failures as Array<Record<string, unknown>>).map((f) => f.id);
+
+      expect(failed).toContain('has_geometry');
+      // Untrue about a file whose material binds one, at severity `error`.
+      expect(failed).not.toContain('base_color_texture');
+    } finally {
+      await tools.close();
+    }
+  });
+
   it('does not contradict itself about whether a scene graph exists', async () => {
     const inspected = await inspectGltf(await emptyDefaultWithGoodMesh(path.join(work, 'nocontra.glb')));
 
@@ -592,5 +618,63 @@ describe('an unused leftover texture is not counted as drawn', () => {
     const inspected = await inspectGltf(await withOrphan(work, true));
 
     expect(inspected.textureCount).toBe(2);
+  });
+});
+
+/**
+ * A placeholder bounding box is not a measurement.
+ *
+ * `bounds.empty` was computed and reached no consumer — the fifth instance of
+ * that class here. So `bounding_box_finite` PASSED while reporting
+ * "0.000 x 0.000 x 0.000 m" for a file where no finite vertex was found, and
+ * `min_dimension` failed at severity `error` for the same reason `has_geometry`
+ * already had. Three errors, one cause, one of them describing a measurement
+ * that never happened.
+ */
+describe('a file with nothing to measure says so', () => {
+  it('reports boundingBoxEmpty to the client', async () => {
+    // Presence at the boundary, not just internally — this is the hop where
+    // four previous fields were lost.
+    const doc = new Document();
+    doc.createBuffer();
+    doc.createScene('empty');
+    const file = path.join(work, 'nothing.glb');
+    await new NodeIO().write(file, doc);
+
+    const tools = await connectTools(registerInspectionTools, work);
+    try {
+      const { payload } = await tools.call('inspect_asset', { modelPath: file });
+      expect(Object.hasOwn(payload, 'boundingBoxEmpty')).toBe(true);
+      expect(payload.boundingBoxEmpty).toBe(true);
+    } finally {
+      await tools.close();
+    }
+  });
+
+  it('does not report a zero box as a passing measurement', async () => {
+    const doc = new Document();
+    doc.createBuffer();
+    doc.createScene('empty');
+    const file = path.join(work, 'nothing2.glb');
+    await new NodeIO().write(file, doc);
+
+    const tools = await connectTools(registerValidateTools, work);
+    try {
+      const { payload } = await tools.call('validate_game_asset', { modelPath: file });
+      const failed = (payload.failures as Array<Record<string, unknown>>).map((f) => f.id);
+
+      // The real cause, named.
+      expect(failed).toContain('has_geometry');
+      // NOT a dimension judgement on a box that was never measured.
+      expect(failed).not.toContain('min_dimension');
+      const finiteCheck = (payload.failures as Array<Record<string, unknown>>).find(
+        (f) => f.id === 'bounding_box_finite',
+      );
+      // It must not silently PASS either — if it reports at all, it must say
+      // there was nothing to measure rather than quote 0.000 x 0.000 x 0.000.
+      if (finiteCheck) expect(String(finiteCheck.actual)).toMatch(/no finite vertex/);
+    } finally {
+      await tools.close();
+    }
   });
 });

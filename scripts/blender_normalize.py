@@ -99,6 +99,19 @@ BLENDER_MIN_THRESHOLD = 1e-6
 # How much larger the mesh's own smallest real feature must be than Blender's
 # threshold floor before we will dissolve at that floor.
 #
+# ⚠ WHAT THIS DOES AND DOES NOT BOUND, measured rather than reasoned:
+# `dissolve_degenerate` removes a face by its ALTITUDE, not by its shortest
+# edge — in Blender 5.2 a triangle with base 1.0 and every edge >= 0.5 is
+# removed at altitude 1e-7 and kept at 1e-6. An altitude can be arbitrarily
+# smaller than the shortest edge, so this factor does NOT prove the dissolve
+# reaches only degenerate faces; a sliver with long edges can still go.
+#
+# It is kept because the direction is benign and the alternative is worse: a
+# non-sliver thin face necessarily HAS a short edge, so the edge minimum is a
+# sound proxy for ordinary geometry, and no destruction of realistic geometry
+# through this gap has been demonstrated. Stated honestly instead of claimed,
+# because the comment above this one has outlived its code twice already.
+#
 # `mergeDistance: 0` is a SENTINEL, not a distance: it means "merge nothing, but
 # still remove faces that are degenerate at any scale". The only threshold
 # Blender can express for that is its 1e-6 floor, and whether 1e-6 is safe
@@ -113,8 +126,11 @@ BLENDER_MIN_THRESHOLD = 1e-6
 #
 # The question was never about world scale. The dissolve runs on LOCAL
 # coordinates, so it is safe exactly when the mesh's smallest real local edge is
-# comfortably above the floor. That is scale-independent by construction, which
-# is the property the previous two framings lacked.
+# comfortably above the floor. That does not make it scale-INDEPENDENT — a mesh
+# authored at 1e-6 local units is still refused where the same world geometry
+# authored at 1.0 is repaired — but it does make the decision depend only on
+# what the operator can actually see, which is what the previous two framings
+# got wrong.
 DEGENERATE_SAFETY_FACTOR = 10.0
 
 
@@ -124,6 +140,10 @@ def smallest_local_edge(obj):
     Zero-length edges are excluded deliberately: they are exactly what the
     dissolve exists to remove, so counting them would make the mesh look finer
     than it is and suppress its own repair.
+
+    None therefore means "this mesh has NO real geometry to protect" — every
+    edge is zero-length, or there are no edges at all (loose points). The caller
+    must treat that as SAFE, not as unknown: see the gate.
     """
     mesh = obj.data
     shortest = None
@@ -348,19 +368,35 @@ def main():
             # divisor 1, the one value at which the bug is invisible.
             #
             # `mergeDistance: 0` means "merge nothing, but still repair faces
-            # that are degenerate at any scale". That is a WORLD-space claim, so
-            # it is expressed as one: the narrowest world radius we are willing
-            # to call degenerate-only. Everything then flows through the single
-            # divisor rule, which is monotonic by construction.
+            # that are degenerate at any scale". RETRACTED, twice, and left here
+            # as a warning rather than deleted: this was first framed as a
+            # world-space radius ("monotonic by construction") and that framing
+            # produced the r14 cliff at divisor 1.0001. The question is LOCAL,
+            # because the operator is.
+            #
+            # ⚠ NOR is the current rule "scale-independent". It keys on the
+            # mesh's own smallest LOCAL edge, so two files with byte-identical
+            # WORLD geometry can still be answered differently when one is
+            # authored so finely that no expressible threshold is safe for it.
+            # That asymmetry is FORCED — Blender's floor is a local floor — and
+            # the honest response is to skip and SAY so, which the counter does.
+            # It is not scale-independence, and calling it that would be the
+            # third overreaching claim about this function.
             if requested_merge <= 0.0:
                 # The sentinel. Dissolve at Blender's floor, but only when this
                 # mesh's own smallest real edge is far enough above it that the
                 # floor can only reach genuinely degenerate geometry.
                 shortest = smallest_local_edge(obj)
-                if (
-                    shortest is not None
-                    and shortest >= BLENDER_MIN_THRESHOLD * DEGENERATE_SAFETY_FACTOR
-                ):
+                if shortest is None:
+                    # No non-zero edge at all: every face is already degenerate,
+                    # or the object is loose points. There is nothing finer than
+                    # the floor to destroy, so the floor is unconditionally safe
+                    # here — and refusing meant a mesh made ENTIRELY of zero-area
+                    # faces went 6 -> 6 while the receipt reported it cleaned.
+                    # The gate was refusing in exactly the case where refusing
+                    # protects nothing.
+                    dissolve_threshold = BLENDER_MIN_THRESHOLD
+                elif shortest >= BLENDER_MIN_THRESHOLD * DEGENERATE_SAFETY_FACTOR:
                     dissolve_threshold = BLENDER_MIN_THRESHOLD
                 else:
                     dissolve_threshold = None

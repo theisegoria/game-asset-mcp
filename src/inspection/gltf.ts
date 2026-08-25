@@ -102,6 +102,18 @@ export interface AssetInspection {
   textureResolutions: TextureResolution[];
 
   boundingBox: BoundingBox;
+  /**
+   * True when NO finite vertex position was found, so `boundingBox` is a
+   * placeholder rather than a measurement.
+   *
+   * On the output type because it was computed and then reached no consumer —
+   * the FIFTH instance of that class here. Without it, `bounding_box_finite`
+   * passed while reporting "0.000 x 0.000 x 0.000 m" for a file where nothing
+   * was measured at all, and `min_dimension` failed at severity `error` for the
+   * same reason `has_geometry` already had: three errors, one cause, and one of
+   * them describing a measurement that never happened.
+   */
+  boundingBoxEmpty: boolean;
 
   /** True only when EVERY primitive carries the attribute. */
   hasUVs: boolean;
@@ -296,6 +308,7 @@ export async function inspectGltf(filePath: string): Promise<AssetInspection> {
     textureCount: drawnTextures.length,
     textureResolutions: textures.resolutions,
     boundingBox: bounds.box,
+    boundingBoxEmpty: bounds.empty,
     hasUVs,
     hasNormals,
     hasTangents,

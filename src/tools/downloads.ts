@@ -130,6 +130,17 @@ export async function extractTextures(
   const written: DownloadedFile[] = [];
   const failures: string[] = [];
 
+  // Reader diagnostics are emitted during read(), BEFORE this loop, so they
+  // cannot be attributed to a particular texture. Draining them inside the loop
+  // gave every one of them to the FIRST texture with a missing image — so with
+  // two missing sidecars, texture_2 was labelled with texture_3's URI and
+  // texture_3 was named with no URI at all. The read is a Promise.all, so which
+  // landed under which label was not even deterministic. They are also dropped
+  // entirely when no texture happens to be missing an image.
+  //
+  // Reported once, unattributed, which is what they actually are.
+  for (const message of readerLog.messages) failures.push(`glTF reader: ${message}`);
+
   const textures = document.getRoot().listTextures();
   for (const [index, texture] of textures.entries()) {
     const image = texture.getImage();
@@ -141,9 +152,6 @@ export async function extractTextures(
       // unreadable-container path, one loop iteration down.
       const label = sanitizeFileName(texture.getName() || `texture_${index + 1}`, `texture_${index + 1}`);
       failures.push(`${label}: texture has no image data (an external file referenced by the glTF is missing)`);
-      // The reader's own diagnostic names the URI it could not open, which is
-      // the actionable half. Captured rather than left on stdout.
-      for (const message of readerLog.messages.splice(0)) failures.push(`glTF reader: ${message}`);
       continue;
     }
     const mime = texture.getMimeType();
