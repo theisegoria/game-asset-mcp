@@ -628,7 +628,7 @@ function computeBoundingBox(root: Root, sceneGraphFallback: boolean): {
   // boolean and the warning contradicting each other in one response, with
   // min_dimension (severity `error`) evaluated against geometry the same report
   // said was not drawn.
-  const bounded = root.getDefaultScene() ?? root.listScenes()[0];
+  const bounded = sceneGraphFallback ? undefined : (root.getDefaultScene() ?? root.listScenes()[0]);
   if (bounded) {
     const sceneBounds = getBounds(bounded);
     expand(sceneBounds.min, sceneBounds.max);
