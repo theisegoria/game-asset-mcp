@@ -211,3 +211,90 @@ describe('the summary describes what is actually on disk', () => {
     expect(String(payload.nextStep)).toMatch(/not written at all/);
   });
 });
+
+/**
+ * A texture that is DECLARED but unreadable is not "no such texture".
+ *
+ * Making this reader non-strict was right — a broken normal map should not cost
+ * you the albedo and roughness you could still have had. But it turned a loud,
+ * correct refusal ("ENOENT … THE_NORMAL_MAP_IS_MISSING.png") into a SUCCESS
+ * that asserted something false: *"the material declares no such texture"*. It
+ * declares one. The reader knew exactly what was wrong and said so, into a
+ * CollectingLogger that was constructed inline and never read.
+ *
+ * Reverting `.setStrictResources(false)` left all 394 tests green, so none of
+ * this was pinned by anything.
+ */
+describe('a declared-but-unreadable texture is reported as such', () => {
+  async function withBrokenNormal(dir: string): Promise<string> {
+    const png = encodePNG({ width: 4, height: 4, data: new Uint8Array(4 * 4 * 4).fill(200) });
+    const gltf = {
+      asset: { version: '2.0' },
+      scenes: [{ nodes: [0] }],
+      scene: 0,
+      nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 1 }, material: 0 }] }],
+      materials: [
+        {
+          pbrMetallicRoughness: { baseColorTexture: { index: 0 } },
+          normalTexture: { index: 1 },
+        },
+      ],
+      textures: [{ source: 0 }, { source: 1 }],
+      images: [
+        { uri: `data:image/png;base64,${Buffer.from(png).toString('base64')}`, mimeType: 'image/png' },
+        { uri: 'THE_NORMAL_MAP_IS_MISSING.png' },
+      ],
+      accessors: [
+        { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+        { bufferView: 1, componentType: 5126, count: 3, type: 'VEC2', min: [0, 0], max: [1, 1] },
+      ],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 36 },
+        { buffer: 0, byteOffset: 36, byteLength: 24 },
+      ],
+      buffers: [
+        {
+          byteLength: 60,
+          uri: `data:application/octet-stream;base64,${Buffer.alloc(60).toString('base64')}`,
+        },
+      ],
+    };
+    const file = path.join(dir, 'brokennormal.gltf');
+    await fs.writeFile(file, JSON.stringify(gltf));
+    return file;
+  }
+
+  it('still extracts the readable planes', async () => {
+    // The point of non-strict reading: one broken map must not cost the rest.
+    const { isError, payload, text } = await tools.call('extract_pbr_trio', {
+      modelPath: await withBrokenNormal(work),
+    });
+
+    expect(isError, text).toBe(false);
+    const planes = payload.planes as Array<Record<string, unknown>>;
+    expect(planes.some((p) => p.plane === 'albedo')).toBe(true);
+  });
+
+  it('does NOT claim the material declares no normal texture', async () => {
+    const { payload } = await tools.call('extract_pbr_trio', {
+      modelPath: await withBrokenNormal(work),
+    });
+
+    expect(payload.unreadableTextures).toContain('normal');
+    // The falsehood, stated verbatim by the shipped version.
+    expect(String(payload.nextStep)).not.toMatch(/declares no such texture/);
+    expect(String(payload.nextStep)).toMatch(/DOES declare/);
+  });
+
+  it('names the file that could not be opened', async () => {
+    // The reader's diagnostic is the actionable half — without it the caller is
+    // told a plane is absent and has nothing to go and fix.
+    const { payload } = await tools.call('extract_pbr_trio', {
+      modelPath: await withBrokenNormal(work),
+    });
+
+    const warnings = (payload.readerWarnings as string[] | undefined) ?? [];
+    expect(warnings.join(' ')).toMatch(/THE_NORMAL_MAP_IS_MISSING\.png/);
+  });
+});

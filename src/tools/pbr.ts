@@ -198,8 +198,18 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
       // sites, fixed together this time instead of one per release.
       // Logger attached for the same reason as the other two readers: the
       // default one writes to stdout, which the MCP transport owns.
+      // ⚠ HELD, not constructed inline and thrown away. The first version of
+      // this did `setLogger(new CollectingLogger())` and never read it, so the
+      // reader's diagnostic — which names the file that could not be opened —
+      // was discarded, and non-strict reading turned a LOUD, correct refusal
+      // ("ENOENT … THE_NORMAL_MAP_IS_MISSING.png") into a SUCCESS asserting
+      // something false: "the material declares no such texture". It declares
+      // one. That is the same class of defect this release fixes in
+      // asset-policy.ts, newly created by this release's own fix, at the third
+      // of three call sites the same comment claims were "fixed together".
+      const readerLog = new CollectingLogger();
       const document = await new NodeIO()
-        .setLogger(new CollectingLogger())
+        .setLogger(readerLog)
         .setStrictResources(false)
         .read(source);
       const materials = document.getRoot().listMaterials();
@@ -218,6 +228,22 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
       const normal = imageFromTexture(material.getNormalTexture());
       const metallicRoughness = imageFromTexture(material.getMetallicRoughnessTexture());
       const occlusion = imageFromTexture(material.getOcclusionTexture());
+
+      // DECLARED but unreadable is a third state, distinct from both "declared
+      // and loaded" and "not declared". Collapsing it into the last one is what
+      // let the response say the material declares no normal map when it does.
+      const unreadable: string[] = [];
+      const declaredButUnreadable = (
+        name: string,
+        texture: { getImage(): Uint8Array | null } | null,
+        decoded: RasterImage | undefined,
+      ): void => {
+        if (texture !== null && decoded === undefined) unreadable.push(name);
+      };
+      declaredButUnreadable('albedo', material.getBaseColorTexture(), baseColor);
+      declaredButUnreadable('normal', material.getNormalTexture(), normal);
+      declaredButUnreadable('roughness', material.getMetallicRoughnessTexture(), metallicRoughness);
+      declaredButUnreadable('occlusion', material.getOcclusionTexture(), occlusion);
 
       // Default to the largest source dimension so the operator does not
       // silently lose detail by accepting an arbitrary default.
@@ -518,10 +544,25 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
         (name) => planes.find((plane) => plane.plane === name)?.source === 'factor',
       );
 
+      // Split by CAUSE. A plane can be absent because the material never
+      // declared it, or because it declared one this reader could not open —
+      // and the caller acts on those differently: the first is a modelling
+      // choice, the second is a broken file they can go and fix.
+      const notDeclared = missing.filter((name) => !unreadable.includes(name));
+      const failedToLoad = missing.filter((name) => unreadable.includes(name));
+
       return ok({
         ...receipt,
         receiptPath,
         missingPlanes: missing,
+        /** Planes whose texture IS declared but whose image could not be read. */
+        ...(unreadable.length > 0 ? { unreadableTextures: unreadable } : {}),
+        // The reader's own diagnostics NAME the files that failed. Surfaced
+        // rather than collected and dropped, which is how a missing normal map
+        // came back as "the material declares no such texture".
+        ...(readerLog.messages.length > 0
+          ? { readerWarnings: readerLog.messages.map((m) => `glTF reader: ${m}`) }
+          : {}),
         nextStep: receipt.trioComplete
           ? 'All three planes came from real texture data.'
           : [
@@ -530,9 +571,15 @@ export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
                 ? `${constant.join(', ')} are flat constants derived from material factors and ` +
                   'are NOT measured detail.'
                 : '',
-              missing.length > 0
-                ? `${missing.join(', ')} was not written at all: the material declares no such ` +
-                  'texture and there is no factor to stand in for one.'
+              notDeclared.length > 0
+                ? `${notDeclared.join(', ')} was not written at all: the material declares no ` +
+                  'such texture and there is no factor to stand in for one.'
+                : '',
+              failedToLoad.length > 0
+                ? `${failedToLoad.join(', ')} was NOT written because the material DOES declare ` +
+                  'a texture for it and this reader could not open the image — see ' +
+                  'readerWarnings for the file that is missing. This is a broken asset, not a ' +
+                  'material without that map.'
                 : '',
             ]
               .filter(Boolean)

@@ -166,7 +166,15 @@ export async function inspectGltf(filePath: string): Promise<AssetInspection> {
   // counters. Using root.listMaterials() here meant the two halves of one report
   // described two different files.
   const materials = geometry.drawnMaterials;
-  const drawnTextures = texturesOf(root, materials);
+  // Whether this reader SKIPPED any extension, which is the only thing that
+  // separates "bound through something we did not parse" from "bound by
+  // nothing at all". Both look identical in the parsed document — parents of
+  // `Root` only — and treating them alike is what reopened the bogus texture
+  // warnings that scoping was added to remove.
+  const skippedExtensions = readerLog.messages.some((message) =>
+    message.includes('Missing optional extension'),
+  );
+  const drawnTextures = texturesOf(root, materials, skippedExtensions);
   const textures = summarizeTextures(drawnTextures);
   const bounds = computeBoundingBox(root, geometry.sceneGraphFallback);
   const pbr = summarizePbr(materials);
@@ -514,9 +522,11 @@ function summarizeGeometry(root: Root): GeometrySummary {
  *                                   it raised `texture_resolution` and
  *                                   `power_of_two_textures` warnings against
  *                                   models whose drawn textures were fine
- *   binding NOT PARSEABLE        -> counted, because we do not know it is
- *                                   unused and silently dropping it is the
- *                                   worse error
+ *   binding NOT PARSEABLE        -> counted, but ONLY when the reader reports
+ *                                   having skipped an extension. Without that
+ *                                   evidence a parentless texture is simply an
+ *                                   orphan, and counting it resurrects the
+ *                                   warnings this scoping removes
  *
  * The third case is not hypothetical. An enumeration of the five core PBR slots
  * cannot see a texture bound through an unregistered extension —
@@ -526,17 +536,23 @@ function summarizeGeometry(root: Root): GeometrySummary {
  * It vanished from `textureCount` and from both texture checks, and the two
  * tools then reported different counts for the same file.
  */
-function texturesOf(root: Root, drawnMaterials: Material[]): Texture[] {
+function texturesOf(root: Root, drawnMaterials: Material[], skippedExtensions: boolean): Texture[] {
   const drawn = new Set<Material>(drawnMaterials);
   const kept: Texture[] = [];
   for (const texture of root.listTextures()) {
     const materialParents = texture
       .listParents()
       .filter((parent) => parent.propertyType === 'Material') as Material[];
-    // No material parent at all means the binding lives somewhere this reader
-    // did not parse — indeterminate, not unused.
-    const bindingUnknown = materialParents.length === 0;
-    if (bindingUnknown || materialParents.some((material) => drawn.has(material))) {
+    // No material parent at all is AMBIGUOUS: it is either bound through an
+    // extension this reader skipped, or bound by nothing at all. The parsed
+    // document cannot tell them apart — both have `Root` as their only parent —
+    // so the reader's own log decides it. Counting both alike brought back the
+    // `texture_resolution` and `power_of_two_textures` warnings against unused
+    // leftovers that this scoping exists to suppress, and on one file made
+    // `inspect_asset` report ONLY the texture nothing samples.
+    const noMaterialParent = materialParents.length === 0;
+    const possiblyExtensionBound = noMaterialParent && skippedExtensions;
+    if (possiblyExtensionBound || materialParents.some((material) => drawn.has(material))) {
       kept.push(texture);
     }
   }

@@ -519,3 +519,78 @@ describe('an extension-bound texture is not silently dropped', () => {
     expect(inspected.textureResolutions).toHaveLength(2);
   });
 });
+
+/**
+ * An orphan texture is not an extension-bound one.
+ *
+ * Both have `Root` as their only parent, so the parsed document cannot tell
+ * them apart, and counting them alike brought back exactly the
+ * `texture_resolution` / `power_of_two_textures` warnings that scoping textures
+ * to drawn materials exists to suppress. On one file it was worse than noisy:
+ * `inspect_asset` reported ONLY the texture nothing samples.
+ *
+ * The reader's own log is the evidence — it says when it skipped an extension.
+ */
+describe('an unused leftover texture is not counted as drawn', () => {
+  async function withOrphan(dir: string, declareExtension: boolean): Promise<string> {
+    const big = encodePNG({ width: 64, height: 64, data: new Uint8Array(64 * 64 * 4).fill(200) });
+    const odd = encodePNG({ width: 25, height: 25, data: new Uint8Array(25 * 25 * 4).fill(90) });
+    const gltf: Record<string, unknown> = {
+      asset: { version: '2.0' },
+      scenes: [{ nodes: [0] }],
+      scene: 0,
+      nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0, TEXCOORD_0: 1 }, material: 0 }] }],
+      materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }],
+      textures: [{ source: 0 }, { source: 1 }],
+      images: [
+        { uri: `data:image/png;base64,${Buffer.from(big).toString('base64')}`, mimeType: 'image/png' },
+        { uri: `data:image/png;base64,${Buffer.from(odd).toString('base64')}`, mimeType: 'image/png' },
+      ],
+      accessors: [
+        { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+        { bufferView: 1, componentType: 5126, count: 3, type: 'VEC2', min: [0, 0], max: [1, 1] },
+      ],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: 36 },
+        { buffer: 0, byteOffset: 36, byteLength: 24 },
+      ],
+      buffers: [
+        {
+          byteLength: 60,
+          uri: `data:application/octet-stream;base64,${Buffer.alloc(60).toString('base64')}`,
+        },
+      ],
+    };
+    if (declareExtension) {
+      // Same file, but texture 1 IS bound — through an extension this reader
+      // does not register. Identical parent structure; different truth.
+      (gltf.materials as Array<Record<string, unknown>>)[0]!.extensions = {
+        KHR_materials_clearcoat: { clearcoatNormalTexture: { index: 1 } },
+      };
+      gltf.extensionsUsed = ['KHR_materials_clearcoat'];
+    }
+    const file = path.join(dir, declareExtension ? 'ext.gltf' : 'orphan.gltf');
+    await fs.writeFile(file, JSON.stringify(gltf));
+    return file;
+  }
+
+  it('excludes a texture that nothing references', async () => {
+    const inspected = await inspectGltf(await withOrphan(work, false));
+
+    // One drawn texture. The 25x25 leftover is unused: counting it produced a
+    // non-power-of-two warning and a resolution warning about a texture no
+    // renderer samples.
+    expect(inspected.textureCount).toBe(1);
+    expect(inspected.textureResolutions).toHaveLength(1);
+    expect(inspected.textureResolutions[0]?.width).toBe(64);
+  });
+
+  it('still counts the same texture when an extension actually binds it', async () => {
+    // The pair matters more than either half: identical parent structure in the
+    // parsed document, opposite correct answers, decided by the reader's log.
+    const inspected = await inspectGltf(await withOrphan(work, true));
+
+    expect(inspected.textureCount).toBe(2);
+  });
+});
