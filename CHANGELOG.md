@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.3.8
+
+A fourteenth review, six findings. The first is the same mistake for the third
+consecutive release, and it is worth stating why it kept surviving.
+
+### Framing a LOCAL question in WORLD terms — three times
+
+`mergeDistance: 0` means "merge nothing, but still repair faces that are
+degenerate at any scale". Two releases tried to express that as a world-space
+number and both were wrong, in opposite directions:
+
+| release | framing | failure |
+| --- | --- | --- |
+| 0.3.7 | `1e-6` **local** | world radius grew with scale; a mesh with 4e-7 local features **lost 98% of itself** and reported ready |
+| 0.3.7 fix | `1e-6` **world** / divisor | gate reduces to `divisor <= 1`, so **every object scaled above 1.0 silently stopped being repaired** |
+
+Each time the fixture sat at scale `[1,1,1]` — the one value at which that
+release's bug is invisible. The second cliff sat at **1.0001**.
+
+The dissolve runs on LOCAL coordinates, so the safety question is the mesh's own
+local feature size and nothing else. It now dissolves at Blender's floor exactly
+when the mesh's smallest real local edge is at least 10x that floor:
+scale-independent by construction, which is what both previous framings lacked.
+Measured across node scale 0.001 / 1 / 1.0001 / 2 / 1000: repaired at every one.
+
+The test sweeps **scale**, not merge distance, and kills both historical
+framings — the strongest check available.
+
+`"monotonic by construction"` is retracted; `mergeDistance: 0` is a sentinel,
+not a distance, and is documented as one. 0.3.7's entry is corrected in place
+rather than quietly edited.
+
+### Reports that stated things that were not true
+
+- **The bounding box still used the OLD scene predicate**, so one response
+  carried `sceneGraphFallback: false` beside the warning "no scene references
+  the meshes" — contradicting itself, with `min_dimension` (severity `error`)
+  judged against geometry the same report called undrawn.
+- **`hasUVs` is `primitiveCount > 0 && missingUv === 0`**, so a file that draws
+  nothing produced *"at least one primitive has no TEXCOORD_0"* about a file
+  whose every primitive is fully unwrapped. Three errors for one cause, two of
+  them untrue. The attribute checks now run only when something is drawn.
+
+### Textures
+
+- **One missing sidecar discarded every other texture in the file.**
+  `extractTextures` read strictly while `inspectGltf` did not, and that reader's
+  comment already stated the rule. All three readers now agree.
+- **A texture bound through an extension vanished.** Scoping to drawn materials
+  was done by enumerating the five core PBR slots, which cannot see a
+  KHR_materials_clearcoat / sheen / transmission binding. Now three cases are
+  distinguished: bound-and-drawn (counted), bound-but-undrawn (excluded),
+  **binding not parseable (counted, because "unknown" is not "unused")**.
+- The missing-image branch added in 0.3.7 was **dead code** under strict
+  reading, which is why reverting it left the suite green — and why that
+  release's "every fix observed to fail" claim was false for it. Now reachable
+  and pinned.
+
 ## 0.3.7
 
 A thirteenth review, six findings. The worst is mine from 0.3.6, and it is the
