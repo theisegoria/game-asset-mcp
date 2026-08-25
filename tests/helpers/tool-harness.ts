@@ -49,6 +49,15 @@ export interface ToolClient {
 export async function connectTools(
   register: (server: McpServer, ctx: ToolContext) => void,
   workspace: string,
+  /**
+   * Overrides applied to the context before the tools are registered.
+   *
+   * Exists so a provider-backed tool can be exercised END TO END without a
+   * credential or a network call — stub the provider, keep everything else
+   * real. Without it those tools are only ever tested at the provider layer,
+   * which is exactly the boundary where this repo keeps losing values.
+   */
+  overrides: Partial<ToolContext> = {},
 ): Promise<ToolClient> {
   // Build the config from a real env so the tools see the same shape they do in
   // production, rather than a hand-written object that could drift from it.
@@ -59,7 +68,7 @@ export async function connectTools(
   const logger = new Logger('error');
   const store = await JobStore.open(config.jobsDir);
   const spend = await SpendLedger.open(config.jobsDir, config.spendLimitCents);
-  const ctx = createToolContext({ config, logger, store, spend });
+  const ctx = Object.assign(createToolContext({ config, logger, store, spend }), overrides);
 
   const server = new McpServer({ name: 'test', version: '0.0.0' });
   register(server, ctx);
