@@ -30,15 +30,24 @@ export async function runDoctor(runtime: GameDevRuntime): Promise<Record<string,
   });
   checks.push({
     id: 'node-runtime',
-    status: 'pass',
+    status: (() => {
+      const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
+      return major > 22 || (major === 22 && minor >= 5) ? 'pass' : 'fail';
+    })(),
     detail: process.version,
-    evidence: { executable: process.execPath },
+    evidence: { executable: process.execPath, minimum: '22.5.0 (node:sqlite catalog)' },
   });
   checks.push({
     id: 'workspace',
     status: 'pass',
     detail: runtime.config.outputDir,
-    evidence: { jobsDir: runtime.config.jobsDir },
+    evidence: {
+      jobsDir: runtime.config.jobsDir,
+      durableJobsDir: runtime.config.durableJobsDir,
+      packagesDir: runtime.config.packagesDir,
+      catalogPath: runtime.config.catalogPath,
+      runsDir: runtime.config.runsDir,
+    },
   });
   checks.push({
     id: 'tripo-credential',
@@ -63,6 +72,32 @@ export async function runDoctor(runtime: GameDevRuntime): Promise<Record<string,
     status: await exists(normalizer) ? 'pass' : 'fail',
     detail: normalizer,
   });
+  const usdExporter = packagedScript('blender_usd_export.py');
+  checks.push({
+    id: 'blender-usd-exporter',
+    status: await exists(usdExporter) ? 'pass' : 'fail',
+    detail: usdExporter,
+  });
+  checks.push({
+    id: 'usdzip',
+    status: await exists('/usr/bin/usdzip') ? 'pass' : 'unavailable',
+    detail: await exists('/usr/bin/usdzip') ? '/usr/bin/usdzip' : 'not present on this platform',
+  });
+
+  try {
+    await import('node:sqlite');
+    checks.push({
+      id: 'sqlite-catalog-runtime',
+      status: 'pass',
+      detail: 'node:sqlite is available',
+    });
+  } catch (error) {
+    checks.push({
+      id: 'sqlite-catalog-runtime',
+      status: 'fail',
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   const skillRoot = path.join(process.env.CODEX_HOME?.trim() || path.join(process.env.HOME ?? '', '.codex'), 'skills');
   const expectedSkills = [

@@ -5,13 +5,18 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliEntry = path.join(here, '..', 'dist', 'cli.js');
+const retiredOutputs = [
+  'server.js',
+  'server.js.map',
+  'server.d.ts',
+].map((name) => path.join(here, '..', 'dist', name));
 
 const EXPECTED_TOOLS = [
   'preview_asset_prompt',
@@ -37,9 +42,19 @@ const EXPECTED_TOOLS = [
 ];
 
 const EXPECTED_FAMILIES = [
-  'capabilities', 'doctor', 'provider', 'job', 'asset', 'package',
-  'scenario', 'capture', 'visual', 'performance', 'skill', 'migrate',
+  'capabilities', 'doctor', 'credentials', 'provider', 'job', 'catalog',
+  'asset', 'vendor', 'package', 'scenario', 'capture', 'visual',
+  'performance', 'skill', 'migrate', 'launch', 'tool',
 ];
+
+async function exists(target) {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function run(args, env = {}) {
   return new Promise((resolve, reject) => {
@@ -58,6 +73,14 @@ function run(args, env = {}) {
 async function main() {
   const workspace = await mkdtemp(path.join(tmpdir(), 'game-dev-verify-'));
   try {
+    const leakedOutputs = [];
+    for (const target of retiredOutputs) {
+      if (await exists(target)) leakedOutputs.push(path.basename(target));
+    }
+    if (leakedOutputs.length > 0) {
+      throw new Error(`retired MCP outputs leaked into dist: ${leakedOutputs.join(', ')}`);
+    }
+
     const capabilityRun = await run(['capabilities', '--json', '--output-dir', workspace]);
     const envelope = JSON.parse(capabilityRun.stdout);
     if (envelope.ok !== true || envelope.data?.schema !== 'game_dev.capabilities.v1') {
