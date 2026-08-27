@@ -103,6 +103,7 @@ async function main() {
   const exportedRepository = path.join(temporaryRoot, 'exported-skills-repository');
 
   try {
+    const sourcePackage = await readJson(path.join(sourceRoot, 'package.json'));
     await Promise.all([mkdir(packRoot), mkdir(consumerRoot)]);
     const npmEnvironment = { npm_config_cache: npmCache };
     const packed = await run(npmExecutable, [
@@ -115,7 +116,7 @@ async function main() {
     invariant(Array.isArray(packRecords) && packRecords.length === 1, 'npm pack returned an unexpected record count');
     const packRecord = packRecords[0];
     invariant(packRecord?.name === '@theisegoria/game-development-studio', 'npm pack returned the wrong package');
-    invariant(packRecord?.version === '1.0.0', 'npm pack returned the wrong version');
+    invariant(packRecord?.version === sourcePackage.version, 'packed version differs from package.json');
     const tarballPath = path.join(packRoot, packRecord.filename);
     invariant(await exists(tarballPath), 'npm pack did not create the reported tarball');
 
@@ -249,10 +250,10 @@ async function main() {
       process.platform === 'win32' ? 'game-dev.cmd' : 'game-dev',
     );
     const binRun = await run(installedBin, ['--version'], { cwd: consumerRoot });
-    invariant(binRun.stdout.trim() === '1.0.0', 'installed npm bin did not execute the packed CLI');
+    invariant(binRun.stdout.trim() === installedPackage.version, 'installed npm bin did not execute the packed CLI');
 
     const library = await import(pathToFileURL(path.join(packageRoot, 'dist', 'index.js')).href);
-    invariant(library.GAME_DEV_VERSION === '1.0.0', 'installed library export has the wrong version');
+    invariant(library.GAME_DEV_VERSION === installedPackage.version, 'installed library export has the wrong version');
 
     const builderRun = await run(process.execPath, [
       path.join(packageRoot, 'scripts', 'build-skills-repository.mjs'),

@@ -16,6 +16,13 @@ APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
+APP_MODULE_CACHE="$PACKAGE_DIR/.build/ModuleCache"
+ICON_SOURCE="$ROOT_DIR/assets/icon.png"
+ICONSET_DIR="$APP_RESOURCES/AppIcon.iconset"
+
+mkdir -p "$APP_MODULE_CACHE"
+export CLANG_MODULE_CACHE_PATH="$APP_MODULE_CACHE"
+export SWIFTPM_MODULECACHE_OVERRIDE="$APP_MODULE_CACHE"
 
 case "$APP_BUNDLE" in
   "$ROOT_DIR"/macos/GameDevelopmentStudio/dist/*.app) ;;
@@ -25,16 +32,39 @@ case "$APP_BUNDLE" in
     ;;
 esac
 
+if [[ "$MODE" == "--test" || "$MODE" == "test" ]]; then
+  swift test --disable-sandbox --package-path "$PACKAGE_DIR"
+  exit 0
+fi
+
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
-swift build --package-path "$PACKAGE_DIR"
-BUILD_BINARY="$(swift build --package-path "$PACKAGE_DIR" --show-bin-path)/$APP_NAME"
+swift build --disable-sandbox --package-path "$PACKAGE_DIR"
+BUILD_BINARY="$(swift build --disable-sandbox --package-path "$PACKAGE_DIR" --show-bin-path)/$APP_NAME"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
-cp "$ROOT_DIR/assets/icon.png" "$APP_RESOURCES/ProductIcon.png"
 chmod +x "$APP_BINARY"
+
+mkdir -p "$ICONSET_DIR"
+make_icon() {
+  local size="$1"
+  local output="$2"
+  /usr/bin/sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET_DIR/$output" >/dev/null
+}
+make_icon 16 icon_16x16.png
+make_icon 32 icon_16x16@2x.png
+make_icon 32 icon_32x32.png
+make_icon 64 icon_32x32@2x.png
+make_icon 128 icon_128x128.png
+make_icon 256 icon_128x128@2x.png
+make_icon 256 icon_256x256.png
+make_icon 512 icon_256x256@2x.png
+make_icon 512 icon_512x512.png
+make_icon 1024 icon_512x512@2x.png
+/usr/bin/iconutil -c icns "$ICONSET_DIR" -o "$APP_RESOURCES/AppIcon.icns"
+rm -rf "$ICONSET_DIR"
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -47,6 +77,8 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -98,7 +130,7 @@ case "$MODE" in
     pgrep -x "$APP_NAME" >/dev/null
     ;;
   *)
-    echo "usage: $0 [run|--build-only|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--test|--build-only|--debug|--logs|--telemetry|--verify]" >&2
     exit 2
     ;;
 esac

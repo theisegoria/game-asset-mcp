@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public protocol GameDevCLIClientProtocol: Sendable {
     func execute(
@@ -25,6 +26,7 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
     case invalidUTF8(ProcessOutputStream)
     case invalidJSON(exitCode: Int32, diagnostic: String)
     case unexpectedSchema(String)
+    case inconsistentResult(exitCode: Int32, ok: Bool)
 
     public var errorDescription: String? {
         switch self {
@@ -50,6 +52,8 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
             "game-dev returned invalid JSON (exit \(exitCode)): \(diagnostic)"
         case let .unexpectedSchema(schema):
             "game-dev returned unsupported schema \(schema)."
+        case let .inconsistentResult(exitCode, ok):
+            "game-dev returned contradictory status (exit \(exitCode), ok \(ok))."
         }
     }
 }
@@ -89,6 +93,9 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
         if !arguments.contains("--json") { arguments.append("--json") }
 
         var environment = baseEnvironment
+        for provider in CredentialProvider.allCases {
+            environment.removeValue(forKey: provider.environmentVariable)
+        }
         environment.merge(invocation.environment) { _, invocationValue in invocationValue }
         for (provider, credential) in credentials where !credential.isEmpty {
             environment[provider.environmentVariable] = credential
@@ -169,6 +176,12 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
         guard envelope.schema == Self.resultSchema else {
             throw GameDevCLIClientError.unexpectedSchema(envelope.schema)
         }
+        guard (raw.exitCode == 0) == envelope.ok else {
+            throw GameDevCLIClientError.inconsistentResult(
+                exitCode: raw.exitCode,
+                ok: envelope.ok
+            )
+        }
 
         let redactedEnvelope = envelope.redacting(Array(secrets))
         let redactedStandardError = SecretRedactor.redact(stderr, secrets: Array(secrets))
@@ -199,6 +212,14 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
         }
         if invocation.arguments.contains("--jsonl") {
             throw GameDevCLIClientError.invalidInvocation("JSON Lines is not supported by the single-result app client")
+        }
+        let providerEnvironmentVariables = Set(
+            CredentialProvider.allCases.map(\.environmentVariable)
+        )
+        if invocation.environment.keys.contains(where: providerEnvironmentVariables.contains) {
+            throw GameDevCLIClientError.invalidInvocation(
+                "provider credentials must use the explicit credentials parameter"
+            )
         }
         if let workingDirectory = invocation.workingDirectory, !workingDirectory.isFileURL {
             throw GameDevCLIClientError.invalidInvocation("the working directory is not a file URL")
@@ -235,6 +256,7 @@ private final class ManagedProcess: @unchecked Sendable {
     private let maximumOutputBytesPerStream: Int
     private let stateQueue = DispatchQueue(label: "GameDevelopmentStudio.GameDevCLIClient.state")
     private let inputQueue = DispatchQueue(label: "GameDevelopmentStudio.GameDevCLIClient.input")
+    private let forcedTerminationGrace: DispatchTimeInterval = .milliseconds(350)
 
     private var standardOutput = Data()
     private var standardError = Data()
@@ -322,7 +344,7 @@ private final class ManagedProcess: @unchecked Sendable {
         stateQueue.async { [weak self] in
             guard let self, completion == nil else { return }
             if pendingFailure == nil { pendingFailure = failure }
-            if process.isRunning { process.terminate() }
+            terminateProcess()
         }
     }
 
@@ -357,7 +379,21 @@ private final class ManagedProcess: @unchecked Sendable {
                 stream: stream,
                 limit: maximumOutputBytesPerStream
             )
-            if process.isRunning { process.terminate() }
+            terminateProcess()
+        }
+    }
+
+    private func terminateProcess() {
+        guard process.isRunning else { return }
+        let processIdentifier = process.processIdentifier
+        process.terminate()
+        stateQueue.asyncAfter(deadline: .now() + forcedTerminationGrace) { [weak self] in
+            guard let self,
+                  completion == nil,
+                  process.isRunning,
+                  process.processIdentifier == processIdentifier
+            else { return }
+            _ = Darwin.kill(processIdentifier, SIGKILL)
         }
     }
 

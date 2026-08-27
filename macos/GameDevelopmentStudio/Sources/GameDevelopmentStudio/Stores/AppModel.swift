@@ -131,7 +131,20 @@ public final class AppModel {
         await execute(label: "Asset validation", arguments: ["asset", "validate", path])
     }
 
-    public func buildPackage(path: String, name: String, version: String, license: String) async {
+    public func buildPackage(
+        path: String,
+        name: String,
+        version: String,
+        license: String,
+        confirmed: Bool
+    ) async {
+        guard confirmed else {
+            failLocally(
+                summary: "Package build confirmation required",
+                message: "Review the source, package identity, license, and local write before building."
+            )
+            return
+        }
         guard
             let path = required(path, label: "GLB path"),
             let name = required(name, label: "Package name"),
@@ -399,7 +412,7 @@ public final class AppModel {
             history.insert(result.envelope, at: 0)
             if history.count > 50 { history.removeLast(history.count - 50) }
 
-            if result.envelope.ok {
+            if result.succeeded {
                 executionState = .succeeded(result.envelope.summary)
                 Self.logger.info("Completed \(label, privacy: .public)")
             } else {

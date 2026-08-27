@@ -39,7 +39,7 @@ struct ResultInspectorView: View {
                                     .font(.system(.caption, design: .monospaced, weight: .medium))
                                     .lineLimit(2)
                                 HStack {
-                                    Text(result.status.rawValue.capitalized)
+                                    StatusPill(status: result.status.rawValue)
                                     Spacer()
                                     Text(result.timestamp, style: .relative)
                                 }

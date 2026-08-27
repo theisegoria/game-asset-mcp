@@ -194,26 +194,35 @@ struct ResultSummaryView: View {
     }
 }
 
-private struct StatusPill: View {
+struct StatusPill: View {
     let status: String
 
     private var color: Color {
         switch status.lowercased() {
         case "ok", "success", "succeeded", "complete", "completed": .green
-        case "warning", "partial", "blocked": .orange
+        case "approvalrequired", "warning", "partial", "blocked": .orange
         case "error", "failed", "failure": .red
         default: .secondary
         }
     }
 
+    private var displayStatus: String {
+        switch status {
+        case "approvalRequired": "Approval required"
+        case "succeeded": "Succeeded"
+        case "failed": "Failed"
+        default: status.isEmpty ? "Result" : status.capitalized
+        }
+    }
+
     var body: some View {
-        Text(status.isEmpty ? "Result" : status.capitalized)
+        Text(displayStatus)
             .font(.caption.weight(.semibold))
             .foregroundStyle(color)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(color.opacity(0.12), in: Capsule())
-            .accessibilityLabel("Status: \(status.isEmpty ? "result" : status)")
+            .accessibilityLabel("Status: \(displayStatus)")
     }
 }
 

@@ -25,12 +25,10 @@ struct ProductionWorkspaceView: View {
                     Button("Refresh Capabilities") {
                         Task { await model.refreshCapabilities() }
                     }
-                    .keyboardShortcut("k", modifiers: [.command, .shift])
 
                     Button("Run Doctor") {
                         Task { await model.runDoctor() }
                     }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
                 }
                 .disabled(model.executionState.isRunning)
             }
@@ -39,19 +37,36 @@ struct ProductionWorkspaceView: View {
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
                     GridRow {
                         Text("Provider")
-                        Picker("Provider", selection: $provider) {
-                            Text("Choose a provider").tag(nil as CredentialProvider?)
-                            ForEach(CredentialProvider.allCases) { candidate in
-                                Label(candidate.displayName, systemImage: candidate.systemImage)
-                                    .tag(Optional(candidate))
+                        HStack {
+                            Picker("Provider", selection: $provider) {
+                                Text("Choose a provider").tag(nil as CredentialProvider?)
+                                ForEach(CredentialProvider.allCases) { candidate in
+                                    Label(candidate.displayName, systemImage: candidate.systemImage)
+                                        .tag(Optional(candidate))
+                                }
+                            }
+                            .labelsHidden()
+
+                            if let provider {
+                                let isConfigured = model.credentialState(for: provider).isConfigured
+                                Label(
+                                    isConfigured ? "Configured" : "Credential missing",
+                                    systemImage: isConfigured ? "checkmark.circle.fill" : "exclamationmark.circle"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(isConfigured ? Color.green : Color.orange)
                             }
                         }
-                        .labelsHidden()
                     }
 
                     GridRow {
                         Text("Operation")
-                        TextField("generate", text: $operation)
+                        Picker("Operation", selection: $operation) {
+                            ForEach(availableOperations, id: \.self) { candidate in
+                                Text(candidate).tag(candidate)
+                            }
+                        }
+                        .labelsHidden()
                     }
 
                     GridRow {
@@ -147,6 +162,9 @@ struct ProductionWorkspaceView: View {
                 provider = CredentialProvider.allCases.first
             }
         }
+        .onChange(of: provider) { _, _ in
+            operation = availableOperations.first ?? "generate"
+        }
         .sheet(item: $approvalRequest) { request in
             ApprovalSheet(request: request)
         }
@@ -165,6 +183,17 @@ struct ProductionWorkspaceView: View {
             && !packageName.isEmpty
             && !packageVersion.isEmpty
             && !packageLicense.isEmpty
+    }
+
+    private var availableOperations: [String] {
+        switch provider {
+        case .tripo:
+            ["generate"]
+        case .leonardo:
+            ["image-generate", "sound-generate"]
+        case nil:
+            []
+        }
     }
 
     private func prepareProviderApproval() {
@@ -217,7 +246,8 @@ struct ProductionWorkspaceView: View {
                 path: submittedPath,
                 name: submittedName,
                 version: submittedVersion,
-                license: submittedLicense
+                license: submittedLicense,
+                confirmed: true
             )
         }
     }

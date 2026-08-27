@@ -27,7 +27,6 @@ struct LibraryVendoringWorkspaceView: View {
                     Button("Refresh") {
                         Task { await model.refreshCatalog(query: model.searchText) }
                     }
-                    .keyboardShortcut("r", modifiers: [.command])
                     .disabled(model.executionState.isRunning)
                 }
             }
@@ -115,7 +114,9 @@ struct LibraryVendoringWorkspaceView: View {
                 destination: selectedDestination,
                 confirmed: false
             )
-            plannedSignature = signature
+            if model.executionState.errorMessage == nil, model.latestResult?.ok == true {
+                plannedSignature = signature
+            }
         }
     }
 

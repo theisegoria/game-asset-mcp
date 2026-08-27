@@ -74,5 +74,8 @@ struct ContentView: View {
                 isOperationRunning: model.executionState.isRunning
             )
         )
+        .task {
+            await model.refreshCredentialStates()
+        }
     }
 }

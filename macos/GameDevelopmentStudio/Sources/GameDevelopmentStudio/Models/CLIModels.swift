@@ -99,6 +99,9 @@ public struct CLIResultEnvelope: Codable, Equatable, Identifiable, Sendable {
             in: data,
             keys: ["completedAt", "createdAt", "updatedAt", "timestamp"]
         ) else { return receivedAt }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let parsed = fractional.date(from: raw) { return parsed }
         return ISO8601DateFormatter().date(from: raw) ?? receivedAt
     }
 
@@ -108,7 +111,7 @@ public struct CLIResultEnvelope: Codable, Equatable, Identifiable, Sendable {
             "operation": operation,
             "ok": ok,
         ]
-        object[ok ? "data" : "error"] = (error ?? data).foundationObject()
+        object[ok ? "data" : "error"] = (ok ? data : error ?? data).foundationObject()
         guard JSONSerialization.isValidJSONObject(object),
               let encoded = try? JSONSerialization.data(
                   withJSONObject: object,

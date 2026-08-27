@@ -167,6 +167,7 @@ private struct CredentialSettingsPane: View {
         }
         .formStyle(.grouped)
         .task {
+            await model.refreshCredentialStates()
             if selectedProvider == nil {
                 selectedProvider = CredentialProvider.allCases.first
             }

@@ -155,7 +155,9 @@ struct VisualDebuggingWorkspaceView: View {
 
         Task { @MainActor in
             await model.planScenario(id: scenario, project: project)
-            plannedSignature = signature
+            if model.executionState.errorMessage == nil, model.latestResult?.ok == true {
+                plannedSignature = signature
+            }
         }
     }
 
