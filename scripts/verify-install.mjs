@@ -42,7 +42,7 @@ const EXPECTED_TOOLS = [
 ];
 
 const EXPECTED_FAMILIES = [
-  'capabilities', 'doctor', 'credentials', 'provider', 'job', 'catalog',
+  'capabilities', 'doctor', 'credentials', 'adapter', 'provider', 'job', 'catalog',
   'asset', 'vendor', 'package', 'scenario', 'capture', 'visual',
   'performance', 'skill', 'migrate', 'launch', 'tool',
 ];

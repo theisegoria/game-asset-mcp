@@ -19,7 +19,13 @@ function isInside(root: string, target: string): boolean {
 
 async function regularFileInside(root: string, target: string, description: string): Promise<string> {
   const candidate = path.resolve(root, target);
-  if (!isInside(root, candidate)) throw invalidInput(`${description} escapes the run directory`, { path: candidate });
+  // Relative artifact paths must be lexically contained before touching the
+  // filesystem. Absolute paths from a trusted native report may use an OS
+  // alias such as macOS /var -> /private/var, so their identity is checked
+  // after realpath instead of rejecting the spelling here.
+  if (!path.isAbsolute(target) && !isInside(root, candidate)) {
+    throw invalidInput(`${description} escapes the run directory`, { path: candidate });
+  }
   const stats = await fs.lstat(candidate).catch(() => undefined);
   if (!stats || stats.isSymbolicLink() || !stats.isFile()) {
     throw invalidState(`${description} must be an existing non-symlink regular file`, { path: candidate });
@@ -169,9 +175,24 @@ export async function normalizeGenomeHemeraCapture(options: {
 
   const reportDocument = await readJson(nativeRunPath, 'renderer_acceptance_matrix.runtime.json', 'Genome final capture report');
   const report = record(reportDocument.value, 'Genome final capture report');
+  const reportedRunDirectory = stringField(report, 'run_directory', 'Genome final capture report');
+  if (!path.isAbsolute(reportedRunDirectory)) {
+    throw invalidState('Genome final capture report has a non-absolute run_directory');
+  }
+  let reportedRunIdentity: string;
+  try {
+    reportedRunIdentity = await fs.realpath(reportedRunDirectory);
+  } catch {
+    throw invalidState('Genome final capture report run_directory cannot be resolved');
+  }
+  if (reportedRunIdentity !== nativeRunPath) {
+    throw invalidState('Genome final capture report has an inadmissible run_directory', {
+      expected: nativeRunPath,
+      actual: reportedRunDirectory,
+    });
+  }
   const exactFields: Array<[string, unknown]> = [
     ['schema', 'evo.renderer_acceptance_capture_run.v1'],
-    ['run_directory', nativeRunPath],
     ['windowless', true],
     ['backend', 'metal'],
     ['render_mode', 'raster'],

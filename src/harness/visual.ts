@@ -119,8 +119,8 @@ function analyzeRaster(
     const values = [red, green, blue, alpha];
     for (let channel = 0; channel < 4; channel += 1) {
       const value = values[channel] ?? 0;
-      minimum[channel] = Math.min(minimum[channel], value);
-      maximum[channel] = Math.max(maximum[channel], value);
+      minimum[channel] = Math.min(minimum[channel] ?? 255, value);
+      maximum[channel] = Math.max(maximum[channel] ?? 0, value);
       sums[channel] = (sums[channel] ?? 0) + value;
     }
     luminance += 0.2126 * red + 0.7152 * green + 0.0722 * blue;
@@ -312,6 +312,7 @@ export async function compareRunVisuals(options: {
   let outputPath: string | undefined;
   if (options.outputPath) {
     outputPath = path.resolve(options.outputPath);
+    await fs.mkdir(path.dirname(outputPath), { recursive: true, mode: 0o700 });
     await fs.mkdir(outputPath, { recursive: false, mode: 0o700 });
   }
   const baselineAttachments = new Map<string, { frame: CaptureManifest['frames'][number]; attachment: CaptureAttachment }>();

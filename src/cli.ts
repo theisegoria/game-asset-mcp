@@ -373,6 +373,129 @@ async function dispatch(
     throw invalidInput('credential mutation is available through the native app so secrets never enter shell history');
   }
 
+  if (family === 'adapter' && action === 'templates') {
+    return {
+      operation: 'adapter.templates',
+      data: {
+        schema: 'game_dev.adapter_templates.v1',
+        templates: await listAdapterTemplates(),
+      },
+    };
+  }
+  if (family === 'adapter' && action === 'install') {
+    const result = await installAdapterTemplate({
+      templateId: requirePositional(parsed, 2, 'adapter template id'),
+      projectRoot: path.resolve(requireFlag(parsed, 'project')),
+      confirm: booleanFlag(parsed, 'confirm'),
+    });
+    return { operation: 'adapter.install', data: result };
+  }
+  if (family === 'adapter' && action === 'inspect') {
+    const adapter = await loadAdapter(
+      path.resolve(requireFlag(parsed, 'project')),
+      stringFlag(parsed, 'manifest'),
+    );
+    return {
+      operation: 'adapter.inspect',
+      data: {
+        schema: 'game_dev.adapter_inspection.v1',
+        projectRoot: adapter.projectRoot,
+        manifestPath: adapter.manifestPath,
+        manifestSha256: adapter.manifestSha256,
+        adapter: adapter.manifest,
+        evidenceCeiling: 'Inspection validates a declarative adapter only; it executes no project command.',
+      },
+    };
+  }
+
+  if (family === 'scenario' && ['list', 'plan', 'run'].includes(action ?? '')) {
+    const adapter = await loadAdapter(
+      path.resolve(requireFlag(parsed, 'project')),
+      stringFlag(parsed, 'manifest'),
+    );
+    if (action === 'list') {
+      return {
+        operation: 'scenario.list',
+        data: {
+          schema: 'game_dev.scenario_list.v1',
+          adapterId: adapter.manifest.id,
+          adapterVersion: adapter.manifest.version,
+          scenarios: adapter.manifest.scenarios.map((scenario) => ({
+            id: scenario.id,
+            title: scenario.title,
+            description: scenario.description,
+            capabilities: scenario.capabilities,
+            parameters: scenario.parameters,
+            outputFormat: scenario.outputs.format,
+          })),
+        },
+      };
+    }
+    const scenarioId = requirePositional(parsed, 2, 'scenario id');
+    const request = await readRequest(parsed);
+    const plan = await planScenarioRun({
+      adapter,
+      scenarioId,
+      runsRoot: runtime.config.runsDir,
+      parameters: request,
+    });
+    if (action === 'plan') return { operation: 'scenario.plan', data: plan as unknown as Record<string, unknown> };
+
+    const missing: string[] = [];
+    if (!booleanFlag(parsed, 'confirm')) missing.push('--confirm');
+    if (plan.requiredAuthorizations.includes('gpu') && !booleanFlag(parsed, 'allow-gpu')) missing.push('--allow-gpu');
+    if (plan.requiredAuthorizations.includes('performance') && !booleanFlag(parsed, 'allow-performance')) {
+      missing.push('--allow-performance');
+    }
+    if (missing.length > 0) {
+      return {
+        operation: 'scenario.run',
+        isError: true,
+        data: {
+          error: 'APPROVAL_REQUIRED',
+          message: 'Scenario execution requires every capability-specific authorization listed below.',
+          requiredFlags: missing,
+          plan,
+        },
+      };
+    }
+    events.emit('progress', {
+      phase: 'scenario_process',
+      runId: plan.runId,
+      scenarioId,
+      capabilities: plan.capabilities,
+    });
+    const executed = await executeScenarioRun({
+      adapter,
+      plan,
+      request,
+      confirm: true,
+      allowGpu: booleanFlag(parsed, 'allow-gpu'),
+      allowPerformance: booleanFlag(parsed, 'allow-performance'),
+    });
+    events.emit('artifact', {
+      kind: 'run_bundle',
+      path: executed.runPath,
+      runId: executed.manifest.runId,
+      manifestSha256: executed.manifestSha256,
+    });
+    return {
+      operation: 'scenario.run',
+      data: {
+        schema: 'game_dev.scenario_run_result.v1',
+        runPath: executed.runPath,
+        manifestPath: executed.manifestPath,
+        manifestSha256: executed.manifestSha256,
+        run: executed.manifest,
+      },
+      ...(executed.manifest.status === 'completed' ? {} : { isError: true }),
+      artifacts: [
+        { path: executed.runPath, kind: 'run_bundle' },
+        { path: executed.manifestPath, kind: 'run_manifest', sha256: executed.manifestSha256 },
+      ],
+    };
+  }
+
   if (family === 'tool' && action === 'call') {
     const name = requirePositional(parsed, 2, 'local command name');
     if (isSpendingTool(name)) {
@@ -696,6 +819,123 @@ async function dispatch(
     };
   }
 
+  if (family === 'capture' && action === 'verify') {
+    const runPath = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 2, 'run id or path'));
+    const verified = await verifyRunBundle(runPath);
+    return {
+      operation: 'capture.verify',
+      data: {
+        schema: 'game_dev.run_verification.v1',
+        runPath: verified.runPath,
+        manifestPath: verified.manifestPath,
+        manifestSha256: verified.manifestSha256,
+        run: verified.manifest,
+        hashesVerified: true,
+        closedArtifactRosterVerified: true,
+      },
+    };
+  }
+
+  if (family === 'visual' && action === 'analyze') {
+    const runPath = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 2, 'run id or path'));
+    return {
+      operation: 'visual.analyze',
+      data: await analyzeRunCapture(runPath) as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (family === 'visual' && action === 'compare') {
+    const baseline = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 2, 'baseline run id or path'));
+    const candidate = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 3, 'candidate run id or path'));
+    const output = stringFlag(parsed, 'output');
+    const comparison = await compareRunVisuals({
+      baselineRunPath: baseline,
+      candidateRunPath: candidate,
+      threshold: nonNegativeIntegerFlag(parsed, 'threshold', 0),
+      ...(output ? { outputPath: path.resolve(output) } : {}),
+    });
+    if (comparison.outputPath) events.emit('artifact', { kind: 'visual_comparison', path: comparison.outputPath });
+    return {
+      operation: 'visual.compare',
+      data: comparison as unknown as Record<string, unknown>,
+      ...(comparison.outputPath
+        ? { artifacts: [{ path: comparison.outputPath, kind: 'visual_comparison' }] }
+        : {}),
+    };
+  }
+
+  if (family === 'performance' && action === 'summarize') {
+    const runPath = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 2, 'run id or path'));
+    return {
+      operation: 'performance.summarize',
+      data: await summarizeRunPerformance(runPath) as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (family === 'performance' && action === 'compare') {
+    const baseline = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 2, 'baseline run id or path'));
+    const candidate = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 3, 'candidate run id or path'));
+    const statistic = stringFlag(parsed, 'stat') ?? 'median';
+    if (!['min', 'max', 'mean', 'median', 'p95', 'p99'].includes(statistic)) {
+      throw invalidInput('--stat must be min, max, mean, median, p95, or p99');
+    }
+    return {
+      operation: 'performance.compare',
+      data: await compareRunPerformance(
+        baseline,
+        candidate,
+        statistic as 'min' | 'max' | 'mean' | 'median' | 'p95' | 'p99',
+      ) as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (family === 'performance' && action === 'goal-create') {
+    const baseline = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 2, 'baseline run id or path'));
+    const request = await readRequest(parsed);
+    const statistic = request.statistic ?? 'median';
+    if (typeof statistic !== 'string' || !['min', 'max', 'mean', 'median', 'p95', 'p99'].includes(statistic)) {
+      throw invalidInput('request.statistic must be min, max, mean, median, p95, or p99');
+    }
+    const direction = requestString(request, 'direction');
+    if (!['lower', 'higher'].includes(direction)) throw invalidInput('request.direction must be lower or higher');
+    const maximumIterations = request.maximumIterations;
+    if (typeof maximumIterations !== 'number' || !Number.isInteger(maximumIterations)) {
+      throw invalidInput('request.maximumIterations must be an integer');
+    }
+    const result = await createOptimizationGoal({
+      projectRoot: path.resolve(requireFlag(parsed, 'project')),
+      baselineRunPath: baseline,
+      metric: requestString(request, 'metric'),
+      statistic: statistic as 'min' | 'max' | 'mean' | 'median' | 'p95' | 'p99',
+      ...(typeof request.unit === 'string' ? { unit: request.unit } : {}),
+      direction: direction as 'lower' | 'higher',
+      target: requestFiniteNumber(request, 'target'),
+      maximumIterations,
+      allowedPaths: requestStringArray(request, 'allowedPaths'),
+      ...(typeof request.id === 'string' ? { id: request.id } : {}),
+      confirm: booleanFlag(parsed, 'confirm'),
+    });
+    return {
+      operation: 'performance.goal-create',
+      data: result as unknown as Record<string, unknown>,
+      ...(result.dryRun ? {} : { artifacts: [{ path: result.goalPath, kind: 'optimization_goal' }] }),
+    };
+  }
+
+  if (family === 'performance' && action === 'goal-evaluate') {
+    const candidate = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 3, 'candidate run id or path'));
+    const result = await evaluateOptimizationGoal({
+      goalPath: path.resolve(requirePositional(parsed, 2, 'goal path')),
+      candidateRunPath: candidate,
+      confirm: booleanFlag(parsed, 'confirm'),
+    });
+    return {
+      operation: 'performance.goal-evaluate',
+      data: result as unknown as Record<string, unknown>,
+      ...(result.dryRun ? {} : { artifacts: [{ path: result.goalPath, kind: 'optimization_goal' }] }),
+    };
+  }
+
   if (family === 'migrate' && action === 'legacy') {
     const result = await migrateLegacyWorkspace({
       outputRoot: path.resolve(stringFlag(parsed, 'from') ?? runtime.config.outputDir),
@@ -728,14 +968,14 @@ function parsedFromDurableRequest(
   }
   const flags = new Map<string, string | boolean>();
   for (const [name, value] of Object.entries(persistedFlags)) {
-    if (['approve-spend', 'spend-limit-cents', 'output-dir'].includes(name)) continue;
+    if (['approve-spend', 'spend-limit-cents', 'output-dir', 'confirm', 'allow-gpu', 'allow-performance'].includes(name)) continue;
     if (typeof value === 'string' || typeof value === 'boolean') flags.set(name, value);
   }
   const input = job.request.input;
   if (input && typeof input === 'object' && !Array.isArray(input)) {
     flags.set('input', JSON.stringify(input));
   }
-  for (const name of ['approve-spend', 'spend-limit-cents', 'output-dir']) {
+  for (const name of ['approve-spend', 'spend-limit-cents', 'output-dir', 'confirm', 'allow-gpu', 'allow-performance']) {
     const value = current.flags.get(name);
     if (value !== undefined) flags.set(name, value);
   }
@@ -841,7 +1081,11 @@ function needsDurableJob(runtime: GameDevRuntime, parsed: ParsedArguments): bool
   const [family, action, name] = parsed.positionals;
   if (family === 'provider') return true;
   if (family === 'asset' && ['normalize', 'preview-usdz'].includes(action ?? '')) return true;
-  if (['vendor', 'package', 'scenario', 'capture', 'visual', 'performance', 'migrate'].includes(family ?? '')) {
+  if (['vendor', 'package', 'migrate'].includes(family ?? '')) return true;
+  if (family === 'adapter' && action === 'install' && booleanFlag(parsed, 'confirm')) return true;
+  if (family === 'scenario' && action === 'run') return true;
+  if (family === 'visual' && action === 'compare' && stringFlag(parsed, 'output') !== undefined) return true;
+  if (family === 'performance' && ['goal-create', 'goal-evaluate'].includes(action ?? '') && booleanFlag(parsed, 'confirm')) {
     return true;
   }
   if (family === 'catalog' && ['admit', 'rebuild'].includes(action ?? '')) return true;
@@ -860,6 +1104,9 @@ async function durableRequest(parsed: ParsedArguments): Promise<Record<string, u
       'request',
       'input',
       'approve-spend',
+      'confirm',
+      'allow-gpu',
+      'allow-performance',
     ].includes(name)),
   );
   const hasInput = parsed.flags.has('request') || parsed.flags.has('input');

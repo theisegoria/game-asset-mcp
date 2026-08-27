@@ -181,6 +181,7 @@ function parameterValue(
       })();
     }
   }
+  throw invalidState(`unsupported scenario parameter type for ${name}`);
 }
 
 function substitute(template: string, values: Record<string, string>, fixed: Record<string, string>): string {

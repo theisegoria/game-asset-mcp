@@ -83,7 +83,7 @@ const projectPathParameterSchema = z.object({
   kind: z.enum(['file', 'directory', 'any']).default('any'),
 }).strict();
 
-export const adapterParameterSchema = z.discriminatedUnion('type', [
+export const adapterParameterSchema = z.union([
   stringParameterSchema,
   integerParameterSchema,
   enumParameterSchema,

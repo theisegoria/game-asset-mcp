@@ -19,11 +19,6 @@ import {
 const OUTPUT_LIMIT = 16 * 1024 * 1024;
 const FILE_COUNT_LIMIT = 20_000;
 
-function isInside(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
 function portableRelative(root: string, target: string): string {
   const relative = path.relative(root, target);
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -182,6 +177,33 @@ async function walkFiles(root: string, directory = root, files: string[] = []): 
   return files;
 }
 
+async function removeUnsafeEntries(root: string, directory = root, rejected: Array<Record<string, unknown>> = []): Promise<Array<Record<string, unknown>>> {
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const candidate = path.join(directory, entry.name);
+    const stats = await fs.lstat(candidate);
+    if (stats.isSymbolicLink()) {
+      rejected.push({
+        path: portableRelative(root, candidate),
+        type: 'symbolic_link',
+        target: await fs.readlink(candidate).catch(() => '[unreadable]'),
+      });
+      await fs.rm(candidate, { force: true });
+      continue;
+    }
+    if (stats.isDirectory()) {
+      await removeUnsafeEntries(root, candidate, rejected);
+      continue;
+    }
+    if (!stats.isFile()) {
+      rejected.push({ path: portableRelative(root, candidate), type: 'special_file' });
+      await fs.rm(candidate, { force: true });
+    }
+  }
+  return rejected;
+}
+
 function artifactKinds(runPath: string, capture?: CaptureValidation): Map<string, RunArtifact['kind']> {
   const kinds = new Map<string, RunArtifact['kind']>([
     [path.join(runPath, 'adapter.json'), 'adapter'],
@@ -255,8 +277,16 @@ export async function executeScenarioRun(options: {
 
   await fs.mkdir(path.dirname(options.plan.runPath), { recursive: true, mode: 0o700 });
   await fs.mkdir(options.plan.runPath, { mode: 0o700 });
+  const runStats = await fs.lstat(options.plan.runPath);
+  if (!runStats.isDirectory() || runStats.isSymbolicLink()) {
+    throw invalidState('created run path is not a real directory');
+  }
   const runPath = await fs.realpath(options.plan.runPath);
-  if (runPath !== options.plan.runPath) throw invalidState('created run directory identity changed unexpectedly');
+  const expectedRunPath = path.join(
+    await fs.realpath(path.dirname(options.plan.runPath)),
+    path.basename(options.plan.runPath),
+  );
+  if (runPath !== expectedRunPath) throw invalidState('created run directory identity changed unexpectedly');
   await writeCanonicalExclusive(path.join(runPath, 'adapter.json'), serializableAdapterSnapshot(options.adapter));
   await writeCanonicalExclusive(path.join(runPath, 'request.json'), redact(options.request ?? {}));
   await writeCanonicalExclusive(path.join(runPath, 'plan.json'), options.plan);
@@ -310,6 +340,19 @@ export async function executeScenarioRun(options: {
     }
   }
 
+  const rejectedEntries = await removeUnsafeEntries(runPath);
+  if (rejectedEntries.length > 0) {
+    status = 'failed';
+    failure ??= {
+      code: 'UNSAFE_ARTIFACT',
+      message: 'scenario emitted symbolic links or special files; they were recorded and removed before sealing',
+    };
+    await writeCanonicalExclusive(path.join(runPath, 'rejected-artifacts.json'), {
+      schema: 'game_dev.rejected_artifacts.v1',
+      artifacts: rejectedEntries,
+    });
+    capture = undefined;
+  }
   const artifacts = await roster(runPath, capture);
   const completedAt = new Date();
   const adapterEvidence = capture?.manifest.adapterEvidence;
