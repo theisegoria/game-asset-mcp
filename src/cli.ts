@@ -27,6 +27,12 @@ import { migrateLegacyWorkspace } from './packages/migration.js';
 import { generateUsdzPreview } from './packages/usdz.js';
 import type { AssetCategory } from './domain/asset-spec.js';
 import type { GameAssetPolicy } from './domain/asset-policy.js';
+import { loadAdapter, planScenarioRun } from './harness/adapter.js';
+import { executeScenarioRun, resolveRunPath, verifyRunBundle } from './harness/run-bundle.js';
+import { installAdapterTemplate, listAdapterTemplates } from './harness/templates.js';
+import { analyzeRunCapture, compareRunVisuals } from './harness/visual.js';
+import { compareRunPerformance, summarizeRunPerformance } from './harness/performance.js';
+import { createOptimizationGoal, evaluateOptimizationGoal } from './harness/goals.js';
 
 const HELP = `Game Development Studio local harness
 
@@ -53,6 +59,21 @@ Usage:
   game-dev vendor admit <package-id|path> --project PATH [--destination RELATIVE] [--confirm]
   game-dev launch <package-id|path> --with finder|quicklook|blender [--confirm]
   game-dev migrate legacy --from OUTPUT_ROOT [--license SPDX] [--confirm]
+  game-dev adapter templates [--json]
+  game-dev adapter install <template-id> --project PATH [--confirm]
+  game-dev adapter inspect --project PATH [--manifest RELATIVE] [--json]
+  game-dev scenario list --project PATH [--json]
+  game-dev scenario plan <scenario-id> --project PATH [--request PARAMS.json] [--json]
+  game-dev scenario run <scenario-id> --project PATH [--request PARAMS.json] [--confirm]
+                    [--allow-gpu] [--allow-performance] [--jsonl]
+  game-dev capture verify <run-id|path> [--json]
+  game-dev visual analyze <run-id|path> [--json]
+  game-dev visual compare <baseline-run> <candidate-run> [--threshold 0..255]
+                  [--output NEW_DIRECTORY] [--jsonl]
+  game-dev performance summarize <run-id|path> [--json]
+  game-dev performance compare <baseline-run> <candidate-run> [--stat median] [--json]
+  game-dev performance goal-create <baseline-run> --project PATH --request GOAL.json [--confirm]
+  game-dev performance goal-evaluate <goal.json> <candidate-run> [--confirm]
 
 Global options:
   --output-dir PATH   Asset workspace for this invocation.
@@ -101,6 +122,35 @@ function positiveIntegerFlag(parsed: ParsedArguments, name: string, fallback: nu
 function optionalPositiveIntegerFlag(parsed: ParsedArguments, name: string): number | undefined {
   if (!parsed.flags.has(name)) return undefined;
   return positiveIntegerFlag(parsed, name, 1);
+}
+
+function nonNegativeIntegerFlag(parsed: ParsedArguments, name: string, fallback: number): number {
+  const raw = stringFlag(parsed, name);
+  if (raw === undefined) return fallback;
+  if (!/^\d+$/.test(raw)) throw invalidInput(`--${name} must be a non-negative integer`);
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(value)) throw invalidInput(`--${name} must be a non-negative safe integer`);
+  return value;
+}
+
+function requestString(request: Record<string, unknown>, name: string): string {
+  const value = request[name];
+  if (typeof value !== 'string' || value.length === 0) throw invalidInput(`request.${name} must be a non-empty string`);
+  return value;
+}
+
+function requestFiniteNumber(request: Record<string, unknown>, name: string): number {
+  const value = request[name];
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw invalidInput(`request.${name} must be a finite number`);
+  return value;
+}
+
+function requestStringArray(request: Record<string, unknown>, name: string): string[] {
+  const value = request[name];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    throw invalidInput(`request.${name} must be an array of strings`);
+  }
+  return value;
 }
 
 function approvalRequired(tool: string, parsed: ParsedArguments): DispatchResult | undefined {
@@ -197,6 +247,7 @@ function capabilities(runtime: GameDevRuntime): Record<string, unknown> {
       'capabilities',
       'doctor',
       'credentials',
+      'adapter',
       'provider',
       'job',
       'catalog',
