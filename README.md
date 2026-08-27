@@ -42,8 +42,8 @@ diagnosis has inspectable evidence behind it.
   operations
 - A project adapter only when executing game-specific capture scenarios
 
-The native macOS 26 companion app is a separate, last-stage deliverable. It is
-not required by the CLI or skills.
+The native companion requires macOS 26 and a Swift 6.2 toolchain to build from
+source. It remains optional: the CLI and skills do not require the app.
 
 ## Product tour
 
@@ -56,6 +56,47 @@ not required by the CLI or skills.
 The third image is explicitly a synthetic validation fixture. It demonstrates
 the diagnostic layout and evidence language; it is not a target-game capture,
 hardware GPU result, or performance claim.
+
+## Native macOS app
+
+The repository also contains a native SwiftUI companion with four first-class
+workspaces: Production, Library & Vendoring, Visual Debugging, and Performance.
+It presents the existing local `game-dev` protocol through a
+`NavigationSplitView`, system search and toolbar controls, a result inspector,
+keyboard commands, a dedicated Settings scene, and explicit empty, loading, and
+error states. It does not add an MCP server or hosted backend.
+
+Provider credentials are entered in masked fields, stored in the macOS
+Keychain, and shown only as configured or not configured. Paid provider calls,
+package construction, project vendoring, scenario execution, GPU capture, and
+hardware-performance collection use one-shot approval sheets. Vendoring and
+scenario execution are dry-run-first, and changing their planned inputs
+invalidates the current approval path.
+
+From the repository root:
+
+```sh
+./script/build_and_run.sh --test
+./script/build_and_run.sh --build-only
+./script/build_and_run.sh          # build and launch
+./script/build_and_run.sh --verify # process-level launch check only
+```
+
+The helper produces
+`macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app` with an ad-hoc
+signature for local development. It is not a Developer ID-signed, notarized, or
+Mac App Store build. The `--verify` mode finding a live process after two
+seconds does not prove window readiness, pixel correctness, workflow behavior,
+accessibility, or human acceptance.
+
+> **Runtime screenshot pending:** the publication path is reserved as
+> `assets/screenshots/04-native-macos-app.png`. No image is embedded here yet;
+> it has not been captured or visually inspected.
+
+<!-- Runtime screenshot placeholder: assets/screenshots/04-native-macos-app.png -->
+
+See [Native macOS app](docs/macos-app.md) for the architecture, approval and
+Keychain boundaries, commands, local-bundle status, and exact evidence limits.
 
 ## Install
 

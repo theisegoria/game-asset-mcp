@@ -28,6 +28,26 @@ it is not shipped by 1.0.0.
 - deterministic raster statistics, heatmaps, attachment-aware comparisons,
   metric summaries, and bounded optimization goals
 
+### Native macOS app
+
+- native macOS 26 SwiftUI companion, built as a Swift 6.2 SwiftPM executable,
+  with a `WindowGroup`, separate Settings scene, `NavigationSplitView`, toolbar
+  search, result inspector, desktop menu commands, and adaptive system styling
+- four first-class workspaces for Production, Library & Vendoring, Visual
+  Debugging, and Performance, all calling the injected `AppModel` rather than
+  launching processes from views
+- Keychain-backed Tripo and Leonardo credential entry that reports only
+  configured state and never restores a saved value to a visible field
+- one-shot approval sheets for paid providers and local process, package,
+  vendoring, GPU, and performance actions; vendoring and scenarios remain
+  dry-run-first and invalidate their plan when bound inputs change
+- local build, test, debug, log, telemetry, and process-level verification modes
+  through `./script/build_and_run.sh`
+- the helper's `.app` is ad-hoc signed for local development; Developer ID
+  signing, notarization, external Gatekeeper validation, Mac App Store review,
+  runtime screenshot inspection, pixel acceptance, and target-hardware evidence
+  remain separate gates
+
 ### Distribution and safety
 
 - router plus four focused skills with generated icon metadata and byte-checked
