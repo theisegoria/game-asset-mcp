@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import { createAssetJob, summarizeAssetJob } from '../domain/asset-job.js';
 import { gameAssetSpecSchema, sanitizeAssetName } from '../domain/asset-spec.js';
 import type { GameAssetSpec } from '../domain/asset-spec.js';
@@ -134,7 +134,7 @@ export async function runImageGeneration(
   });
 }
 
-export function registerReferenceTools(server: McpServer, ctx: ToolContext): void {
+export function registerReferenceTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'generate_asset_reference',
     {

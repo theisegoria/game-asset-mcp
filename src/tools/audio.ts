@@ -10,7 +10,7 @@
 
 import path from 'node:path';
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import { createAssetJob, summarizeAssetJob, type DownloadedFile } from '../domain/asset-job.js';
 import { sanitizeAssetName } from '../domain/asset-spec.js';
 import { downloadFile } from '../util/http.js';
@@ -24,7 +24,7 @@ import { guard, ok, type ToolContext } from './context.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function registerAudioTools(server: McpServer, ctx: ToolContext): void {
+export function registerAudioTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'generate_sound_effect',
     {

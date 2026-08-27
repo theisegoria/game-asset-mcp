@@ -12,7 +12,7 @@
  */
 
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import { createAssetJob, summarizeAssetJob } from '../domain/asset-job.js';
 import type { AssetJob } from '../domain/asset-job.js';
 import { gameAssetSpecSchema, sanitizeAssetName } from '../domain/asset-spec.js';
@@ -23,7 +23,7 @@ import { IMAGE_EXTENSIONS, MESH_EXTENSIONS, readLocalFile } from '../util/local-
 import { TRIPO_DEFAULT_MODEL_VERSION } from '../providers/model3d/tripo.js';
 import { guard, ok, type ToolContext } from './context.js';
 
-export function registerTextureTools(server: McpServer, ctx: ToolContext): void {
+export function registerTextureTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'texture_existing_asset',
     {

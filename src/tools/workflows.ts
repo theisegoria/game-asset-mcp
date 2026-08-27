@@ -13,14 +13,14 @@
  */
 
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import { gameAssetSpecSchema } from '../domain/asset-spec.js';
 import type { GameAssetSpec } from '../domain/asset-spec.js';
 import { buildReconstructionPrompt } from '../prompts/reconstruction-prompt.js';
 import { guard, ok, type ToolContext } from './context.js';
 import { runImageGeneration } from './references.js';
 
-export function registerWorkflowTools(server: McpServer, ctx: ToolContext): void {
+export function registerWorkflowTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'preview_asset_prompt',
     {

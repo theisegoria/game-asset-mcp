@@ -17,7 +17,7 @@ import { z } from 'zod';
 import { NodeIO } from '@gltf-transform/core';
 import { CollectingLogger } from '../inspection/gltf.js';
 import type { Material } from '@gltf-transform/core';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import {
   constantColorImage, constantImage,
   decodeImage,
@@ -124,7 +124,7 @@ function applyNormalScale(image: RasterImage, scale: number): RasterImage {
   return { width: image.width, height: image.height, data: out };
 }
 
-export function registerPbrTools(server: McpServer, ctx: ToolContext): void {
+export function registerPbrTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'extract_pbr_trio',
     {

@@ -7,12 +7,12 @@
  * mistakes an estimate for a bill.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import { spendingToolNames } from '../domain/spend.js';
 import { formatCents } from '../storage/spend.js';
 import { guard, ok, type ToolContext } from './context.js';
 
-export function registerSpendTools(server: McpServer, ctx: ToolContext): void {
+export function registerSpendTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'get_spend_report',
     {

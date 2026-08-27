@@ -12,8 +12,13 @@ import { parseLogLevel, type LogLevel } from './util/logging.js';
 import { configMissing, invalidInput } from './util/errors.js';
 
 export interface Config {
+  dataRoot: string;
   outputDir: string;
   jobsDir: string;
+  durableJobsDir: string;
+  packagesDir: string;
+  runsDir: string;
+  catalogPath: string;
   maxDownloadBytes: number;
   httpTimeoutMs: number;
   /**
@@ -57,11 +62,17 @@ function positiveIntFromEnv(raw: string | undefined, fallback: number, varName: 
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const outputDir = path.resolve(env.ASSET_OUTPUT_DIR?.trim() || path.join(process.cwd(), 'assets', 'generated'));
+  const dataRoot = path.resolve(env.GAME_DEV_DATA_ROOT?.trim() || path.join(outputDir, '.game-dev'));
   return {
+    dataRoot,
     outputDir,
     // Job records live beside the assets but in a dot-directory, so a user
     // browsing their asset workspace sees assets, not bookkeeping.
     jobsDir: path.join(outputDir, '.jobs'),
+    durableJobsDir: path.join(dataRoot, 'jobs'),
+    packagesDir: path.join(dataRoot, 'packages'),
+    runsDir: path.join(dataRoot, 'runs'),
+    catalogPath: path.join(dataRoot, 'catalog.sqlite3'),
     maxDownloadBytes: positiveIntFromEnv(
       env.ASSET_MAX_DOWNLOAD_BYTES,
       256 * 1024 * 1024,

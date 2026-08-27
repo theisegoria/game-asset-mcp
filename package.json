@@ -1,10 +1,12 @@
 {
-  "name": "@theisegoria/game-asset-mcp",
-  "version": "0.4.0",
-  "description": "MCP server for an agentic game-asset generation pipeline: reference images to 3D models with PBR textures, plus retexturing meshes you already own.",
+  "name": "@theisegoria/game-development-studio",
+  "version": "1.0.0",
+  "description": "Local-first CLI and native macOS studio for game-asset production, deterministic captures, visual debugging, and performance analysis.",
   "keywords": [
-    "mcp",
-    "model-context-protocol",
+    "game-development",
+    "cli",
+    "macos",
+    "blender",
     "3d",
     "game-assets",
     "pbr",
@@ -21,13 +23,14 @@
     "node": ">=18.17"
   },
   "bin": {
-    "game-asset-mcp": "dist/server.js"
+    "game-dev": "dist/cli.js"
   },
-  "main": "dist/server.js",
+  "main": "dist/index.js",
   "files": [
     "dist",
     "scripts/*.py",
     "scripts/*.mjs",
+    "skills",
     "CHANGELOG.md",
     "README.md",
     "LICENSE"
@@ -40,12 +43,11 @@
     "verify": "npm run build && node scripts/verify-install.mjs",
     "test": "npm run build && vitest run",
     "test:watch": "vitest",
-    "start": "node dist/server.js",
+    "start": "node dist/cli.js",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@gltf-transform/core": "^4.1.1",
-    "@modelcontextprotocol/sdk": "^1.12.0",
     "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0",
     "zod": "^3.23.8"
@@ -64,10 +66,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/theisegoria/game-asset-mcp.git"
+    "url": "git+https://github.com/theisegoria/game-development-studio.git"
   },
-  "homepage": "https://github.com/theisegoria/game-asset-mcp#readme",
+  "homepage": "https://github.com/theisegoria/game-development-studio#readme",
   "bugs": {
-    "url": "https://github.com/theisegoria/game-asset-mcp/issues"
+    "url": "https://github.com/theisegoria/game-development-studio/issues"
   }
 }

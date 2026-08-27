@@ -9,14 +9,14 @@
  */
 
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import { inspectGltf } from '../inspection/gltf.js';
 import { invalidInput, invalidState } from '../util/errors.js';
 import { MESH_EXTENSIONS } from '../util/local-file.js';
 import path from 'node:path';
 import { guard, ok, type ToolContext } from './context.js';
 
-export function registerInspectionTools(server: McpServer, ctx: ToolContext): void {
+export function registerInspectionTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'inspect_asset',
     {

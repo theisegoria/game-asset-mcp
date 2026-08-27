@@ -15,6 +15,7 @@ import { sanitizeAssetName, gameAssetSpecSchema } from '../src/domain/asset-spec
 import { buildReconstructionPrompt } from '../src/prompts/reconstruction-prompt.js';
 import { parseLogLevel } from '../src/util/logging.js';
 import { loadConfig } from '../src/config.js';
+import { GAME_DEV_VERSION } from '../src/version.js';
 import { uniqueFilePath, writeFileAtomic } from '../src/storage/filesystem.js';
 import { JobStore } from '../src/storage/jobs.js';
 import { promises as fs } from 'node:fs';
@@ -353,23 +354,17 @@ describe('HIGH — the symlink guard and the redirect POST refusal are actually 
 });
 
 describe('metadata cannot drift', () => {
-  it('the version the server reports matches package.json', async () => {
+  it('the version the CLI reports matches package.json', async () => {
     const pkg = JSON.parse(
       await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'),
     ) as { version: string };
-    const source = await fs.readFile(new URL('../src/server.ts', import.meta.url), 'utf8');
-    const declared = /const SERVER_VERSION = '([^']+)'/.exec(source)?.[1];
-    // A server that announces a stale version over MCP misleads every client
-    // that logs it, and nothing else in the build would notice.
-    expect(declared).toBe(pkg.version);
+    expect(GAME_DEV_VERSION).toBe(pkg.version);
   });
 
-  it('verify-install checks every tool the server registers', async () => {
+  it('verify-install checks representative commands from every registered subsystem', async () => {
     const script = await fs.readFile(new URL('../scripts/verify-install.mjs', import.meta.url), 'utf8');
-    const serverSource = await fs.readFile(new URL('../src/server.ts', import.meta.url), 'utf8');
-    // Every register*Tools call must be reflected by at least one expected tool,
-    // or the verifier silently under-checks as tools are added.
-    const registrations = serverSource.match(/register\w+Tools\(server, ctx\)/g) ?? [];
+    const registrationSource = await fs.readFile(new URL('../src/commands/register.ts', import.meta.url), 'utf8');
+    const registrations = registrationSource.match(/register\w+Tools\(registry, ctx\)/g) ?? [];
     expect(registrations.length).toBeGreaterThan(5);
     for (const name of ['extract_pbr_trio', 'generate_sound_effect', 'normalize_mesh']) {
       expect(script).toContain(name);
@@ -391,7 +386,7 @@ describe('the Tripo client cannot put an API key on the wire in cleartext', () =
   });
 
   it('accepts an https base URL', () => {
-    expect(() => new TripoProvider({ apiKey: 'tsk_x', baseUrl: 'https://openapi.tripo3d.ai/v3', timeoutMs: 1000 }))
+    expect(() => new TripoProvider({ apiKey: 'tsk_x', baseUrl: 'https://api.tripo3d.ai/v2/openapi', timeoutMs: 1000 }))
       .not.toThrow();
   });
 

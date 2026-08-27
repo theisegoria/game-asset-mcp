@@ -17,14 +17,12 @@
  * helper is right. Only a caller reading the actual response can see it. And
  * optional-property typing means `tsc` reports nothing.
  *
- * This connects a real MCP Client to a real McpServer over an in-memory
- * transport, so the assertions run against the same JSON a client receives —
- * no subprocess, no build step, no network.
+ * This connects the real operation modules to the framework-free local
+ * registry, so the assertions run against the same validated JSON the CLI
+ * receives — no subprocess, build step, network, or MCP transport.
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { LocalCommandRegistry, type ToolRegistrar } from '../../src/commands/registry.js';
 import { Logger } from '../../src/util/logging.js';
 import { JobStore } from '../../src/storage/jobs.js';
 import { SpendLedger } from '../../src/storage/spend.js';
@@ -47,7 +45,7 @@ export interface ToolClient {
  * @param workspace an existing directory to use as ASSET_OUTPUT_DIR
  */
 export async function connectTools(
-  register: (server: McpServer, ctx: ToolContext) => void,
+  register: (server: ToolRegistrar, ctx: ToolContext) => void,
   workspace: string,
   /**
    * Overrides applied to the context before the tools are registered.
@@ -70,19 +68,12 @@ export async function connectTools(
   const spend = await SpendLedger.open(config.jobsDir, config.spendLimitCents);
   const ctx = Object.assign(createToolContext({ config, logger, store, spend }), overrides);
 
-  const server = new McpServer({ name: 'test', version: '0.0.0' });
-  register(server, ctx);
-
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'harness', version: '0.0.0' }, { capabilities: {} });
-  await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+  const registry = new LocalCommandRegistry();
+  register(registry, ctx);
 
   return {
     async call(name, args) {
-      const result = (await client.callTool({ name, arguments: args })) as {
-        isError?: boolean;
-        content?: Array<{ type: string; text?: string }>;
-      };
+      const result = await registry.call(name, args);
       const text = result.content?.[0]?.text ?? '';
       let payload: Record<string, unknown> = {};
       try {
@@ -96,9 +87,6 @@ export async function connectTools(
       }
       return { isError: result.isError === true, payload, text };
     },
-    async close() {
-      await client.close();
-      await server.close();
-    },
+    async close() {},
   };
 }

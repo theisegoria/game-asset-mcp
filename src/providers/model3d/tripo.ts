@@ -2,12 +2,9 @@
  * Tripo 3D provider.
  *
  * ── ENDPOINT CAVEAT ────────────────────────────────────────────────────────
- * Tripo's public documentation describes the v3 surface in two ways: a generic
- * task endpoint (`POST /task` + `GET /task/{id}`) and per-operation paths
- * (`POST /generation/text-to-model`). Both appear in current docs. This client
- * implements the TASK form, which matches the observable behaviour that every
- * generation returns a `task_id` for polling, and exposes `TRIPO_BASE_URL` so
- * a user can retarget without a code change.
+ * Tripo's published v2 OpenAPI uses a generic task endpoint (`POST /task` plus
+ * `GET /task/{id}`). This client pins that documented surface and exposes
+ * `TRIPO_BASE_URL` only for controlled contract testing.
  *
  * The paths below are the FIRST thing the live smoke test verifies. They are
  * marked here rather than silently assumed, because a wrong path fails with a
@@ -34,7 +31,7 @@ import type {
   TextureExistingOptions,
 } from './types.js';
 
-const DEFAULT_BASE_URL = 'https://openapi.tripo3d.ai/v3';
+export const TRIPO_DEFAULT_BASE_URL = 'https://api.tripo3d.ai/v2/openapi';
 
 /** Model version used when the caller does not pin one. */
 export const TRIPO_DEFAULT_MODEL_VERSION = 'v3.0-20250812';
@@ -63,8 +60,8 @@ interface TripoTaskState {
     [key: string]: unknown;
   };
   error?: { code?: number; message?: string };
-  /** Tripo reports consumed credits on some task types. */
-  credits?: number;
+  /** Actual field documented on the task response. */
+  consumed_credit?: number;
 }
 
 interface TripoUploaded {
@@ -85,8 +82,11 @@ export class TripoProvider implements Model3DProvider {
   private readonly baseUrl: string;
 
   constructor(private readonly options: TripoClientOptions) {
-    const configured = (options.baseUrl ?? process.env.TRIPO_BASE_URL ?? DEFAULT_BASE_URL)
-      .replace(/\/$/, '');
+    const configured = (
+      options.baseUrl?.trim()
+      || process.env.TRIPO_BASE_URL?.trim()
+      || TRIPO_DEFAULT_BASE_URL
+    ).replace(/\/$/, '');
     // Validated HERE, not at first use. TRIPO_BASE_URL was accepted verbatim,
     // and `upload` then sent the mesh AND the Bearer key through a raw fetch —
     // so an http:// base put the API key on the wire in cleartext. Failing at
@@ -364,7 +364,7 @@ export class TripoProvider implements Model3DProvider {
       ...(output.pbr_model ? { pbrModelUrl: output.pbr_model } : {}),
       ...(output.rendered_image ? { renderedImageUrl: output.rendered_image } : {}),
       ...(data.progress !== undefined ? { progress: data.progress } : {}),
-      ...(data.credits !== undefined ? { creditCost: data.credits } : {}),
+      ...(data.consumed_credit !== undefined ? { creditCost: data.consumed_credit } : {}),
       ...(data.error?.message ? { errorMessage: data.error.message } : {}),
       raw: data,
     };

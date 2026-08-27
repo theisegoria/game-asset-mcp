@@ -15,7 +15,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { NodeIO } from '@gltf-transform/core';
 import { CollectingLogger } from '../inspection/gltf.js';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import type { AssetJob, DownloadedFile } from '../domain/asset-job.js';
 import { summarizeAssetJob } from '../domain/asset-job.js';
 import { invalidState } from '../util/errors.js';
@@ -178,7 +178,7 @@ export async function extractTextures(
   return { written, failures };
 }
 
-export function registerDownloadTools(server: McpServer, ctx: ToolContext): void {
+export function registerDownloadTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'download_asset',
     {

@@ -104,10 +104,15 @@ describe('credit safety', () => {
     const call = probe.captured()[0];
     expect(call?.url).toContain('/v2/generations');
     expect(call?.body?.model).toBe('sound-effects-v2');
-    expect(call?.body?.duration).toBe(5);
-    expect(call?.body?.loop).toBe(true);
-    expect(call?.body?.quantity).toBe(2);
-    expect(call?.body?.prompt_influence).toBe(0.4);
+    expect(call?.body?.parameters).toEqual({
+      prompt: 'heavy steel door slam',
+      duration: 5,
+      loop: true,
+      quantity: 2,
+      prompt_influence: 0.4,
+    });
+    expect(call?.body).not.toHaveProperty('prompt');
+    expect(call?.body).not.toHaveProperty('duration');
     // Never publish a user's asset by default.
     expect(call?.body?.public).toBe(false);
   });

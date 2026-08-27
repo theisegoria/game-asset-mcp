@@ -11,7 +11,7 @@
  */
 
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import { createAssetJob, summarizeAssetJob } from '../domain/asset-job.js';
 import type { AssetJob } from '../domain/asset-job.js';
 import { sanitizeAssetName } from '../domain/asset-spec.js';
@@ -40,7 +40,7 @@ async function childJobFrom(
   return { job, sourceTaskId };
 }
 
-export function registerAnimationTools(server: McpServer, ctx: ToolContext): void {
+export function registerAnimationTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'rig_asset',
     {

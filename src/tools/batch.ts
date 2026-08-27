@@ -9,7 +9,7 @@
 
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ToolRegistrar } from '../commands/registry.js';
 import { inspectGltf } from '../inspection/gltf.js';
 import { uniqueFilePath } from '../storage/filesystem.js';
 import type { GameAssetPolicy } from '../domain/asset-policy.js';
@@ -99,7 +99,7 @@ export function createMeshBatchDeps(options: {
   };
 }
 
-export function registerBatchTools(server: McpServer, ctx: ToolContext): void {
+export function registerBatchTools(server: ToolRegistrar, ctx: ToolContext): void {
   server.registerTool(
     'batch_prepare_meshes',
     {

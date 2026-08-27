@@ -3,9 +3,9 @@
  *
  * ── VERIFICATION CAVEAT ────────────────────────────────────────────────────
  * The REQUEST contract below is quoted from Leonardo's published Sound Effects
- * v2 guide: `model`, `prompt` (max 9999 chars), `duration` (whole seconds,
- * 1..22, default 2), `prompt_influence` (0..1, default 0.7), `loop`,
- * `quantity` (1..4), `public`.
+ * v2 guide: top-level `model` and `public`, plus a `parameters` object carrying
+ * `prompt` (max 9999 chars), `duration` (whole seconds, 1..22, default 2),
+ * `prompt_influence` (0..1, default 0.7), `loop`, and `quantity` (1..4).
  *
  * The RESPONSE shape and the retrieval mechanism are NOT documented. This
  * client therefore reads the generation id and the audio URLs from several
@@ -198,12 +198,14 @@ export class LeonardoAudioProvider implements AudioProvider {
       retries: 0,
       body: {
         model: LEONARDO_SOUND_EFFECTS_MODEL,
-        prompt,
-        ...(duration !== undefined ? { duration } : {}),
-        ...(influence !== undefined ? { prompt_influence: influence } : {}),
-        ...(options.loop !== undefined ? { loop: options.loop } : {}),
-        ...(quantity !== undefined ? { quantity } : {}),
         public: false,
+        parameters: {
+          prompt,
+          ...(duration !== undefined ? { duration } : {}),
+          ...(influence !== undefined ? { prompt_influence: influence } : {}),
+          ...(options.loop !== undefined ? { loop: options.loop } : {}),
+          ...(quantity !== undefined ? { quantity } : {}),
+        },
       },
     });
 

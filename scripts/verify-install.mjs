@@ -1,22 +1,17 @@
 #!/usr/bin/env node
 /**
- * Install verification.
- *
- * Starts the built server over stdio with a real MCP client, performs the
- * handshake, and lists the tools it advertises. This answers "is my install
- * actually working" with a protocol round-trip rather than a version string —
- * a server that fails to register its tools still starts perfectly happily.
- *
- * Spends nothing and contacts no provider. Run: node scripts/verify-install.mjs
+ * Verify the built local helper through its public JSON protocol. This spends
+ * nothing, contacts no provider, and does not require credentials.
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { execFile } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const serverEntry = path.join(here, '..', 'dist', 'server.js');
+const cliEntry = path.join(here, '..', 'dist', 'cli.js');
 
 const EXPECTED_TOOLS = [
   'preview_asset_prompt',
@@ -41,53 +36,69 @@ const EXPECTED_TOOLS = [
   'batch_prepare_meshes',
 ];
 
-async function main() {
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [serverEntry],
-    // Deliberately no API keys: the server must start and advertise its tools
-    // without credentials, reporting CONFIG_MISSING only when one is called.
-    env: { ...process.env, ASSET_LOG_LEVEL: 'error' },
+const EXPECTED_FAMILIES = [
+  'capabilities', 'doctor', 'provider', 'job', 'asset', 'package',
+  'scenario', 'capture', 'visual', 'performance', 'skill', 'migrate',
+];
+
+function run(args, env = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [cliEntry, ...args],
+      { env: { ...process.env, ASSET_LOG_LEVEL: 'error', ...env }, maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) reject(new Error(`game-dev exited ${String(error.code)}: ${stderr || stdout}`));
+        else resolve({ stdout, stderr });
+      },
+    );
   });
-
-  const client = new Client({ name: 'verify-install', version: '1.0.0' });
-  await client.connect(transport);
-
-  const { tools } = await client.listTools();
-  const found = tools.map((tool) => tool.name).sort();
-  const missing = EXPECTED_TOOLS.filter((name) => !found.includes(name));
-
-  // Credit-spending is a distinct axis from read-only: select_reference writes
-  // local state but costs nothing, so keying the marker off readOnlyHint alone
-  // would mislabel it.
-  const spendsCredits = new Set([
-    'generate_asset_reference',
-    'generate_reference_variations',
-    'create_3d_asset',
-    'texture_existing_asset',
-    'create_game_prop',
-    'generate_sound_effect',
-    'rig_asset',
-    'animate_asset',
-    'retopologize_asset',
-  ]);
-
-  console.log(`connected. ${found.length} tools advertised:\n`);
-  for (const tool of tools.sort((a, b) => a.name.localeCompare(b.name))) {
-    console.log(`  ${spendsCredits.has(tool.name) ? '$' : '·'} ${tool.name}`);
-  }
-  console.log('\n  $ = spends provider credits, · = free\n');
-
-  await client.close();
-
-  if (missing.length > 0) {
-    console.error(`FAILED: ${missing.length} expected tool(s) missing: ${missing.join(', ')}`);
-    process.exit(1);
-  }
-  console.log('OK: all expected tools are registered.');
 }
 
-main().catch((err) => {
-  console.error(`FAILED: ${err instanceof Error ? err.message : String(err)}`);
-  process.exit(1);
+async function main() {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'game-dev-verify-'));
+  try {
+    const capabilityRun = await run(['capabilities', '--json', '--output-dir', workspace]);
+    const envelope = JSON.parse(capabilityRun.stdout);
+    if (envelope.ok !== true || envelope.data?.schema !== 'game_dev.capabilities.v1') {
+      throw new Error('capabilities did not return game_dev.capabilities.v1');
+    }
+    if (envelope.data.transport !== 'local-cli') {
+      throw new Error(`unexpected transport: ${String(envelope.data.transport)}`);
+    }
+
+    const tools = envelope.data.localOperations ?? [];
+    const found = tools.map((tool) => tool.name).sort();
+    const missingTools = EXPECTED_TOOLS.filter((name) => !found.includes(name));
+    const families = envelope.data.commandFamilies ?? [];
+    const missingFamilies = EXPECTED_FAMILIES.filter((name) => !families.includes(name));
+    if (missingTools.length > 0 || missingFamilies.length > 0) {
+      throw new Error(
+        `missing operations=[${missingTools.join(', ')}] families=[${missingFamilies.join(', ')}]`,
+      );
+    }
+
+    const promptRequest = JSON.stringify({
+      spec: { name: 'verify_probe', description: 'A small inert test prop.' },
+    });
+    const commandRun = await run([
+      'tool', 'call', 'preview_asset_prompt', '--input', promptRequest,
+      '--json', '--output-dir', workspace,
+    ]);
+    const command = JSON.parse(commandRun.stdout);
+    if (command.ok !== true || typeof command.data?.prompt !== 'string') {
+      throw new Error('a registered local operation could not be executed');
+    }
+
+    console.log(`game-dev ${envelope.data.version}: ${found.length} local operations available`);
+    console.log(`command families: ${families.join(', ')}`);
+    console.log('OK: capability discovery and a free local command completed without MCP.');
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+main().catch((error) => {
+  console.error(`FAILED: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
 });

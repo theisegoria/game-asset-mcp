@@ -19,6 +19,7 @@ import { Document, NodeIO } from '@gltf-transform/core';
 import { resolveNormalizeTarget } from '../src/domain/normalize-target.js';
 import os from 'node:os';
 import { findBlender, packagedScript, requireBlender, runBlenderScript } from '../src/util/blender.js';
+import { callCLICommand } from './helpers/cli-harness.js';
 
 const blender = findBlender();
 const haveBlender = Boolean(blender);
@@ -392,31 +393,15 @@ describe('the tool cleans up after itself', () => {
     await fs.writeFile(stub, '#!/bin/sh\necho "stub blender failing on purpose" >&2\nexit 1\n');
     await fs.chmod(stub, 0o755);
 
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
-      env: {
-        ...process.env,
-        ASSET_LOG_LEVEL: 'error',
-        ASSET_OUTPUT_DIR: path.join(dir, 'ws'),
-        BLENDER_PATH: stub,
-      },
+    await callCLICommand({
+      name: 'normalize_mesh',
+      args: { modelPath: broken, outputPath: output },
+      outputDir: path.join(dir, 'ws'),
+      env: { BLENDER_PATH: stub },
     });
-    const client = new Client({ name: 'orphan-test', version: '1.0.0' });
-    try {
-      await client.connect(transport);
-      await client.callTool({
-        name: 'normalize_mesh',
-        arguments: { modelPath: broken, outputPath: output },
-      });
-      // The reservation created explicit.glb to claim the name. Blender then
-      // fails on the corrupt input, so nothing may remain at that path.
-      await expect(fs.access(output)).rejects.toThrow();
-    } finally {
-      await client.close().catch(() => undefined);
-    }
+    // The reservation created explicit.glb to claim the name. Blender then
+    // fails on the corrupt input, so nothing may remain at that path.
+    await expect(fs.access(output)).rejects.toThrow();
   }, 120_000);
 });
 
@@ -425,25 +410,12 @@ describe('the tool cleans up after itself', () => {
 // depends on how Blender FAILS, not on it being present.
 describe('the destination is only replaced by a verified write', () => {
   async function callNormalize(dir: string, stub: string, args: Record<string, unknown>) {
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
-      env: {
-        ...process.env,
-        ASSET_LOG_LEVEL: 'error',
-        ASSET_OUTPUT_DIR: path.join(dir, 'ws'),
-        BLENDER_PATH: stub,
-      },
+    return callCLICommand({
+      name: 'normalize_mesh',
+      args,
+      outputDir: path.join(dir, 'ws'),
+      env: { BLENDER_PATH: stub },
     });
-    const client = new Client({ name: 'staging-test', version: '1.0.0' });
-    await client.connect(transport);
-    try {
-      return await client.callTool({ name: 'normalize_mesh', arguments: args });
-    } finally {
-      await client.close().catch(() => undefined);
-    }
   }
 
   async function stubBlender(dir: string, body: string): Promise<string> {
@@ -597,29 +569,17 @@ describe('an explicit destination never builds directories', () => {
     await fs.copyFile(uvlessMesh, source);
     const before = await fs.readdir(dir);
 
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
+    // ~ is not expanded here. This used to mkdir -p before any validation and
+    // create a literal "~" directory wherever the process happened to be
+    // running — which is how a stray ~ ended up at a repository root.
+    const result = await callCLICommand({
+      name: 'normalize_mesh',
+      args: { modelPath: source, outputPath: '~/tilde.glb' },
+      outputDir: path.join(dir, 'ws'),
       cwd: dir,
-      env: { ...process.env, ASSET_LOG_LEVEL: 'error', ASSET_OUTPUT_DIR: path.join(dir, 'ws') },
     });
-    const client = new Client({ name: 'containment-test', version: '1.0.0' });
-    try {
-      await client.connect(transport);
-      // ~ is not expanded here. This used to mkdir -p before any validation and
-      // create a literal "~" directory wherever the server happened to be
-      // running — which is how a stray ~ ended up at a repository root.
-      const result = await client.callTool({
-        name: 'normalize_mesh',
-        arguments: { modelPath: source, outputPath: '~/tilde.glb' },
-      });
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toMatch(/does not exist/);
-    } finally {
-      await client.close().catch(() => undefined);
-    }
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toMatch(/does not exist/);
 
     // The only new entry may be the server's OWN configured workspace, which it
     // creates at startup. The tool itself must have built nothing — above all
@@ -639,28 +599,12 @@ describe('the verdict comes from the file, not the receipt', () => {
     await fs.writeFile(stub, `#!/bin/sh\n${stubBody}\n`);
     await fs.chmod(stub, 0o755);
 
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
-      env: {
-        ...process.env,
-        ASSET_LOG_LEVEL: 'error',
-        ASSET_OUTPUT_DIR: path.join(dir, 'ws'),
-        BLENDER_PATH: stub,
-      },
+    return callCLICommand({
+      name: 'normalize_mesh',
+      args: { modelPath: source, ...extra },
+      outputDir: path.join(dir, 'ws'),
+      env: { BLENDER_PATH: stub },
     });
-    const client = new Client({ name: 'verdict', version: '1.0.0' });
-    await client.connect(transport);
-    try {
-      return await client.callTool({
-        name: 'normalize_mesh',
-        arguments: { modelPath: source, ...extra },
-      });
-    } finally {
-      await client.close().catch(() => undefined);
-    }
   }
 
   // Copies the SOURCE through, so the staged file parses and has UVs... except

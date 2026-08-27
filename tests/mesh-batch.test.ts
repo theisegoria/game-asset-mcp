@@ -28,6 +28,7 @@ const FIXTURE_MESH = fileURLToPath(new URL('./fixtures/real/uvless_alien_needler
 import type { AssetInspection } from '../src/inspection/gltf.js';
 import { runMeshBatch, type MeshBatchDeps, type MeshBatchOptions } from '../src/domain/mesh-batch.js';
 import { createMeshBatchDeps } from '../src/tools/batch.js';
+import { callCLICommand } from './helpers/cli-harness.js';
 
 function inspection(overrides: Partial<AssetInspection> = {}): AssetInspection {
   return {
@@ -605,29 +606,16 @@ describe('a lying Blender cannot make the batch report success', () => {
     const stub = path.join(work, 'blender.sh');
     writeFileSync(stub, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
 
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [fileURLToPath(new URL('../dist/server.js', import.meta.url))],
-      env: {
-        ...process.env,
-        ASSET_LOG_LEVEL: 'error',
-        ASSET_OUTPUT_DIR: path.join(work, 'ws'),
-        BLENDER_PATH: stub,
-      },
-    });
-    const client = new Client({ name: 'batch-liar', version: '1.0.0' });
     try {
-      await client.connect(transport);
-      const raw = await client.callTool({
+      const raw = await callCLICommand({
         name: 'batch_prepare_meshes',
-        arguments: { modelPaths: [source], outputDir: outDir },
+        args: { modelPaths: [source], outputDir: outDir },
+        outputDir: path.join(work, 'ws'),
+        env: { BLENDER_PATH: stub },
       });
       const parsed = JSON.parse((raw.content as { text: string }[])[0]!.text);
       return { batch: parsed, files: readdirSync(outDir), work };
     } finally {
-      await client.close().catch(() => undefined);
       rmSync(work, { recursive: true, force: true });
     }
   }
