@@ -20,7 +20,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Game Development Studio",
-    "shortDescription": "Produce assets and diagnose game renders",
+    "shortDescription": "Build assets. Debug renders.",
     "longDescription": "Route game asset production, canonical package vendoring, sealed render-capture diagnosis, and bounded performance work through a local-first evidence-aware workflow. Execution uses the separately installed game-dev CLI; the skills never add an MCP server or silently authorize provider spend, project writes, GPU work, or performance measurement.",
     "developerName": "Benjamin Michael Haire",
     "category": "Developer Tools",
@@ -31,6 +31,7 @@
       "Performance analysis"
     ],
     "websiteURL": "https://github.com/theisegoria/game-development-studio-skills",
+    "supportURL": "https://github.com/theisegoria/game-development-studio-skills/issues",
     "privacyPolicyURL": "https://github.com/theisegoria/game-development-studio-skills/blob/main/PRIVACY.md",
     "termsOfServiceURL": "https://github.com/theisegoria/game-development-studio-skills/blob/main/TERMS.md",
     "defaultPrompt": [
@@ -40,11 +41,6 @@
     ],
     "brandColor": "#10C9D5",
     "composerIcon": "./assets/icon.png",
-    "logo": "./assets/icon.png",
-    "screenshots": [
-      "./assets/screenshots/01-skill-suite.png",
-      "./assets/screenshots/02-cli-contract.png",
-      "./assets/screenshots/03-visual-debugging.png"
-    ]
+    "logo": "./assets/icon.png"
   }
 }

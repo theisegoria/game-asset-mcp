@@ -53,6 +53,12 @@ async function main() {
   ];
   invariant(expectedPolicyUrls.includes(manifest.interface?.privacyPolicyURL), 'unexpected privacy URL');
   invariant(expectedPolicyUrls.includes(manifest.interface?.termsOfServiceURL), 'unexpected terms URL');
+  invariant(
+    manifest.interface?.supportURL === 'https://github.com/theisegoria/game-development-studio-skills/issues',
+    'unexpected support URL',
+  );
+  invariant(manifest.interface?.shortDescription.length <= 30, 'short description exceeds the 30-character limit');
+  invariant(manifest.interface?.screenshots === undefined, 'skills-only plugins must not declare manifest screenshots');
 
   const iconPath = localPath(manifest.interface.composerIcon, 'composerIcon');
   invariant(iconPath === localPath(manifest.interface.logo, 'logo'), 'composer icon and logo must share the suite mark');
@@ -61,8 +67,12 @@ async function main() {
   await png(iconPath, 1254, 1254);
 
   const screenshotProvenance = await json('assets/screenshots/provenance.json');
-  invariant(Array.isArray(manifest.interface.screenshots) && manifest.interface.screenshots.length === 3, 'three screenshots required');
-  for (const screenshot of manifest.interface.screenshots) {
+  const screenshots = [
+    './assets/screenshots/01-skill-suite.png',
+    './assets/screenshots/02-cli-contract.png',
+    './assets/screenshots/03-visual-debugging.png',
+  ];
+  for (const screenshot of screenshots) {
     const screenshotPath = localPath(screenshot, 'screenshot');
     const entry = screenshotProvenance.screenshots.find((item) => item.path === path.basename(screenshotPath));
     invariant(entry, `missing screenshot provenance for ${screenshot}`);
@@ -110,7 +120,7 @@ async function main() {
     version: manifest.version,
     distribution: 'skills-only',
     skills: skillManifest.skills.length,
-    screenshots: manifest.interface.screenshots.length,
+    screenshots: screenshots.length,
     mcp: false,
   }));
 }

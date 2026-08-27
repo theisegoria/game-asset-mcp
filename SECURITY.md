@@ -8,7 +8,7 @@ publication that is 1.x.
 ## Report a vulnerability
 
 Please use
-[GitHub private vulnerability reporting](https://github.com/theisegoria/game-development-studio/security/advisories/new)
+[GitHub private vulnerability reporting](https://github.com/theisegoria/game-development-studio-skills/security/advisories/new)
 instead of a public issue when a report could expose:
 
 - credential or authorization leakage

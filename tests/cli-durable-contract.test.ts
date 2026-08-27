@@ -50,6 +50,13 @@ afterEach(async () => {
 });
 
 describe('game-dev durable CLI contract', () => {
+  it('documents the confirmation and fresh paid-approval boundary for resume', async () => {
+    const result = await run(['--help']);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('game-dev job resume <job-id> --confirm');
+    expect(result.stdout).toContain('[--approve-spend --spend-limit-cents N]');
+  });
+
   it('stops paid provider work at an explicit approval boundary before credentials or network', async () => {
     const root = await workspace();
     const request = JSON.stringify({

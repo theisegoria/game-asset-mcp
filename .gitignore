@@ -2,6 +2,11 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Native macOS companion build products
+macos/GameDevelopmentStudio/.build/
+macos/GameDevelopmentStudio/.swiftpm/
+macos/GameDevelopmentStudio/dist/
+
 # Secrets — never commit. See .env.example.
 .env
 .env.*

@@ -9,7 +9,7 @@ Skills only. No MCP server, hosted backend, OAuth flow, or app reference.
 - Name: Game Development Studio
 - Developer: Benjamin Michael Haire
 - Category: Developer Tools
-- Short description: Produce assets and diagnose game renders.
+- Short description: Build assets. Debug renders.
 - Website: https://github.com/theisegoria/game-development-studio-skills
 - Support: https://github.com/theisegoria/game-development-studio-skills/issues
 - Privacy: https://github.com/theisegoria/game-development-studio-skills/blob/main/PRIVACY.md
@@ -59,8 +59,27 @@ remove this disclosure to make a scan pass.
 ### 2. Audit a package before vendoring
 
 - Prompt: “Here is an asset manifest and verification result. Tell me whether
-  it is safe to vendor; do not write to my project.” Attach the public fixture
-  from the repository test documentation or paste equivalent JSON.
+  it is safe to vendor; do not write to my project.” Include this fixture in
+  the prompt:
+
+  ```json
+  {
+    "manifest": {
+      "schema": "game_dev.asset_package.v1",
+      "id": "signal-beacon@1.0.0+sha256-demo",
+      "name": "Signal Beacon",
+      "version": "1.0.0",
+      "license": "CC0-1.0",
+      "validation": { "valid": true }
+    },
+    "verification": {
+      "schema": "game_dev.package_verification.v1",
+      "ok": true,
+      "hashesVerified": true,
+      "closedRoster": true
+    }
+  }
+  ```
 - Expected skill: `game-asset-vendoring`.
 - Expected behavior: checks hash-verification status, license, validation,
   destination assumptions, and returns blockers plus the dry-run command.
@@ -148,7 +167,9 @@ requirement.
 - repository, support, privacy, and terms URLs publicly reachable
 - final ZIP created from the tagged repository
 - all five skills pass the local validator
-- icon and three screenshots pass manifest validation
+- icon passes manifest validation; the three product screenshots pass the
+  separate GitHub/release asset checks and are not declared in the skills-only
+  manifest
 - five positive and three negative tests entered
 - availability selected only where support and terms are ready
 - product-specific local execution disclosure reviewed with OpenAI partner

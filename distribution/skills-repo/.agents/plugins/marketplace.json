@@ -1,0 +1,20 @@
+{
+  "name": "game-development-studio-skills",
+  "interface": {
+    "displayName": "Game Development Studio"
+  },
+  "plugins": [
+    {
+      "name": "game-development-studio",
+      "source": {
+        "source": "local",
+        "path": "./plugins/game-development-studio"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -105,7 +105,10 @@ The package follows semantic versioning:
 - command aliases are not silently repurposed
 - persisted manifests declare their own schema independently of CLI version
 
-The `scripts/verify-install.mjs` check installs the packed tarball into an
-empty temporary consumer, validates imports, exercises representative CLI
-routes, verifies a deterministic package, and validates all five bundled
-skills.
+The `scripts/verify-install.mjs` check creates the npm tarball with scripts
+disabled, installs that exact tarball and its runtime dependencies into an
+empty temporary consumer, and exercises only the installed copy. It validates
+the library export and npm bin, representative free CLI routes, all five skill
+copies, the README asset and policy roster, the skills-repository exporter,
+and the absence of retired MCP/app entry points. It makes no provider call and
+does not install into a real user profile.

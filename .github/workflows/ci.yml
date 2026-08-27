@@ -77,3 +77,30 @@ jobs:
         run: |
           npx vitest run tests/normalize.test.ts --reporter=json --outputFile=blender-results.json
           node .github/scripts/assert-blender-tests-ran.mjs blender-results.json
+
+  macos-app:
+    runs-on: macos-26
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report the native toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Build the macOS 26 app
+        run: swift build --package-path macos/GameDevelopmentStudio
+
+      - name: Test the app model, process boundary, and credential boundary
+        run: swift test --package-path macos/GameDevelopmentStudio
+
+      - name: Stage and ad-hoc sign the local app bundle
+        run: ./script/build_and_run.sh --build-only
+
+      - name: Validate the staged bundle
+        run: |
+          plutil -lint macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app/Contents/Info.plist
+          codesign --verify --deep --strict macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app

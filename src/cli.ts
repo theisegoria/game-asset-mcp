@@ -49,7 +49,8 @@ Usage:
   game-dev job list [--limit N] [--status STATUS] [--json]
   game-dev job show <job-id> [--detail] [--json]
   game-dev job follow <job-id> [--max-seconds N] [--jsonl]
-  game-dev job resume <job-id> [--json|--jsonl]
+  game-dev job resume <job-id> --confirm
+                    [--approve-spend --spend-limit-cents N] [--json|--jsonl]
   game-dev job cancel <job-id> --confirm [--json]
   game-dev asset inspect <model.glb> [--json]
   game-dev asset validate <model.glb> [--request POLICY.json] [--json]
