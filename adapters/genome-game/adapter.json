@@ -1,0 +1,159 @@
+{
+  "description": "Local adapter for Genome Game's existing owner-gated Trident Bay Hemera windowless Metal raster lane.",
+  "id": "genome-game",
+  "name": "Genome Game",
+  "scenarios": [
+    {
+      "capabilities": [
+        "cpu"
+      ],
+      "command": {
+        "arguments": [
+          "--validate-only"
+        ],
+        "executable": "script/capture_renderer_acceptance_matrix.sh",
+        "workingDirectory": "."
+      },
+      "description": "Validate the frozen 18-shot contract and print its plan. Locates no game binary and launches no GPU work.",
+      "id": "trident-bay-contract",
+      "outputs": {
+        "format": "none"
+      },
+      "parameters": {},
+      "timeoutSeconds": 120,
+      "title": "Trident Bay contract validation"
+    },
+    {
+      "capabilities": [
+        "cpu",
+        "project-write"
+      ],
+      "command": {
+        "arguments": [
+          "--preflight-only",
+          "--binary",
+          "{param.binary}",
+          "--out-dir",
+          "{run_dir}/native"
+        ],
+        "executable": "script/capture_renderer_acceptance_matrix.sh",
+        "workingDirectory": "."
+      },
+      "description": "Hash and validate the exact binary, source-root receipt, Metal libraries, dependencies, terrain authority, and material inputs without launching the game or GPU lane.",
+      "id": "trident-bay-preflight",
+      "outputs": {
+        "format": "none"
+      },
+      "parameters": {
+        "binary": {
+          "description": "Project-relative direct evo_arena executable; .app paths are refused by Genome's own harness.",
+          "kind": "file",
+          "mustExist": true,
+          "required": true,
+          "type": "project_path"
+        }
+      },
+      "timeoutSeconds": 600,
+      "title": "Trident Bay native preflight"
+    },
+    {
+      "capabilities": [
+        "project-write",
+        "gpu",
+        "metal"
+      ],
+      "command": {
+        "arguments": [
+          "--owner-authorized-gpu-run",
+          "--binary",
+          "{param.binary}",
+          "--out-dir",
+          "{run_dir}/native"
+        ],
+        "executable": "script/capture_renderer_acceptance_matrix.sh",
+        "workingDirectory": "."
+      },
+      "description": "Run the exact owner-gated 18-shot windowless Metal raster matrix on a quiet host and normalize its frozen evidence roster.",
+      "id": "trident-bay-windowless-metal",
+      "outputs": {
+        "format": "genome-hemera-v1",
+        "path": "native"
+      },
+      "parameters": {
+        "binary": {
+          "description": "Project-relative direct evo_arena executable built from the canonical source root.",
+          "kind": "file",
+          "mustExist": true,
+          "required": true,
+          "type": "project_path"
+        }
+      },
+      "timeoutSeconds": 7200,
+      "title": "Trident Bay 18-shot windowless Metal capture"
+    },
+    {
+      "capabilities": [
+        "project-write",
+        "gpu",
+        "metal"
+      ],
+      "command": {
+        "arguments": [
+          "--owner-authorized-gpu-run",
+          "--binary",
+          "{param.binary}",
+          "--diagnostic-shot",
+          "{param.shot}",
+          "--out-dir",
+          "{run_dir}/native"
+        ],
+        "executable": "script/capture_renderer_acceptance_matrix.sh",
+        "workingDirectory": "."
+      },
+      "description": "Capture one authored Trident Bay shot for bounded visual diagnosis. This is not full-matrix acceptance or performance evidence.",
+      "id": "trident-bay-diagnostic-shot",
+      "outputs": {
+        "format": "genome-hemera-v1",
+        "path": "native"
+      },
+      "parameters": {
+        "binary": {
+          "description": "Project-relative direct evo_arena executable built from the canonical source root.",
+          "kind": "file",
+          "mustExist": true,
+          "required": true,
+          "type": "project_path"
+        },
+        "shot": {
+          "description": "Exact authored capture-matrix shot slug.",
+          "required": true,
+          "type": "enum",
+          "values": [
+            "dawn_mountain_ocean",
+            "morning_sriver_headwater",
+            "noon_alpine_river",
+            "afternoon_ocean_shoaling",
+            "sunset_storm_spray",
+            "night_ocean_glints",
+            "dawn_rain_all_water",
+            "river_ford_flow",
+            "rain_tributary_ford",
+            "dusk_confluence_foam",
+            "morning_cliff_shelf",
+            "rainforest_cascades",
+            "storm_estuary_surge",
+            "fog_alpine_ruins",
+            "golden_beach_surf",
+            "dusk_wetland_braids",
+            "night_fog_creek",
+            "predawn_watershed_runoff"
+          ]
+        }
+      },
+      "timeoutSeconds": 900,
+      "title": "Trident Bay bounded diagnostic shot"
+    }
+  ],
+  "schema": "game_dev.adapter.v1",
+  "version": "1.0.0"
+}

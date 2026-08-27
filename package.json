@@ -30,6 +30,7 @@
     "dist",
     "scripts/*.py",
     "scripts/*.mjs",
+    "adapters",
     "skills",
     "CHANGELOG.md",
     "README.md",
