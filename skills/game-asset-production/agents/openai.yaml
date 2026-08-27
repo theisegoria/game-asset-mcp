@@ -1,4 +1,7 @@
 interface:
   display_name: "Game Asset Production"
   short_description: "Create, normalize, and package game assets"
+  icon_small: "./assets/icon.png"
+  icon_large: "./assets/icon.png"
+  brand_color: "#10C9D5"
   default_prompt: "Use $game-asset-production to create or prepare a game-ready asset package."

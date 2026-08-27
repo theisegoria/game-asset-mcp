@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -61,12 +62,29 @@ describe('packaged Codex skill suite', () => {
       expect(skill.files).toEqual(expect.arrayContaining([
         expect.objectContaining({ path: 'SKILL.md' }),
         expect.objectContaining({ path: 'agents/openai.yaml' }),
+        expect.objectContaining({ path: 'assets/icon.png' }),
+        expect.objectContaining({ path: 'assets/icon-provenance.json' }),
       ]));
       expect(skill.files.every((file) => !path.isAbsolute(file.path) && !file.path.includes('..'))).toBe(true);
       const markdown = await readFile(path.join('skills', skill.relativePath, 'SKILL.md'), 'utf8');
       const metadata = await readFile(path.join('skills', skill.relativePath, 'agents', 'openai.yaml'), 'utf8');
+      const icon = await readFile(path.join('skills', skill.relativePath, 'assets', 'icon.png'));
+      const provenance = JSON.parse(await readFile(
+        path.join('skills', skill.relativePath, 'assets', 'icon-provenance.json'),
+        'utf8',
+      )) as Record<string, unknown>;
       expect(markdown).not.toMatch(/\[TODO/i);
       expect(metadata).toContain(`$${skill.id}`);
+      expect(metadata).toContain('icon_small: "./assets/icon.png"');
+      expect(metadata).toContain('icon_large: "./assets/icon.png"');
+      expect(metadata).toContain('brand_color: "#10C9D5"');
+      expect(provenance).toMatchObject({
+        schema: 'game_dev.image_asset_provenance.v1',
+        asset: 'icon.png',
+        generator: 'OpenAI ImageGen in Codex',
+        inputImages: [],
+      });
+      expect(provenance.sha256).toBe(createHash('sha256').update(icon).digest('hex'));
     }
   });
 

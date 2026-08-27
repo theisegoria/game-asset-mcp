@@ -40,9 +40,12 @@ const HELP = `Game Development Studio local harness
 Usage:
   game-dev capabilities [--json]
   game-dev doctor [--json]
+  game-dev credentials status [--json]
   game-dev tool call <name> [--request FILE|- | --input JSON] [--json|--jsonl]
-  game-dev provider tripo generate --request FILE [--json|--jsonl]
-  game-dev provider leonardo sound-generate --request FILE [--json|--jsonl]
+  game-dev provider tripo <generate|retexture|rig|retarget|retopologize> --request FILE
+                    --approve-spend --spend-limit-cents N [--json|--jsonl]
+  game-dev provider leonardo <image-generate|sound-generate> --request FILE
+                    --approve-spend --spend-limit-cents N [--json|--jsonl]
   game-dev job list [--limit N] [--status STATUS] [--json]
   game-dev job show <job-id> [--detail] [--json]
   game-dev job follow <job-id> [--max-seconds N] [--jsonl]
@@ -56,6 +59,7 @@ Usage:
   game-dev package show <package-id|path> [--json]
   game-dev package verify <package-id|path> [--json]
   game-dev catalog list [--query TEXT] [--category CATEGORY] [--valid|--invalid] [--json]
+  game-dev catalog show <package-id> [--json]
   game-dev catalog rebuild --confirm [--jsonl]
   game-dev vendor admit <package-id|path> --project PATH [--destination RELATIVE] [--confirm]
   game-dev launch <package-id|path> --with finder|quicklook|blender [--confirm]

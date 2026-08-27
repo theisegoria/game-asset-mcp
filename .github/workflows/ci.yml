@@ -5,15 +5,16 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # 18.17 is the declared floor; 22 and 24 catch anything that only works
-        # on the newest runtime. No native modules, so this matrix is cheap.
-        node: ['18.17', '22', '24']
+        node: ['22', '24']
 
     steps:
       - uses: actions/checkout@v4
@@ -24,52 +25,14 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run verify
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Audit the publish roster
+        run: npm pack --dry-run --json
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        # BEFORE the tests, deliberately: the entry-point test spawns the built
-        # server through a symlink and skips itself when dist/ is absent. Left
-        # after, that test would quietly stop running the moment the `prepare`
-        # script changed — a green suite covering one test fewer than it claims.
-        run: npm run build
-
-      - name: Test
-        # Skipped on 18.17 ONLY because vitest 4 imports `styleText` from
-        # node:util, which arrived in Node 20.12 — a limit of the test runner,
-        # not of this package. The 18.17 job still typechecks, lints, builds and
-        # completes a real MCP handshake below, which is what actually proves
-        # the declared engines floor.
-        if: matrix.node != '18.17'
-        # No API keys are provided, so nothing here contacts a live provider.
-        run: npm test
-
-      - name: Verify the server registers its tools
-        # A protocol round-trip, not a version string: a server that fails to
-        # register its tools still starts perfectly happily. This runs on EVERY
-        # Node in the matrix, including 18.17, so the engines floor is backed by
-        # the server actually starting there rather than by assertion.
-        run: node scripts/verify-install.mjs
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # The Blender-backed tests, actually executed.
-  #
-  # WHY THIS JOB EXISTS. Every test touching scripts/blender_normalize.py is
-  # `describe.skipIf(!haveBlender)`, and no runner above has Blender — so the
-  # matrix reported green while never executing a single line of that script.
-  # That script is where every data-destruction defect in this project's history
-  # has lived: a threshold that ate 98% of a mesh and reported it ready, an
-  # inverted scale divisor, a repair silently skipped on any object scaled above
-  # 1.0. The suite's most important guards ran only on one developer's laptop.
-  #
-  # A green CI that never runs the dangerous code is precisely the failure mode
-  # this project keeps finding, so this job installs Blender and REFUSES to pass
-  # by skipping.
-  # ────────────────────────────────────────────────────────────────────────────
   blender:
     runs-on: ubuntu-latest
     steps:
@@ -81,69 +44,36 @@ jobs:
           cache: npm
 
       - run: npm ci
-
       - run: npm run build
 
       - name: Install Blender
         run: |
           sudo apt-get update
-          # python3-numpy is NOT optional. Ubuntu's blender package runs against
-          # the SYSTEM python and only RECOMMENDS numpy, which
-          # --no-install-recommends duly stripped — and Blender's glTF importer
-          # imports numpy at module load. Every import then died with
-          # "ModuleNotFoundError: No module named 'numpy'" inside the addon,
-          # which the tool surfaced as a full traceback via stderrTail.
           sudo apt-get install -y --no-install-recommends blender python3-numpy
           blender --version | head -1
-          echo "blender package version: $(dpkg -s blender | grep ^Version || true)"
 
       - name: Refuse to continue if Blender is not discoverable
-        # Without this the job would pass BY SKIPPING, which is the exact
-        # failure it exists to prevent. findBlender is the same discovery the
-        # tests use, so this asserts on the thing that actually gates them.
         run: |
           node -e "
           import('./dist/util/blender.js').then(({ findBlender }) => {
             const found = findBlender();
             if (!found) {
-              console.error('Blender not discoverable - the gated tests would silently skip');
+              console.error('Blender not discoverable - gated tests would skip');
               process.exit(1);
             }
             console.log('Blender discovered at ' + found);
           });
           "
 
-      - name: Prove Blender can actually import glTF
-        # An environment check, kept separate on purpose. Without it a broken
-        # Blender install arrives as fifteen failing tests with tracebacks
-        # buried in serialized errors, and reads like a code regression. This
-        # names it as what it is, before the suite runs.
-        run: |
-          cat > /tmp/import_probe.py <<'PY'
-          import bpy, sys
-          try:
-              bpy.ops.import_scene.gltf
-              import numpy  # noqa: F401  the glTF addon imports this at load
-              print("glTF importer and numpy are both available")
-          except Exception as exc:
-              print("Blender cannot import glTF: %s" % exc, file=sys.stderr)
-              sys.exit(1)
-          PY
-          blender --background --factory-startup --python /tmp/import_probe.py
+      - name: Prove Blender can import glTF
+        run: >-
+          blender --background --factory-startup
+          --python-expr "import bpy, numpy; bpy.ops.import_scene.gltf; print('glTF importer and numpy are available')"
 
       - name: Run the Blender-backed tests
-        # DEFAULT reporter, deliberately: the JSON reporter swallows failure
-        # output, and with `bash -e` the first run aborted the step before the
-        # count assertion below could print anything — so the first real failure
-        # this job caught was invisible. Visible failures first, counting second.
         run: npx vitest run tests/normalize.test.ts
 
       - name: Prove the Blender-gated tests actually ran
-        # By NAME, not by a blanket pending count. The first version failed a
-        # job whose Blender tests had all passed, because
-        # `it.skipIf(!caseInsensitive)` correctly skips on Linux ext4 and runs on
-        # macOS APFS — one legitimate platform skip, read as the very failure the
-        # check exists to catch.
         run: |
           npx vitest run tests/normalize.test.ts --reporter=json --outputFile=blender-results.json
           node .github/scripts/assert-blender-tests-ran.mjs blender-results.json

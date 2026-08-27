@@ -18,6 +18,7 @@
     "image-to-3d"
   ],
   "license": "MIT",
+  "author": "Benjamin Michael Haire",
   "type": "module",
   "engines": {
     "node": ">=22.5"
@@ -26,13 +27,24 @@
     "game-dev": "dist/cli.js"
   },
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
   "files": [
     "dist",
     "scripts/*.py",
     "scripts/*.mjs",
     "adapters",
     "skills",
+    "docs",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "README.md",
     "LICENSE"
   ],

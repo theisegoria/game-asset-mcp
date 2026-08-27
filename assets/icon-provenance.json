@@ -1,0 +1,11 @@
+{
+  "schema": "game_dev.image_asset_provenance.v1",
+  "asset": "icon.png",
+  "generator": "OpenAI ImageGen in Codex",
+  "generatedOn": "2026-08-28",
+  "inputImages": [],
+  "prompt": "Create a single square product icon for “Game Development Studio,” a local game-asset production, render-capture telemetry, and visual-debugging toolkit. Center one bold, simple symbol: a faceted 3D mesh cube whose right-hand facets resolve into three precise diagnostic scan lines and a small waveform pulse. Refined native macOS-quality visual language, but not a screenshot and not a copy of any Apple or Blender icon. Deep indigo-to-charcoal field, luminous teal/cyan geometry with one restrained warm copper accent. Crisp silhouette and strong contrast that remain readable at 32 px. Symmetrical, calm, technical, premium, minimal detail, generous safe margin. No text, no letters, no numbers, no game controller, no robot, no mascot, no watermark, no baked rounded-corner mask. Output one polished 1024x1024 raster icon.",
+  "actualPixels": { "width": 1254, "height": 1254 },
+  "sha256": "1e72c066c6a387d24bc4ec3d2509e2b5a12841335b5fdec3758a00d09d494fde",
+  "postProcessing": "None; copied byte-identically from the generated output."
+}

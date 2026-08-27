@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.0.0
+
+Game Development Studio replaces the retired MCP entry point with a local-first
+`game-dev` CLI, a stable JSON/JSONL automation protocol, and five publishable
+skills. The v0.4.0 MCP implementation remains available in Git history and tags;
+it is not shipped by 1.0.0.
+
+### Production and vendoring
+
+- durable provider jobs for Tripo 3D and Leonardo image/audio generation
+- explicit per-invocation spend approval and estimated-cent ceilings
+- GLB inspection, validation, Blender-backed normalization, and optional USDZ
+  preview export
+- canonical, content-addressed asset packages with manifests, receipts,
+  provenance, closed hash rosters, license gates, and a rebuildable SQLite
+  catalog
+- dry-run-first project vendoring, legacy migration, and Finder, Quick Look, or
+  Blender launch plans
+
+### Capture and diagnosis
+
+- declarative game adapters and separately authorized execution, GPU, and
+  hardware-performance capabilities
+- sealed run bundles with color and semantic attachments, structured telemetry,
+  logs, metrics, manifests, and hashes
+- deterministic raster statistics, heatmaps, attachment-aware comparisons,
+  metric summaries, and bounded optimization goals
+
+### Distribution and safety
+
+- router plus four focused skills with generated icon metadata and byte-checked
+  provenance
+- explicitly confirmed, atomic skill installation; no automatic writes to a
+  user profile or game project
+- secrets excluded from arguments and receipts, HTTPS-only provider traffic,
+  bounded downloads, atomic persistence, and literal evidence ceilings
+- Node.js 22.5 or newer is now required; CI covers supported Node releases and
+  executes the Blender-gated normalization suite in a dedicated job
+
+Provider-contract tests use local HTTPS fixtures, not paid live requests.
+Static inspection and fixture captures do not prove live-provider behavior,
+hardware GPU execution, pixel correctness, performance on a target machine,
+signing, notarization, or human visual review.
+
 ## 0.4.0
 
 No defect fixes. Two additions, one of them the first proof of something that

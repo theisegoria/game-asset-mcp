@@ -9,7 +9,11 @@ dist/
 
 # Default asset workspace (generated output can be large)
 assets/generated/
+.game-dev/
 .game-asset-mcp/
+
+# Browser-capture scratch space. Curated screenshots live in assets/screenshots/.
+output/playwright/
 
 # OS / editor
 .DS_Store
