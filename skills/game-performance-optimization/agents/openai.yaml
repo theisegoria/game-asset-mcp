@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Performance Optimization"
+  short_description: "Run bounded evidence-aware optimization loops"
+  default_prompt: "Use $game-performance-optimization to compare runs and execute a bounded optimization goal."

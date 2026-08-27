@@ -113,9 +113,20 @@ async function main() {
       throw new Error('a registered local operation could not be executed');
     }
 
+    const skillRun = await run(['skill', 'list', '--json', '--output-dir', workspace]);
+    const skillEnvelope = JSON.parse(skillRun.stdout);
+    if (
+      skillEnvelope.ok !== true ||
+      skillEnvelope.data?.schema !== 'game_dev.skill_bundle.v1' ||
+      skillEnvelope.data?.skills?.length !== 5 ||
+      skillEnvelope.data.skills.some((skill) => typeof skill.source === 'string')
+    ) {
+      throw new Error('the packaged five-skill suite failed its public validation contract');
+    }
+
     console.log(`game-dev ${envelope.data.version}: ${found.length} local operations available`);
     console.log(`command families: ${families.join(', ')}`);
-    console.log('OK: capability discovery and a free local command completed without MCP.');
+    console.log('OK: capability discovery, packaged skills, and a free local command completed without MCP.');
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

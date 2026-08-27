@@ -1,0 +1,36 @@
+{
+  "schema": "game_dev.skill_bundle.v1",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "game-development-studio",
+      "displayName": "Game Development Studio",
+      "description": "Route local game-development workflows to the focused skill suite.",
+      "relativePath": "game-development-studio"
+    },
+    {
+      "id": "game-asset-production",
+      "displayName": "Game Asset Production",
+      "description": "Create, normalize, validate, and package reusable game assets.",
+      "relativePath": "game-asset-production"
+    },
+    {
+      "id": "game-asset-vendoring",
+      "displayName": "Game Asset Vendoring",
+      "description": "Verify and safely admit canonical packages into game projects.",
+      "relativePath": "game-asset-vendoring"
+    },
+    {
+      "id": "game-visual-debugging",
+      "displayName": "Game Visual Debugging",
+      "description": "Investigate rendering defects with captures, telemetry, and semantic diffs.",
+      "relativePath": "game-visual-debugging"
+    },
+    {
+      "id": "game-performance-optimization",
+      "displayName": "Game Performance Optimization",
+      "description": "Compare sealed metrics and run bounded optimization goals.",
+      "relativePath": "game-performance-optimization"
+    }
+  ]
+}

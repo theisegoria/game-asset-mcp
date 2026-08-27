@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Asset Vendoring"
+  short_description: "Verify and admit assets into game projects"
+  default_prompt: "Use $game-asset-vendoring to verify and safely vendor an asset package into a game project."

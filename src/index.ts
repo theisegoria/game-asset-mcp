@@ -25,6 +25,7 @@ export * from './harness/adapter.js';
 export * from './harness/capture.js';
 export * from './harness/run-bundle.js';
 export * from './harness/templates.js';
+export * from './skills/bundle.js';
 export * from './harness/visual.js';
 export * from './harness/performance.js';
 export * from './harness/goals.js';

@@ -33,6 +33,7 @@ import { installAdapterTemplate, listAdapterTemplates } from './harness/template
 import { analyzeRunCapture, compareRunVisuals } from './harness/visual.js';
 import { compareRunPerformance, summarizeRunPerformance } from './harness/performance.js';
 import { createOptimizationGoal, evaluateOptimizationGoal } from './harness/goals.js';
+import { installSkillBundle, listSkillBundle } from './skills/bundle.js';
 
 const HELP = `Game Development Studio local harness
 
@@ -74,6 +75,8 @@ Usage:
   game-dev performance compare <baseline-run> <candidate-run> [--stat median] [--json]
   game-dev performance goal-create <baseline-run> --project PATH --request GOAL.json [--confirm]
   game-dev performance goal-evaluate <goal.json> <candidate-run> [--confirm]
+  game-dev skill list [--json]
+  game-dev skill install <skill-id|all> [--target CODEX_SKILLS_DIR] [--confirm]
 
 Global options:
   --output-dir PATH   Asset workspace for this invocation.
@@ -371,6 +374,32 @@ async function dispatch(
   }
   if (family === 'credentials') {
     throw invalidInput('credential mutation is available through the native app so secrets never enter shell history');
+  }
+
+  if (family === 'skill' && action === 'list') {
+    return {
+      operation: 'skill.list',
+      data: await listSkillBundle() as unknown as Record<string, unknown>,
+    };
+  }
+  if (family === 'skill' && action === 'install') {
+    const result = await installSkillBundle({
+      selection: requirePositional(parsed, 2, 'skill id or all'),
+      ...(stringFlag(parsed, 'target') ? { targetRoot: path.resolve(requireFlag(parsed, 'target')) } : {}),
+      confirm: booleanFlag(parsed, 'confirm'),
+    });
+    return {
+      operation: 'skill.install',
+      data: result,
+      ...(booleanFlag(parsed, 'confirm')
+        ? {
+            artifacts: (result.installations as Array<{ destination: string }>).map((installation) => ({
+              path: installation.destination,
+              kind: 'codex_skill',
+            })),
+          }
+        : {}),
+    };
   }
 
   if (family === 'adapter' && action === 'templates') {
@@ -1083,6 +1112,7 @@ function needsDurableJob(runtime: GameDevRuntime, parsed: ParsedArguments): bool
   if (family === 'asset' && ['normalize', 'preview-usdz'].includes(action ?? '')) return true;
   if (['vendor', 'package', 'migrate'].includes(family ?? '')) return true;
   if (family === 'adapter' && action === 'install' && booleanFlag(parsed, 'confirm')) return true;
+  if (family === 'skill' && action === 'install' && booleanFlag(parsed, 'confirm')) return true;
   if (family === 'scenario' && action === 'run') return true;
   if (family === 'visual' && action === 'compare' && stringFlag(parsed, 'output') !== undefined) return true;
   if (family === 'performance' && ['goal-create', 'goal-evaluate'].includes(action ?? '') && booleanFlag(parsed, 'confirm')) {

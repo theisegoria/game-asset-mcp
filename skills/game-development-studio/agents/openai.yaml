@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Development Studio"
+  short_description: "Route local game-development workflows"
+  default_prompt: "Use $game-development-studio to choose and run the right local game asset or diagnostic workflow."

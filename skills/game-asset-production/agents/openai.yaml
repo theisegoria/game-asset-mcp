@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Asset Production"
+  short_description: "Create, normalize, and package game assets"
+  default_prompt: "Use $game-asset-production to create or prepare a game-ready asset package."

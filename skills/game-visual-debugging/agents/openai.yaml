@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Visual Debugging"
+  short_description: "Debug renders with captures and telemetry"
+  default_prompt: "Use $game-visual-debugging to investigate a rendering problem with sealed captures and telemetry."
