@@ -111,7 +111,7 @@ export async function refreshAssetJob(ctx: ToolContext, job: AssetJob): Promise<
 /**
  * Poll until the job leaves a pending state or the budget runs out.
  *
- * Bounded on purpose: an MCP call that blocks indefinitely is worse than one
+ * Bounded on purpose: a CLI call that blocks indefinitely is worse than one
  * that returns "still generating", because the client cannot tell a slow
  * provider from a hung server.
  */

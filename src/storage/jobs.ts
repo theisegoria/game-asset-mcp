@@ -7,9 +7,9 @@
  *
  * Chosen over SQLite deliberately: Node's built-in `node:sqlite` is still
  * experimental and needs Node >= 22.5, and a native driver would force every
- * installer of this server through a build toolchain. At the scale this server
+ * installer of this CLI through a build toolchain. At the scale this harness
  * operates (hundreds of jobs, single writer) a keyed file store is sufficient,
- * and it keeps `npx game-asset-mcp` working everywhere. Reasoning recorded in
+ * and it keeps `game-dev` working everywhere. Reasoning recorded in
  * docs/architecture.md.
  */
 
@@ -96,7 +96,7 @@ export class JobStore {
     if (job.schemaVersion !== 1) {
       throw new AssetPipelineError(
         'INVALID_STATE',
-        `job ${id} has unsupported schemaVersion ${String(job.schemaVersion)} (this server understands 1)`,
+        `job ${id} has unsupported schemaVersion ${String(job.schemaVersion)} (this harness understands 1)`,
         { details: { id, schemaVersion: job.schemaVersion } },
       );
     }

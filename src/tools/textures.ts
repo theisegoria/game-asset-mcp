@@ -33,7 +33,7 @@ export function registerTextureTools(server: ToolRegistrar, ctx: ToolContext): v
         'geometry untouched. Use this when you already own a model and only the materials are missing ' +
         'or wrong — it is cheaper than regenerating and preserves the mesh exactly. ' +
         'Provide the mesh as either modelPath (local .glb/.gltf/.fbx/.obj/.stl) or originalAssetJobId ' +
-        '(a previous job from this server whose 3D task produced a model). ' +
+        '(a previous job from this harness whose 3D task produced a model). ' +
         'Direct the material with EITHER prompt OR styleImagePath, not both. ' +
         'ASYNCHRONOUS: poll get_asset_job until "ready", then download_asset. ' +
         'NOTE: providers may only support retexturing meshes that originated from their own prior ' +
@@ -43,7 +43,7 @@ export function registerTextureTools(server: ToolRegistrar, ctx: ToolContext): v
         originalAssetJobId: z
           .string()
           .optional()
-          .describe('A previous asset job from this server whose 3D task produced a model.'),
+          .describe('A previous asset job from this harness whose 3D task produced a model.'),
         prompt: z.string().max(2000).optional().describe('Text direction for the material.'),
         styleImagePath: z
           .string()

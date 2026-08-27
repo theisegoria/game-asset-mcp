@@ -70,7 +70,7 @@ export function requireBlender(env: NodeJS.ProcessEnv = process.env): string {
     'Blender was not found. This tool needs a local Blender install (4.x or newer). ' +
       'Install it from https://www.blender.org/download/, or set BLENDER_PATH to the executable — ' +
       'on macOS that is /Applications/Blender.app/Contents/MacOS/Blender, which is deliberately ' +
-      'not on PATH. Every other tool in this server works without Blender.',
+      'not on PATH. Every other non-Blender operation in this harness works without Blender.',
     { details: { checked: ['BLENDER_PATH', 'PATH', ...CANDIDATE_PATHS] } },
   );
 }

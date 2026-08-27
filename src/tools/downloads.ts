@@ -109,7 +109,7 @@ export async function extractTextures(
   // A logger, for two measured reasons.
   //
   // 1. glTF-Transform's default logger routes `info` through console.info, which
-  //    lands on STDOUT — the channel the MCP transport owns, where one stray
+  //    lands on STDOUT — the channel the JSON/JSONL protocol owns, where one stray
   //    line corrupts the session. gltf.ts carries this warning already.
   // 2. Non-strict reading makes the reader talk: "Failed to load image URI …"
   //    names the file that is actually missing, which is the actionable half of

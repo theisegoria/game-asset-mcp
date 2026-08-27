@@ -197,7 +197,7 @@ export function registerPbrTools(server: ToolRegistrar, ctx: ToolContext): void 
       // roughness, rather than refusing the whole call. The third of three
       // sites, fixed together this time instead of one per release.
       // Logger attached for the same reason as the other two readers: the
-      // default one writes to stdout, which the MCP transport owns.
+      // default one writes to stdout, which the JSON/JSONL protocol owns.
       // ⚠ HELD, not constructed inline and thrown away. The first version of
       // this did `setLogger(new CollectingLogger())` and never read it, so the
       // reader's diagnostic — which names the file that could not be opened —

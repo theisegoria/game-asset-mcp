@@ -1,7 +1,7 @@
 /**
  * Structured logging to stderr.
  *
- * stdout belongs to the MCP protocol — writing anything there corrupts the
+ * stdout belongs to the versioned JSON/JSONL protocol — writing anything there corrupts the
  * transport, so every log line goes to stderr.
  *
  * Secrets are redacted centrally rather than at each call site, because the

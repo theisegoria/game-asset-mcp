@@ -52,7 +52,7 @@ export function registerSpendTools(server: ToolRegistrar, ctx: ToolContext): voi
         ...(summary.limitCents === undefined
           ? {
               warning:
-                'No ceiling is set. Set ASSET_SPEND_LIMIT_CENTS to make this server refuse rather ' +
+                'No ceiling is set. Set ASSET_SPEND_LIMIT_CENTS to make this harness refuse rather ' +
                 'than overspend — a batch loop is where that matters most.',
             }
           : {}),

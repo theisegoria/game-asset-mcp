@@ -220,7 +220,7 @@ async function prepareOne(
     throw invalidInput(
       `outputDir does not exist: ${dir}. Create it first, or omit outputDir to write beside each ` +
       'source. A leading ~ is NOT expanded here, and a relative path resolves against the ' +
-      "server's working directory rather than yours.",
+      "process working directory rather than yours.",
       { outputDir: dir },
     );
   }
@@ -316,7 +316,7 @@ export async function runMeshBatch(
     // Inside the try, deliberately. path.resolve throws on a non-string, and
     // outside it that TypeError escaped the loop and discarded every verdict
     // already computed — the precise failure this function exists to prevent.
-    // The MCP schema rejects non-strings, but a batch runner that loses forty
+    // The CLI schema rejects non-strings, but a batch runner that loses forty
     // results to one bad element is wrong regardless of who calls it.
     let source = typeof raw === 'string' ? raw : String(raw);
     try {

@@ -2,7 +2,7 @@
  * The 3D-provider contract.
  *
  * Kept deliberately small. The point is not to abstract over every capability
- * any vendor might ever ship — it is to ensure the MCP tool surface does not
+ * any vendor might ever ship — it is to ensure the local operation surface does not
  * change when a second provider is added. Anything vendor-specific travels in
  * `raw` rather than being promoted into this interface.
  */

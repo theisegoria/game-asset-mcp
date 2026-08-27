@@ -2,7 +2,7 @@
  * Minimal raster decode/encode/resample for PBR texture work.
  *
  * Pure JavaScript on purpose. A native codec (sharp, canvas) would be faster
- * but would force every installer of this server through a build toolchain and
+ * but would force every installer of this CLI through a build toolchain and
  * break `npx`, which is the whole distribution story.
  *
  * Everything here operates on 8-bit RGBA. That is lossy for 16-bit source
@@ -44,7 +44,7 @@ export function decodeImage(bytes: Uint8Array): RasterImage {
   if (!format) {
     throw new AssetPipelineError(
       'INSPECTION_FAILED',
-      'texture is neither PNG nor JPEG; this server does not decode other raster formats',
+      'texture is neither PNG nor JPEG; this harness does not decode other raster formats',
     );
   }
 

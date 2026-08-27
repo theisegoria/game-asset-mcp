@@ -49,7 +49,7 @@ export function registerNormalizeTools(server: ToolRegistrar, ctx: ToolContext):
             'become .glb and could land on a different file. Refused if it resolves onto the ' +
             'input mesh, by filesystem identity, so symlinks, hardlinks and case-insensitive ' +
             'volumes all count. Use an ABSOLUTE path: a relative one resolves against the ' +
-            'SERVER\'s working directory, which your MCP client chose, and a leading ~ is not ' +
+            'CALLER\'s working directory, and a leading ~ is not ' +
             'expanded. Naming an existing directory writes a sibling file beside it, not inside ' +
             'it. Defaults to <input>_normalized.glb beside the source.',
           ),
@@ -133,7 +133,7 @@ export function registerNormalizeTools(server: ToolRegistrar, ctx: ToolContext):
         // mkdir -p before any validation, so a mistyped path silently built a
         // directory tree anywhere the process could write: outputPath
         // "~/out.glb" is not expanded by the shell here and created a literal
-        // "~" directory in the server's working directory. Refusing is both
+        // "~" directory in the process working directory. Refusing is both
         // safer and a better diagnosis — a missing parent is nearly always a
         // typo or an unexpanded variable.
         let parentIsDirectory = false;

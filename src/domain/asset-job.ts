@@ -1,5 +1,5 @@
 /**
- * The AssetJob — the unit of identity and provenance in this server.
+ * The AssetJob — the unit of identity and provenance in the local harness.
  *
  * Two rules drive the shape:
  *

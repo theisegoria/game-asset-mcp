@@ -2,7 +2,7 @@
  * Preparing many meshes in one call.
  *
  * The single-asset tools are the right shape for one asset and the wrong shape
- * for forty. This is the MCP surface over `runMeshBatch`; the loop itself lives
+ * for forty. This is the local command surface over `runMeshBatch`; the loop itself lives
  * in `domain/mesh-batch.ts` so its failure handling can be tested without a
  * server, a Blender install, or a staged broken file.
  */

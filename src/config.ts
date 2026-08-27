@@ -1,7 +1,7 @@
 /**
  * Configuration.
  *
- * Credentials are resolved LAZILY. The server must start with only one
+ * Credentials are resolved LAZILY. The local harness must start with only one
  * provider configured so a user who only wants 3D generation is not forced to
  * hold an image-provider account; the tools that need a missing key fail with
  * a clear CONFIG_MISSING error at call time instead of preventing startup.
@@ -104,7 +104,7 @@ export function requireLeonardoKey(config: Config): string {
   return config.leonardoApiKey;
 }
 
-/** Which providers are usable right now — surfaced by the server on startup. */
+/** Which providers are usable right now — surfaced by capability discovery. */
 export function configuredProviders(config: Config): { image: string[]; model3d: string[] } {
   return {
     image: config.leonardoApiKey ? ['leonardo'] : [],

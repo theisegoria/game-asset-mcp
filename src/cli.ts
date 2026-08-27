@@ -39,6 +39,9 @@ Usage:
 
 Global options:
   --output-dir PATH   Asset workspace for this invocation.
+  --approve-spend     Explicitly authorize this paid provider invocation.
+  --spend-limit-cents N
+                      Refuse before a provider call would exceed N US cents.
   --json              Emit one game_dev.result.v1 object.
   --jsonl             Emit game_dev.event.v1 JSON Lines.
   --version           Print the helper version.
@@ -189,6 +192,8 @@ async function followJob(
   if (jobId.startsWith('job_')) {
     let afterSequence = -1;
     let job = await runtime.durableJobs.get(jobId);
+    const stopped = (status: DurableJob['status']): boolean =>
+      ['approval_required', 'completed', 'failed', 'cancelled'].includes(status);
     while (true) {
       const persisted = await runtime.durableJobs.readEvents(jobId, { afterSequence });
       for (const event of persisted) {
@@ -196,7 +201,7 @@ async function followJob(
         if (typeof event.sequence === 'number') afterSequence = Math.max(afterSequence, event.sequence);
       }
       job = await runtime.durableJobs.get(jobId);
-      if (['completed', 'failed', 'cancelled'].includes(job.status) || Date.now() >= deadline) break;
+      if (stopped(job.status) || Date.now() >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, Math.min(500, deadline - Date.now())));
     }
     return {
@@ -205,7 +210,8 @@ async function followJob(
         jobId: job.id,
         status: job.status,
         terminal: ['completed', 'failed', 'cancelled'].includes(job.status),
-        timedOut: !['completed', 'failed', 'cancelled'].includes(job.status),
+        waitingForApproval: job.status === 'approval_required',
+        timedOut: !stopped(job.status),
         eventCount: job.eventCount,
         updatedAt: job.updatedAt,
         ...(job.receiptPath ? { receiptPath: job.receiptPath } : {}),
@@ -341,15 +347,7 @@ async function dispatch(
   if (family === 'job' && action === 'resume') {
     const jobId = requirePositional(parsed, 2, 'job id');
     if (jobId.startsWith('job_')) {
-      const job = await runtime.durableJobs.get(jobId);
-      return {
-        operation: 'job.resume',
-        data: {
-          ...job,
-          resumable: job.status === 'queued' || job.status === 'approval_required',
-          note: 'Resume the original command using this job request; completed, failed, and cancelled jobs are immutable evidence.',
-        },
-      };
+      return resumeDurableJob(runtime, jobId, parsed);
     }
     return callLocal(runtime, 'job.resume', 'get_asset_job', {
       assetJobId: jobId,
@@ -413,6 +411,129 @@ async function dispatch(
   }
 
   throw invalidInput(`unknown command: ${parsed.positionals.join(' ') || '(none)'}`);
+}
+
+function parsedFromDurableRequest(
+  job: DurableJob,
+  current: ParsedArguments,
+): ParsedArguments {
+  const positionals = job.request.positionals;
+  const persistedFlags = job.request.flags;
+  if (!Array.isArray(positionals) || !positionals.every((value) => typeof value === 'string')) {
+    throw invalidInput(`durable job ${job.id} does not contain resumable positionals`);
+  }
+  if (!persistedFlags || typeof persistedFlags !== 'object' || Array.isArray(persistedFlags)) {
+    throw invalidInput(`durable job ${job.id} does not contain resumable flags`);
+  }
+  const flags = new Map<string, string | boolean>();
+  for (const [name, value] of Object.entries(persistedFlags)) {
+    if (['approve-spend', 'spend-limit-cents', 'output-dir'].includes(name)) continue;
+    if (typeof value === 'string' || typeof value === 'boolean') flags.set(name, value);
+  }
+  const input = job.request.input;
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    flags.set('input', JSON.stringify(input));
+  }
+  for (const name of ['approve-spend', 'spend-limit-cents', 'output-dir']) {
+    const value = current.flags.get(name);
+    if (value !== undefined) flags.set(name, value);
+  }
+  return { positionals: [...positionals], flags };
+}
+
+async function resumeDurableJob(
+  runtime: GameDevRuntime,
+  jobId: string,
+  parsed: ParsedArguments,
+): Promise<DispatchResult> {
+  const source = await runtime.durableJobs.get(jobId);
+  if (!booleanFlag(parsed, 'confirm')) {
+    return {
+      operation: 'job.resume',
+      isError: true,
+      data: {
+        error: 'APPROVAL_REQUIRED',
+        message: 'Retrying can repeat project writes or paid provider work. Re-run with --confirm.',
+        approval: { flag: '--confirm', jobId },
+      },
+    };
+  }
+  if (source.status === 'running') {
+    return {
+      operation: 'job.resume',
+      isError: true,
+      data: {
+        error: 'INVALID_STATE',
+        message: 'A running job cannot be retried because this process cannot prove the original worker stopped.',
+        jobId,
+      },
+    };
+  }
+  if (['completed', 'cancelled'].includes(source.status)) {
+    return {
+      operation: 'job.resume',
+      isError: true,
+      data: {
+        error: 'INVALID_STATE',
+        message: `${source.status} jobs are immutable and cannot be retried`,
+        jobId,
+      },
+    };
+  }
+
+  const retryParsed = parsedFromDurableRequest(source, parsed);
+  const retry = await runtime.durableJobs.create(source.operation, source.request, { parentJobId: source.id });
+  await runtime.durableJobs.markRunning(retry.id);
+  const retryEvents = new EventStream(
+    source.operation,
+    false,
+    retry.id,
+    (event) => runtime.durableJobs.appendEvent(retry.id, event as unknown as Record<string, unknown>),
+  );
+  retryEvents.emit('started', { resumedFromJobId: source.id, version: GAME_DEV_VERSION });
+  try {
+    const result = await dispatch(runtime, retryParsed, retryEvents);
+    if (result.data.error === 'APPROVAL_REQUIRED') {
+      retryEvents.emit('approval_required', result.data);
+      await runtime.durableJobs.markApprovalRequired(retry.id, result.data);
+    } else if (result.isError) {
+      retryEvents.emit('failed', result.data);
+      await runtime.durableJobs.fail(retry.id, result.data);
+    } else {
+      retryEvents.emit('completed', result.data);
+      await runtime.durableJobs.complete(retry.id, {
+        schema: 'game_dev.receipt.v1',
+        operation: result.operation,
+        resumedFromJobId: source.id,
+        result: result.data,
+        completedAt: new Date().toISOString(),
+      });
+    }
+    return {
+      operation: 'job.resume',
+      data: {
+        resumedFromJobId: source.id,
+        retryJobId: retry.id,
+        result: result.data,
+      },
+      ...(result.isError ? { isError: true } : {}),
+    };
+  } catch (error) {
+    const described = describeError(error);
+    const failure = {
+      error: described.error,
+      message: described.message,
+      retryable: described.retryable,
+      ...(described.details ? { details: described.details } : {}),
+    };
+    retryEvents.emit('failed', failure);
+    await runtime.durableJobs.fail(retry.id, failure);
+    return {
+      operation: 'job.resume',
+      data: { resumedFromJobId: source.id, retryJobId: retry.id, result: failure },
+      isError: true,
+    };
+  }
 }
 
 function needsDurableJob(runtime: GameDevRuntime, parsed: ParsedArguments): boolean {

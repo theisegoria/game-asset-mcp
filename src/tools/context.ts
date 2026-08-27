@@ -112,7 +112,7 @@ export function createToolContext(params: {
   };
 }
 
-/** MCP tool result shape. */
+/** Transport-neutral local command result shape. */
 export interface ToolResult {
   content: { type: 'text'; text: string }[];
   isError?: boolean;

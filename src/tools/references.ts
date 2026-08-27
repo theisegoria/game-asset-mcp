@@ -2,7 +2,7 @@
  * Reference-image tools.
  *
  * These produce the input to reconstruction, and they stop there on purpose.
- * Choosing between candidates is visual judgement, and the MCP client already
+ * Choosing between candidates is visual judgement, and the calling agent already
  * has a capable vision model — far better to hand it the images and let it
  * call `select_reference` than to embed a second paid model inside this
  * server to guess on its behalf.

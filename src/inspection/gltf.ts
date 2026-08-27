@@ -131,7 +131,7 @@ export interface AssetInspection {
 
 /**
  * glTF-Transform's default logger writes through `console.info`, which lands on
- * stdout — the channel the MCP transport owns, where a stray line corrupts the
+ * stdout — the channel the JSON/JSONL protocol owns, where a stray line corrupts the
  * protocol. Rather than silence the reader, its complaints are captured: an
  * "unsupported extension" or a malformed-accessor warning is exactly the kind
  * of thing this report exists to surface.

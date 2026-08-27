@@ -88,10 +88,10 @@ export async function assertRealPathInside(root: string, target: string): Promis
  * validation, so a mistyped path silently built a directory tree anywhere the
  * process could write. `destination: "~/out"` is not expanded — no shell is
  * involved — and created a literal `~` directory in whatever working directory
- * the MCP client happened to choose. `extract_pbr_trio` wrote five files into
+ * the caller happened to choose. `extract_pbr_trio` wrote five files into
  * one and reported success.
  *
- * The server's OWN workspace (ASSET_OUTPUT_DIR) is still created on demand:
+ * The harness's OWN workspace (ASSET_OUTPUT_DIR) is still created on demand:
  * that path is configuration, not caller input.
  */
 export async function assertExistingDirectory(dir: string, parameter: string): Promise<void> {
@@ -106,7 +106,7 @@ export async function assertExistingDirectory(dir: string, parameter: string): P
       'INVALID_INPUT',
       `${parameter} does not exist as a directory: ${dir}. Create it first, or omit ${parameter} ` +
       `to use the configured workspace. A leading ~ is NOT expanded here, and a relative path ` +
-      `resolves against the SERVER's working directory rather than yours.`,
+      `resolves against the PROCESS working directory rather than yours.`,
       { details: { [parameter]: dir } },
     );
   }

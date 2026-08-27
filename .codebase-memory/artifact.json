@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "39a79fe537a4b83956da6d0658543636b789127a",
+    "indexed_at": "2026-08-27T13:26:31Z",
+    "project": "game-development-studio",
+    "nodes": 981,
+    "edges": 2931,
+    "original_size": 4128768,
+    "compressed_size": 961379,
+    "compression_level": 9
+}
