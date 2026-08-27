@@ -17,12 +17,17 @@ APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 APP_MODULE_CACHE="$PACKAGE_DIR/.build/ModuleCache"
-ICON_SOURCE="$ROOT_DIR/assets/icon.png"
+ICON_SOURCE="$ROOT_DIR/assets/macos/AppIcon.png"
 ICONSET_DIR="$APP_RESOURCES/AppIcon.iconset"
 
 mkdir -p "$APP_MODULE_CACHE"
 export CLANG_MODULE_CACHE_PATH="$APP_MODULE_CACHE"
 export SWIFTPM_MODULECACHE_OVERRIDE="$APP_MODULE_CACHE"
+
+if [[ ! -f "$ICON_SOURCE" ]]; then
+  echo "missing app icon master: $ICON_SOURCE" >&2
+  exit 1
+fi
 
 case "$APP_BUNDLE" in
   "$ROOT_DIR"/macos/GameDevelopmentStudio/dist/*.app) ;;

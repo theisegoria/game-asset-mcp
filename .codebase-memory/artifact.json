@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "c7d8fce769c22291d0e7f83598ecb2b7482a6356",
-    "indexed_at": "2026-08-27T22:07:31Z",
-    "project": "game-development-studio",
-    "nodes": 1407,
-    "edges": 4227,
-    "original_size": 6750208,
-    "compressed_size": 1403127,
-    "compression_level": 3
+    "commit": "78bfe9b121017b882d0ed4e6e92d82b96a6eeb30",
+    "indexed_at": "2026-08-27T23:37:51Z",
+    "project": "game-asset-mcp",
+    "nodes": 2254,
+    "edges": 6636,
+    "original_size": 5570560,
+    "compressed_size": 1376767,
+    "compression_level": 9
 }

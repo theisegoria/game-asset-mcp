@@ -1,0 +1,125 @@
+# Game Development Studio for macOS
+
+Game Development Studio is a native macOS control surface for the local
+`game-dev` toolchain. It brings asset production, canonical package vendoring,
+evidence-rich visual debugging, and performance comparison into four focused
+workspaces without adding an MCP server or hosted application backend.
+
+![Game Development Studio running on macOS 26](screenshots/04-native-macos-app.png)
+
+## Download
+
+Download `GameDevelopmentStudio-1.0.0-macOS-arm64.zip` and `CHECKSUMS.txt` from
+the [latest GitHub release](https://github.com/theisegoria/game-development-studio-macos/releases/latest).
+
+This first release has a deliberately narrow platform contract:
+
+- macOS 26.0 or later
+- Apple silicon (`arm64`) only
+- a separately installed `game-dev` CLI, version 1.0.0 or later
+- Node.js 22.5 or later for that CLI; Node is not embedded in the native app
+
+Blender is needed only for CLI operations that explicitly use Blender. Tripo
+or Leonardo credentials are needed only for the selected provider's paid
+route.
+
+## Verify the download
+
+Put the ZIP and `CHECKSUMS.txt` in the same directory, then run:
+
+```sh
+shasum -a 256 -c CHECKSUMS.txt
+ditto -x -k GameDevelopmentStudio-1.0.0-macOS-arm64.zip .
+codesign --verify --deep --strict GameDevelopmentStudio.app
+lipo -archs GameDevelopmentStudio.app/Contents/MacOS/GameDevelopmentStudio
+```
+
+The final command must print exactly `arm64`. The signature inspection command
+
+```sh
+codesign -dvvv GameDevelopmentStudio.app
+```
+
+must report `Signature=adhoc` and `TeamIdentifier=not set` for version 1.0.0.
+The checksum detects a changed download; it is not a substitute for a
+Developer ID identity or Apple notarization.
+
+## Install and open
+
+After verification, move `GameDevelopmentStudio.app` to `/Applications` or a
+folder you control. This release is ad-hoc signed and is **not** Developer ID
+signed or notarized. macOS may therefore refuse a normal first launch after the
+app is downloaded. If you trust the release and its verified checksum, use
+Finder's Control-click **Open** flow or the specific **Open Anyway** control in
+System Settings > Privacy & Security. Do not disable Gatekeeper globally.
+
+The app can use `game-dev` from `PATH`, or you can choose an explicit CLI
+executable in Settings. Provider credentials are optional and remain
+provider-specific.
+
+## Four local workspaces
+
+- **Production** checks the local toolchain, submits explicitly approved Tripo
+  or Leonardo work, inspects and validates GLB files, and builds canonical
+  packages with identity and license data.
+- **Library & Vendoring** searches the derived package catalog and plans an
+  exact project admission before any confirmed write.
+- **Visual Debugging** discovers project-owned scenarios, separates process,
+  GPU, and hardware-performance authority, and analyzes sealed captures with
+  declared semantic attachments and telemetry.
+- **Performance** summarizes admitted metrics and compares bounded statistics
+  between sealed runs.
+
+Paid provider work, package construction, project writes, scenario execution,
+GPU capture, and hardware-performance collection use one-shot approval sheets.
+Approval is for the displayed invocation; it is not saved as standing
+permission.
+
+## Local-first boundaries
+
+The app does not include the CLI, Blender, a game engine, or provider services.
+It launches the configured local CLI with structured arguments and reads the
+`game_dev.result.v1` response contract. Tripo and Leonardo credentials are
+stored in macOS Keychain, entered through masked fields, and are not restored
+into visible fields. See [PRIVACY.md](PRIVACY.md) and
+[SECURITY.md](SECURITY.md) for the narrower guarantees and limitations.
+
+No analytics or publisher-hosted backend is included. An explicitly approved
+provider request goes directly from the user's machine to that provider under
+the provider's own terms.
+
+## Evidence, not overclaiming
+
+A package receipt does not prove engine import or rendering. Semantic capture
+attachments do not replace human visual review. Deterministic metric arithmetic
+does not prove hardware comparability, causality, or statistical significance.
+GPU and performance claims require a real admitted run on the stated target
+hardware.
+
+The native screenshot above proves one inspected state on one Mac. The other
+images in `screenshots/` are labelled product illustrations; they are not
+runtime, provider, target-game, GPU, pixel-approval, or performance evidence.
+
+## Distribution trust state
+
+Version 1.0.0 is:
+
+- compiled as a native `arm64` macOS app bundle;
+- ad-hoc signed (`Signature=adhoc`, no Team Identifier);
+- not Developer ID signed;
+- not notarized and has no stapled notarization ticket;
+- not claimed to use Hardened Runtime;
+- not a Mac App Store build; and
+- distributed as a compiled app ZIP, with no Swift or TypeScript source in this
+  repository.
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the release boundary and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled-component details.
+
+## Support
+
+Use [GitHub Issues](https://github.com/theisegoria/game-development-studio-macos/issues)
+for reproducible defects and documentation problems. Use GitHub private
+vulnerability reporting for security-sensitive findings. Never attach provider
+keys, private game assets, signed URLs, or private project paths to a report.
+

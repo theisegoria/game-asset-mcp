@@ -1,0 +1,35 @@
+{
+  "schema": "game_dev.image_asset_provenance.v1",
+  "asset": "AppIcon.png",
+  "purpose": "Native macOS 26 app icon master",
+  "generator": "OpenAI ImageGen in Codex",
+  "generatedOn": "2026-08-28",
+  "sourceArtifact": "exec-64f8b5bc-aca4-4162-816f-6002b77d70a3.png",
+  "sourceSha256": "58197c0d1665fc7c02646ae34d9ae8213e62df3eb07ea808f5ffe50177333589",
+  "inputImages": [
+    {
+      "artifact": "exec-33e71dea-da58-4478-8fc2-9a1163313c9e.png",
+      "sha256": "60bcec524807ecb7f2600eaba052ee09c0d949113f94ae7963df304cfa5d5725"
+    }
+  ],
+  "prompt": "Edit this exact native macOS app icon master. Preserve the dark indigo rounded-square icon, faceted cyan mesh cube, three diagnostic traces, waveform, and single restrained copper center accent. Remove every visible checkerboard tile and every white or gray background pixel outside the rounded-square icon. Make the outside area genuinely transparent alpha, including around the soft shadow, with clean antialiased edges. Do not replace transparency with a checkerboard illustration. Do not add text, letters, numbers, logos, controllers, robots, mascots, or watermarks. Keep a centered square composition, premium macOS developer-tool aesthetic, strong legibility at 16 and 32 pixels, and output one high-resolution PNG with a true alpha channel.",
+  "actualPixels": {
+    "width": 1254,
+    "height": 1254
+  },
+  "hasAlpha": true,
+  "sha256": "d217a66f4a8eae014583d409a83757736dbeb7de6c5860922b21030359b02f4e",
+  "postProcessing": {
+    "reason": "ImageGen returned flattened checkerboard pixels despite the transparent-alpha prompt.",
+    "tool": "FFmpeg geq alpha mask",
+    "operation": "Applied a deterministic 1254 px rounded-rectangle alpha mask only; the generated RGB artwork was preserved byte-for-byte inside the mask.",
+    "bounds": {
+      "left": 45,
+      "top": 40,
+      "right": 1211,
+      "bottom": 1211,
+      "radius": 165,
+      "edgeAntialiasPixels": 1
+    }
+  }
+}
