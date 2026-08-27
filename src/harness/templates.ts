@@ -32,7 +32,7 @@ export async function listAdapterTemplates(): Promise<Array<Record<string, unkno
         title: scenario.title,
         capabilities: scenario.capabilities,
       })),
-      source,
+      manifestRelativePath: path.posix.join('adapters', entry.name, 'adapter.json'),
     });
   }
   return templates;

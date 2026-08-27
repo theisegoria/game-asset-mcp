@@ -32,6 +32,13 @@ export interface CaptureAnalysis {
   adapterId: string;
   scenarioId: string;
   rasters: RasterAnalysis[];
+  evidence: {
+    sealedRunVerified: true;
+    rasterBytesDecoded: true;
+    deterministicStatisticsComputed: true;
+    artisticDefectsDiagnosed: false;
+    humanVisualReviewPerformed: false;
+  };
   evidenceCeiling: string;
 }
 
@@ -66,6 +73,16 @@ export interface VisualComparison {
   unmatchedBaseline: string[];
   unmatchedCandidate: string[];
   outputPath?: string;
+  evidence: {
+    sealedRunsVerified: true;
+    rasterBytesDecoded: true;
+    deterministicComparisonComputed: true;
+    semanticObjectRegionsCompared: boolean;
+    heatmapsGenerated: boolean;
+    artisticDefectsDiagnosed: false;
+    causalAttributionEstablished: false;
+    humanVisualReviewPerformed: false;
+  };
   evidenceCeiling: string;
 }
 
@@ -163,6 +180,13 @@ export async function analyzeRunCapture(runPath: string): Promise<CaptureAnalysi
     adapterId: loaded.adapterId,
     scenarioId: loaded.scenarioId,
     rasters,
+    evidence: {
+      sealedRunVerified: true,
+      rasterBytesDecoded: true,
+      deterministicStatisticsComputed: true,
+      artisticDefectsDiagnosed: false,
+      humanVisualReviewPerformed: false,
+    },
     evidenceCeiling:
       'Analysis proves deterministic statistics over decoded sealed raster bytes. It does not identify artistic defects, prove visual quality, or substitute for human review.',
   };
@@ -388,6 +412,16 @@ export async function compareRunVisuals(options: {
     unmatchedBaseline: [...baselineAttachments.keys()].filter((key) => !candidateAttachments.has(key)).sort(),
     unmatchedCandidate: [...candidateAttachments.keys()].filter((key) => !baselineAttachments.has(key)).sort(),
     ...(outputPath ? { outputPath } : {}),
+    evidence: {
+      sealedRunsVerified: true,
+      rasterBytesDecoded: true,
+      deterministicComparisonComputed: true,
+      semanticObjectRegionsCompared: pairs.some((pair) => (pair.semanticRegions?.length ?? 0) > 0),
+      heatmapsGenerated: Boolean(outputPath),
+      artisticDefectsDiagnosed: false,
+      causalAttributionEstablished: false,
+      humanVisualReviewPerformed: false,
+    },
     evidenceCeiling:
       'The comparison proves byte-decoded raster statistics, edge deltas, heatmaps, and optional object-ID-region grouping. It does not diagnose artistic intent, establish causality, or count as human visual review.',
   };
