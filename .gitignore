@@ -14,6 +14,7 @@ assets/generated/
 
 # Browser-capture scratch space. Curated screenshots live in assets/screenshots/.
 output/playwright/
+.playwright-cli/
 
 # OS / editor
 .DS_Store

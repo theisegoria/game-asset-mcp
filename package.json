@@ -53,11 +53,12 @@
     "prepare": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "lint": "eslint src tests scripts",
-    "verify": "npm run build && node scripts/verify-install.mjs",
+    "verify": "npm run build && node scripts/verify-install.mjs && node scripts/verify-plugin.mjs",
+    "verify:plugin": "node scripts/verify-plugin.mjs",
     "test": "npm run build && vitest run",
     "test:watch": "vitest",
     "start": "node dist/cli.js",
-    "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run verify"
   },
   "dependencies": {
     "@gltf-transform/core": "^4.1.1",
