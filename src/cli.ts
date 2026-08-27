@@ -17,8 +17,16 @@ import {
   GAME_DEV_RESULT_SCHEMA,
   GAME_DEV_VERSION,
 } from './version.js';
-import type { DurableJob } from './jobs/durable.js';
+import type { DurableArtifact, DurableJob } from './jobs/durable.js';
 import { isSpendingTool } from './domain/spend.js';
+import { buildAssetPackage, readAssetPackage, type AssetProvenanceInput } from './packages/format.js';
+import { AssetCatalog } from './packages/catalog.js';
+import { admitVendorPackage } from './packages/vendor.js';
+import { executeLaunchPlan, planPackageLaunch, type LaunchApplication } from './packages/launcher.js';
+import { migrateLegacyWorkspace } from './packages/migration.js';
+import { generateUsdzPreview } from './packages/usdz.js';
+import type { AssetCategory } from './domain/asset-spec.js';
+import type { GameAssetPolicy } from './domain/asset-policy.js';
 
 const HELP = `Game Development Studio local harness
 
@@ -36,6 +44,15 @@ Usage:
   game-dev asset inspect <model.glb> [--json]
   game-dev asset validate <model.glb> [--request POLICY.json] [--json]
   game-dev asset normalize <model.glb> [--output PATH] [--request OPTIONS.json] [--jsonl]
+  game-dev asset preview-usdz <model.glb> --output PATH [--jsonl]
+  game-dev package build <model.glb> --name NAME [--version 1.0.0] [--license SPDX] [--request METADATA.json]
+  game-dev package show <package-id|path> [--json]
+  game-dev package verify <package-id|path> [--json]
+  game-dev catalog list [--query TEXT] [--category CATEGORY] [--valid|--invalid] [--json]
+  game-dev catalog rebuild --confirm [--jsonl]
+  game-dev vendor admit <package-id|path> --project PATH [--destination RELATIVE] [--confirm]
+  game-dev launch <package-id|path> --with finder|quicklook|blender [--confirm]
+  game-dev migrate legacy --from OUTPUT_ROOT [--license SPDX] [--confirm]
 
 Global options:
   --output-dir PATH   Asset workspace for this invocation.
@@ -55,11 +72,18 @@ interface DispatchResult {
   operation: string;
   data: Record<string, unknown>;
   isError?: boolean;
+  artifacts?: DurableArtifact[];
 }
 
 function requirePositional(parsed: ParsedArguments, index: number, label: string): string {
   const value = parsed.positionals[index];
   if (!value) throw invalidInput(`missing ${label}`);
+  return value;
+}
+
+function requireFlag(parsed: ParsedArguments, name: string): string {
+  const value = stringFlag(parsed, name);
+  if (!value) throw invalidInput(`missing --${name}`);
   return value;
 }
 
@@ -130,6 +154,25 @@ async function callLocal(
   };
 }
 
+async function withCatalog<T>(
+  runtime: GameDevRuntime,
+  body: (catalog: AssetCatalog) => Promise<T> | T,
+): Promise<T> {
+  const catalog = await AssetCatalog.open(runtime.config.catalogPath);
+  try {
+    return await body(catalog);
+  } finally {
+    catalog.close();
+  }
+}
+
+async function resolvePackagePath(runtime: GameDevRuntime, reference: string): Promise<string> {
+  if (reference.startsWith('pkg_')) {
+    return withCatalog(runtime, (catalog) => catalog.get(reference).packagePath);
+  }
+  return path.resolve(reference);
+}
+
 function capabilities(runtime: GameDevRuntime): Record<string, unknown> {
   return {
     schema: GAME_DEV_CAPABILITIES_SCHEMA,
@@ -166,6 +209,7 @@ function capabilities(runtime: GameDevRuntime): Record<string, unknown> {
       'performance',
       'skill',
       'migrate',
+      'launch',
       'tool',
     ],
     localOperations: runtime.registry.capabilities(),
@@ -410,6 +454,212 @@ async function dispatch(
     });
   }
 
+  if (family === 'asset' && action === 'preview-usdz') {
+    const result = await generateUsdzPreview(
+      path.resolve(requirePositional(parsed, 2, 'model path')),
+      path.resolve(requireFlag(parsed, 'output')),
+      {
+        ...(process.env.BLENDER_PATH?.trim() ? { blenderPath: process.env.BLENDER_PATH.trim() } : {}),
+      },
+    );
+    events.emit('artifact', { kind: 'usdz_preview', path: result.outputPath, sha256: result.sha256 });
+    return { operation: 'asset.preview-usdz', data: result as unknown as Record<string, unknown> };
+  }
+
+  if (family === 'package' && action === 'build') {
+    const sourcePath = path.resolve(requirePositional(parsed, 2, 'model path'));
+    const request = await readRequest(parsed);
+    const requestedName = stringFlag(parsed, 'name') ?? request.name;
+    if (typeof requestedName !== 'string' || requestedName.trim().length === 0) {
+      throw invalidInput('package build requires --name or request.name');
+    }
+    const description = stringFlag(parsed, 'description') ?? request.description;
+    const version = stringFlag(parsed, 'package-version') ?? stringFlag(parsed, 'version') ?? request.version;
+    const license = stringFlag(parsed, 'license') ?? request.license;
+    const category = stringFlag(parsed, 'category') ?? request.category;
+    const previewPath = stringFlag(parsed, 'preview') ?? request.previewPath;
+    const provenance = request.provenance;
+    const policy = request.policy;
+    const built = await buildAssetPackage({
+      packagesRoot: runtime.config.packagesDir,
+      sourcePath,
+      name: requestedName,
+      ...(typeof description === 'string' ? { description } : {}),
+      ...(typeof version === 'string' ? { version } : {}),
+      ...(typeof license === 'string' ? { license } : {}),
+      ...(typeof category === 'string' ? { category: category as AssetCategory } : {}),
+      ...(typeof previewPath === 'string' ? { previewPath: path.resolve(previewPath) } : {}),
+      ...(provenance && typeof provenance === 'object' && !Array.isArray(provenance)
+        ? { provenance: provenance as AssetProvenanceInput }
+        : {}),
+      ...(policy && typeof policy === 'object' && !Array.isArray(policy)
+        ? { policy: policy as Partial<GameAssetPolicy> }
+        : {}),
+      maximumBytes: runtime.config.maxDownloadBytes,
+    });
+    const catalogAsset = await withCatalog(runtime, (catalog) => catalog.admit(built.packagePath));
+    events.emit('artifact', {
+      kind: 'asset_package',
+      path: built.packagePath,
+      packageId: built.manifest.packageId,
+      manifestSha256: built.manifestSha256,
+    });
+    return {
+      operation: 'package.build',
+      data: {
+        schema: 'game_dev.package_build_result.v1',
+        packageId: built.manifest.packageId,
+        packagePath: built.packagePath,
+        manifestPath: built.manifestPath,
+        receiptPath: built.receiptPath,
+        manifestSha256: built.manifestSha256,
+        reused: built.reused,
+        validation: built.manifest.validation,
+        catalog: catalogAsset,
+        evidence: {
+          portableGlbCopiedAndHashed: true,
+          staticInspectionCompleted: true,
+          policyValidationCompleted: true,
+          blenderNormalizationPerformed: false,
+          gpuImportTestPerformed: false,
+          humanVisualReviewPerformed: false,
+        },
+      },
+      artifacts: [
+        { path: built.packagePath, kind: 'asset_package' },
+        { path: built.manifestPath, kind: 'manifest', sha256: built.manifestSha256 },
+        { path: built.receiptPath, kind: 'receipt' },
+      ],
+    };
+  }
+
+  if (family === 'package' && ['show', 'verify'].includes(action ?? '')) {
+    const reference = requirePositional(parsed, 2, 'package id or path');
+    const packagePath = await resolvePackagePath(runtime, reference);
+    const manifest = await readAssetPackage(packagePath);
+    return {
+      operation: `package.${action}`,
+      data: {
+        schema: 'game_dev.package_verification.v1',
+        packagePath,
+        manifest,
+        hashesVerified: true,
+        evidence: {
+          packageBytesVerified: true,
+          gpuImportTestPerformed: false,
+          humanVisualReviewPerformed: false,
+        },
+      },
+    };
+  }
+
+  if (family === 'catalog' && action === 'list') {
+    if (booleanFlag(parsed, 'valid') && booleanFlag(parsed, 'invalid')) {
+      throw invalidInput('--valid and --invalid are mutually exclusive');
+    }
+    const assets = await withCatalog(runtime, (catalog) => catalog.list({
+      ...(stringFlag(parsed, 'query') ? { query: stringFlag(parsed, 'query') } : {}),
+      ...(stringFlag(parsed, 'category') ? { category: stringFlag(parsed, 'category') } : {}),
+      ...(booleanFlag(parsed, 'valid') ? { validationPassed: true } : {}),
+      ...(booleanFlag(parsed, 'invalid') ? { validationPassed: false } : {}),
+      limit: positiveIntegerFlag(parsed, 'limit', 100),
+    }));
+    return {
+      operation: 'catalog.list',
+      data: { schema: 'game_dev.catalog_list.v1', total: assets.length, assets },
+    };
+  }
+
+  if (family === 'catalog' && action === 'show') {
+    const packageId = requirePositional(parsed, 2, 'package id');
+    const asset = await withCatalog(runtime, (catalog) => catalog.get(packageId));
+    return { operation: 'catalog.show', data: asset as unknown as Record<string, unknown> };
+  }
+
+  if (family === 'catalog' && action === 'admit') {
+    const packagePath = path.resolve(requirePositional(parsed, 2, 'package path'));
+    const asset = await withCatalog(runtime, (catalog) => catalog.admit(packagePath));
+    return { operation: 'catalog.admit', data: asset as unknown as Record<string, unknown> };
+  }
+
+  if (family === 'catalog' && action === 'rebuild') {
+    if (!booleanFlag(parsed, 'confirm')) {
+      return {
+        operation: 'catalog.rebuild',
+        isError: true,
+        data: {
+          error: 'APPROVAL_REQUIRED',
+          message: 'Catalog rebuild replaces the derived SQLite index after preserving a backup.',
+          approval: { flag: '--confirm' },
+        },
+      };
+    }
+    const rebuilt = await AssetCatalog.rebuild(runtime.config.catalogPath, runtime.config.packagesDir);
+    return {
+      operation: 'catalog.rebuild',
+      data: {
+        schema: 'game_dev.catalog_rebuild.v1',
+        databasePath: rebuilt.databasePath,
+        indexed: rebuilt.indexed.length,
+        ...(rebuilt.backupPath ? { backupPath: rebuilt.backupPath } : {}),
+      },
+    };
+  }
+
+  if (family === 'vendor' && action === 'admit') {
+    const packageReference = requirePositional(parsed, 2, 'package id or path');
+    const packagePath = await resolvePackagePath(runtime, packageReference);
+    const result = await admitVendorPackage({
+      packagePath,
+      projectRoot: path.resolve(requireFlag(parsed, 'project')),
+      ...(stringFlag(parsed, 'destination') ? { destinationRelative: stringFlag(parsed, 'destination') } : {}),
+      confirm: booleanFlag(parsed, 'confirm'),
+      allowUnknownLicense: booleanFlag(parsed, 'allow-unknown-license'),
+      allowInvalid: booleanFlag(parsed, 'allow-invalid'),
+    });
+    return {
+      operation: 'vendor.admit',
+      data: result as unknown as Record<string, unknown>,
+      ...(result.blockers.length > 0 ? { isError: true } : {}),
+    };
+  }
+
+  if (family === 'launch') {
+    const packageReference = requirePositional(parsed, 1, 'package id or path');
+    const application = requireFlag(parsed, 'with');
+    if (!['finder', 'quicklook', 'blender'].includes(application)) {
+      throw invalidInput('--with must be finder, quicklook, or blender');
+    }
+    const packagePath = await resolvePackagePath(runtime, packageReference);
+    const launchPlan = await planPackageLaunch(packagePath, application as LaunchApplication);
+    if (!booleanFlag(parsed, 'confirm')) {
+      return {
+        operation: 'launch.plan',
+        data: { ...launchPlan, dryRun: true },
+      };
+    }
+    const launched = await executeLaunchPlan(launchPlan);
+    return {
+      operation: 'launch.execute',
+      data: { ...launchPlan, ...launched, dryRun: false },
+    };
+  }
+
+  if (family === 'migrate' && action === 'legacy') {
+    const result = await migrateLegacyWorkspace({
+      outputRoot: path.resolve(stringFlag(parsed, 'from') ?? runtime.config.outputDir),
+      packagesRoot: runtime.config.packagesDir,
+      catalogPath: runtime.config.catalogPath,
+      confirm: booleanFlag(parsed, 'confirm'),
+      ...(stringFlag(parsed, 'license') ? { defaultLicense: stringFlag(parsed, 'license') } : {}),
+    });
+    return {
+      operation: 'migrate.legacy',
+      data: result as unknown as Record<string, unknown>,
+      ...(result.failed > 0 ? { isError: true } : {}),
+    };
+  }
+
   throw invalidInput(`unknown command: ${parsed.positionals.join(' ') || '(none)'}`);
 }
 
@@ -507,7 +757,7 @@ async function resumeDurableJob(
         resumedFromJobId: source.id,
         result: result.data,
         completedAt: new Date().toISOString(),
-      });
+      }, result.artifacts ?? []);
     }
     return {
       operation: 'job.resume',
@@ -539,10 +789,12 @@ async function resumeDurableJob(
 function needsDurableJob(runtime: GameDevRuntime, parsed: ParsedArguments): boolean {
   const [family, action, name] = parsed.positionals;
   if (family === 'provider') return true;
-  if (family === 'asset' && action === 'normalize') return true;
+  if (family === 'asset' && ['normalize', 'preview-usdz'].includes(action ?? '')) return true;
   if (['vendor', 'package', 'scenario', 'capture', 'visual', 'performance', 'migrate'].includes(family ?? '')) {
     return true;
   }
+  if (family === 'catalog' && ['admit', 'rebuild'].includes(action ?? '')) return true;
+  if (family === 'launch' && booleanFlag(parsed, 'confirm')) return true;
   if (family === 'tool' && action === 'call' && name) {
     return runtime.registry.capabilities().find((capability) => capability.name === name)?.readOnly === false;
   }
@@ -592,6 +844,15 @@ function outputResult(
   }, null, 2)}\n`);
 }
 
+function requestedOperation(parsed: ParsedArguments): string {
+  const family = parsed.positionals[0];
+  const segmentCount = family === 'provider' || family === 'tool' ? 3 : 2;
+  const segments = parsed.positionals.slice(0, segmentCount).map((segment) =>
+    segment.toLocaleLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, ''),
+  ).filter(Boolean);
+  return segments.join('.') || 'unknown';
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const parsed = parseArguments(argv);
   if (booleanFlag(parsed, 'help') || parsed.positionals[0] === 'help') {
@@ -609,7 +870,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
 
-  const operation = parsed.positionals.slice(0, 3).join('.') || 'unknown';
+  const operation = requestedOperation(parsed);
   let events: EventStream | undefined;
   let runtime: GameDevRuntime | undefined;
   let durable: DurableJob | undefined;
@@ -646,7 +907,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         operation: result.operation,
         result: result.data,
         completedAt: new Date().toISOString(),
-      });
+      }, result.artifacts ?? []);
     }
     return result.isError ? 1 : 0;
   } catch (error) {

@@ -14,3 +14,9 @@ export {
   GAME_DEV_RESULT_SCHEMA,
   GAME_DEV_CAPABILITIES_SCHEMA,
 } from './version.js';
+export * from './packages/format.js';
+export * from './packages/catalog.js';
+export * from './packages/vendor.js';
+export * from './packages/launcher.js';
+export * from './packages/migration.js';
+export * from './packages/usdz.js';
