@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="../assets/icon.png">
+  <title>Game Development Studio — Visual Debugging</title>
+  <style>
+    :root { color-scheme:dark; --cyan:#10c9d5; --orange:#e89658; --green:#5be39a; }
+    *{box-sizing:border-box} body{margin:0;width:100vw;height:100vh;overflow:hidden;background:radial-gradient(800px 550px at 0% 100%,#132a42,transparent 67%),#060b10;color:#f3f8fa;font:14px/1.42 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif}
+    main{height:100%;padding:38px 46px;display:grid;grid-template-rows:auto 1fr;gap:22px}
+    header{display:flex;align-items:center;justify-content:space-between}
+    .brand{display:flex;align-items:center;gap:18px}.brand img{width:64px;height:64px;object-fit:cover;border-radius:16px}.eyebrow{color:var(--cyan);font-size:12px;letter-spacing:.15em;text-transform:uppercase;font-weight:800}h1{font-size:32px;margin:2px 0 0;letter-spacing:-.03em}.fixture{padding:10px 14px;border-radius:999px;background:#2b1e11;border:1px solid #75471f;color:#ffc38b;font-weight:700}
+    .layout{min-height:0;display:grid;grid-template-columns:minmax(0,1.65fr) minmax(350px,.7fr);gap:18px}
+    .left{min-width:0;display:grid;grid-template-rows:1fr 180px;gap:18px}.row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+    .panel{min-width:0;border:1px solid #203542;border-radius:18px;background:#0c151de8;box-shadow:inset 0 1px #ffffff0a;overflow:hidden}.panel-title{height:44px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #20303b;color:#d7e3e9;font-weight:700}.panel-title small{color:#78909f;font-weight:500}
+    .render{height:100%;min-height:0;position:relative;background:#06101a}.render svg{width:100%;height:100%;display:block}.tag{position:absolute;left:12px;bottom:12px;padding:6px 9px;border-radius:8px;background:#02070cbb;border:1px solid #ffffff17;color:#adc0ca;font-size:12px}
+    .metrics{display:grid;grid-template-columns:1.1fr .9fr;gap:0}.metric-list{padding:15px 18px;border-right:1px solid #20303b}.metric{display:grid;grid-template-columns:1fr auto auto;gap:14px;padding:8px 0;border-bottom:1px solid #172832}.metric:last-child{border-bottom:0}.name{color:#91a7b4}.value{font-variant-numeric:tabular-nums}.delta.good{color:var(--green)}.delta.bad{color:#ff8290}
+    .spark{padding:15px 18px}.spark h3,.side h3{margin:0 0 9px;font-size:14px}.spark svg{width:100%;height:100px}
+    .side{display:grid;grid-template-rows:auto auto 1fr auto;gap:14px}.side .panel{padding:17px 18px}.side .panel-title{margin:-17px -18px 13px;height:39px}
+    .attachments{display:grid;grid-template-columns:1fr 1fr;gap:8px}.chip{padding:8px 10px;border:1px solid #25404e;border-radius:9px;color:#bed0d9;background:#0b1d26}.chip.ok:before{content:"●";color:var(--green);margin-right:7px}.chip.warn:before{content:"●";color:var(--orange);margin-right:7px}
+    .finding{border-left:3px solid var(--cyan)!important}.finding strong{display:block;font-size:17px;margin-bottom:7px}.finding p,.ceiling p{margin:0;color:#91a7b5}.steps{margin:0;padding-left:20px;color:#c4d2d9}.steps li{margin:8px 0}.ceiling{background:#101624!important;border-color:#343559!important}.ceiling code{color:#b9b2ff}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand"><img src="../assets/icon.png" alt=""><div><div class="eyebrow">Sealed capture + telemetry</div><h1>Diagnose the render, not just the screenshot.</h1></div></div>
+    <div class="fixture">Synthetic validation fixture · not a GPU claim</div>
+  </header>
+  <div class="layout">
+    <div class="left">
+      <div class="row">
+        <section class="panel"><div class="panel-title">Baseline <small>run_fixture_a</small></div><div class="render">
+          <svg viewBox="0 0 420 430" preserveAspectRatio="none"><defs><linearGradient id="sky1" x2="0" y2="1"><stop stop-color="#173d5d"/><stop offset="1" stop-color="#78b8cf"/></linearGradient><linearGradient id="water1" x2="0" y2="1"><stop stop-color="#157d91"/><stop offset="1" stop-color="#062a46"/></linearGradient></defs><rect width="420" height="250" fill="url(#sky1)"/><path d="M0 260L80 150 135 235 210 110 300 248 350 180 420 245V310H0Z" fill="#172a36"/><rect y="250" width="420" height="180" fill="url(#water1)"/><path d="M0 285 Q70 260 140 286 T280 278 T420 285" fill="none" stroke="#7ce9e0" stroke-width="5" opacity=".75"/><path d="M0 330 Q60 310 120 335 T250 325 T420 335" fill="none" stroke="#4ab9d5" stroke-width="3" opacity=".65"/><circle cx="305" cy="85" r="34" fill="#ffd89a" opacity=".9"/><path d="M310 250l24-94 24 94z" fill="#c97545"/><rect x="328" y="194" width="12" height="56" fill="#202b32"/></svg>
+          <span class="tag">color · populated water material</span></div></section>
+        <section class="panel"><div class="panel-title">Candidate <small>run_fixture_b</small></div><div class="render">
+          <svg viewBox="0 0 420 430" preserveAspectRatio="none"><defs><linearGradient id="sky2" x2="0" y2="1"><stop stop-color="#173d5d"/><stop offset="1" stop-color="#78b8cf"/></linearGradient></defs><rect width="420" height="250" fill="url(#sky2)"/><path d="M0 260L80 150 135 235 210 110 300 248 350 180 420 245V310H0Z" fill="#172a36"/><rect y="250" width="420" height="180" fill="#020406"/><circle cx="305" cy="85" r="34" fill="#ffd89a" opacity=".9"/><path d="M310 250l24-94 24 94z" fill="#c97545"/><rect x="328" y="194" width="12" height="56" fill="#202b32"/></svg>
+          <span class="tag">color · water region black</span></div></section>
+        <section class="panel"><div class="panel-title">Difference heatmap <small>threshold 0</small></div><div class="render">
+          <svg viewBox="0 0 420 430" preserveAspectRatio="none"><defs><linearGradient id="heat" x2="1" y2="1"><stop stop-color="#230052"/><stop offset=".45" stop-color="#ef335f"/><stop offset="1" stop-color="#ffd84a"/></linearGradient></defs><rect width="420" height="250" fill="#070813"/><rect y="250" width="420" height="180" fill="url(#heat)"/><path d="M0 285 Q70 260 140 286 T280 278 T420 285" fill="none" stroke="#fff26b" stroke-width="8"/><path d="M0 330 Q60 310 120 335 T250 325 T420 335" fill="none" stroke="#ff6d61" stroke-width="6"/></svg>
+          <span class="tag">changed pixels localized below horizon</span></div></section>
+      </div>
+      <section class="panel metrics"><div class="metric-list">
+        <div class="metric"><span class="name">color.mean_luminance</span><span class="value">0.412 → 0.238</span><span class="delta bad">−42.2%</span></div>
+        <div class="metric"><span class="name">depth.coverage</span><span class="value">0.983 → 0.983</span><span class="delta good">stable</span></div>
+        <div class="metric"><span class="name">object_id.unique</span><span class="value">14 → 14</span><span class="delta good">stable</span></div>
+        <div class="metric"><span class="name">material_id.water</span><span class="value">7 → missing</span><span class="delta bad">regressed</span></div>
+      </div><div class="spark"><h3>Frame-time samples <span style="color:#718895;font-weight:500">illustrative</span></h3><svg viewBox="0 0 300 100"><path d="M0 72L25 65 50 70 75 48 100 58 125 54 150 61 175 42 200 49 225 45 250 52 275 38 300 43" fill="none" stroke="#10c9d5" stroke-width="3"/><path d="M0 82H300M0 52H300M0 22H300" stroke="#253944" stroke-width="1"/></svg></div></section>
+    </div>
+    <aside class="side">
+      <section class="panel"><div class="panel-title">Admitted attachments <small>closed roster</small></div><div class="attachments"><div class="chip warn">color</div><div class="chip ok">depth</div><div class="chip ok">normal</div><div class="chip ok">object_id</div><div class="chip warn">material_id</div><div class="chip ok">telemetry</div></div></section>
+      <section class="panel finding"><strong>Likely fault domain</strong><p>Material binding or water shading-path selection—not camera visibility or scene geometry.</p></section>
+      <section class="panel"><h3>Discriminating next checks</h3><ol class="steps"><li>Capture the water material-ID binding table.</li><li>Compare pipeline and shader variant identifiers.</li><li>Freeze scene, camera, seed, tick, and resolution.</li><li>Run one bounded diagnostic shot before the full matrix.</li></ol></section>
+      <section class="panel ceiling"><h3>Evidence ceiling</h3><p><code>fixture bytes decoded + semantic comparison</code><br>Not target hardware, pixel approval, causality, or performance proof.</p></section>
+    </aside>
+  </div>
+</main>
+</body>
+</html>

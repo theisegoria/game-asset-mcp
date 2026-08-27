@@ -45,6 +45,18 @@ diagnosis has inspectable evidence behind it.
 The native macOS 26 companion app is a separate, last-stage deliverable. It is
 not required by the CLI or skills.
 
+## Product tour
+
+![Five-skill Game Development Studio suite](assets/screenshots/01-skill-suite.png)
+
+![Stable local CLI contract and approval boundaries](assets/screenshots/02-cli-contract.png)
+
+![Synthetic sealed-capture visual-debugging example](assets/screenshots/03-visual-debugging.png)
+
+The third image is explicitly a synthetic validation fixture. It demonstrates
+the diagnostic layout and evidence language; it is not a target-game capture,
+hardware GPU result, or performance claim.
+
 ## Install
 
 From a published npm release:

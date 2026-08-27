@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="../assets/icon.png">
+  <title>Game Development Studio — CLI Contract</title>
+  <style>
+    :root { color-scheme: dark; --cyan:#10c9d5; --orange:#e89658; --green:#5be39a; --red:#ff7a89; }
+    * { box-sizing:border-box; }
+    body { margin:0; width:100vw; height:100vh; overflow:hidden; color:#f3f8fb; font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif; background:radial-gradient(900px 500px at 85% 0%,#182b49,transparent 70%),#060b11; }
+    main { height:100%; padding:48px 58px; display:grid; grid-template-columns:minmax(0,1.6fr) minmax(330px,.78fr); gap:26px; }
+    .terminal { min-width:0; border:1px solid #273844; background:#081018ed; border-radius:22px; box-shadow:0 30px 70px #0009; overflow:hidden; display:grid; grid-template-rows:52px 1fr; }
+    .titlebar { display:flex; align-items:center; gap:9px; padding:0 20px; background:#111b24; border-bottom:1px solid #26333d; }
+    .traffic { width:12px; height:12px; border-radius:50%; } .red{background:#ff6058}.yellow{background:#ffbd2e}.green{background:#28c840}
+    .title { margin-left:10px; color:#91a4b2; font-size:13px; }
+    pre { margin:0; padding:26px 28px 32px; font:14px/1.56 "SFMono-Regular",Menlo,Consolas,monospace; color:#c7d4dc; white-space:pre-wrap; }
+    .prompt { color:var(--cyan); font-weight:700; }.key{color:#8ecbf2}.string{color:#a9e58c}.false{color:var(--red)}.true{color:var(--green)}.muted{color:#667b89}.approval{color:#ffc071}
+    aside { display:grid; grid-template-rows:auto auto 1fr auto; gap:18px; }
+    .brand { display:flex; gap:17px; align-items:center; padding:4px 4px 14px; }
+    .brand img { width:72px; height:72px; object-fit:cover; border-radius:18px; box-shadow:0 14px 35px #0008; }
+    .eyebrow { color:var(--cyan); font-size:12px; font-weight:800; letter-spacing:.15em; text-transform:uppercase; }
+    h1 { font-size:31px; margin:3px 0 0; line-height:1.08; letter-spacing:-.035em; }
+    .card { border:1px solid #223744; background:linear-gradient(145deg,#101c27,#0a131c); border-radius:18px; padding:20px; }
+    .card h2 { margin:0 0 10px; font-size:18px; }.card p{margin:0;color:#91a6b4}
+    .gate { display:grid; grid-template-columns:34px 1fr; gap:12px; align-items:start; margin-top:15px; }
+    .gate span:first-child { width:30px;height:30px;display:grid;place-items:center;border-radius:9px;background:#172c38;color:var(--cyan);font-weight:800}
+    .gate strong { display:block; font-size:14px; }.gate small{color:#8398a6}
+    .schema { align-self:end; background:#0d2630; border-color:#1e5864; }
+    .schema code { color:#baf7f4; }
+    .footer { text-align:center; color:#8296a4; font-size:13px; }
+  </style>
+</head>
+<body>
+<main>
+  <section class="terminal">
+    <div class="titlebar"><span class="traffic red"></span><span class="traffic yellow"></span><span class="traffic green"></span><span class="title">actual v1.0.0 command contract · shortened for display</span></div>
+    <pre><span class="prompt">❯ game-dev capabilities --json</span>
+{
+  <span class="key">"schema"</span>: <span class="string">"game_dev.result.v1"</span>,
+  <span class="key">"operation"</span>: <span class="string">"capabilities"</span>,
+  <span class="key">"ok"</span>: <span class="true">true</span>,
+  <span class="key">"data"</span>: {
+    <span class="key">"version"</span>: <span class="string">"1.0.0"</span>,
+    <span class="key">"transport"</span>: <span class="string">"local-cli"</span>,
+    <span class="key">"providers"</span>: {
+      <span class="key">"tripo"</span>: { <span class="key">"configured"</span>: <span class="false">false</span>,
+        <span class="key">"operations"</span>: [<span class="string">"generate"</span>, <span class="string">"retexture"</span>, <span class="string">"rig"</span>, …] },
+      <span class="key">"leonardo"</span>: { <span class="key">"configured"</span>: <span class="false">false</span>,
+        <span class="key">"operations"</span>: [<span class="string">"image-generate"</span>, <span class="string">"sound-generate"</span>] }
+    }
+  }
+}
+
+<span class="prompt">❯ game-dev skill install game-development-studio --target ./skills --json</span>
+{ <span class="key">"operation"</span>: <span class="string">"skill.install"</span>, <span class="key">"ok"</span>: <span class="true">true</span>,
+  <span class="key">"data"</span>: { <span class="key">"dryRun"</span>: <span class="true">true</span>, <span class="key">"fileCount"</span>: 5, <span class="key">"reused"</span>: <span class="false">false</span> } }
+
+<span class="prompt">❯ game-dev provider tripo generate --input '{"textPrompt":"harbor beacon"}' --json</span>
+{ <span class="key">"operation"</span>: <span class="string">"approval.create_3d_asset"</span>, <span class="key">"ok"</span>: <span class="false">false</span>,
+  <span class="key">"error"</span>: { <span class="key">"error"</span>: <span class="approval">"APPROVAL_REQUIRED"</span>,
+    <span class="key">"requiredFlags"</span>: [<span class="string">"--approve-spend"</span>, <span class="string">"--spend-limit-cents N"</span>] } }
+
+<span class="muted"># No key was read. No provider was contacted. No credit was spent.</span></pre>
+  </section>
+  <aside>
+    <div class="brand"><img src="../assets/icon.png" alt=""><div><div class="eyebrow">Stable local interface</div><h1>Plan first.<br>Authorize exactly.</h1></div></div>
+    <div class="card"><h2>Same contract for humans and agents</h2><p>One inspectable executable. JSON for one result; JSONL for progress and artifacts. Diagnostics stay on stderr.</p></div>
+    <div class="card">
+      <h2>Independent authority</h2>
+      <div class="gate"><span>✓</span><div><strong>Local mutation</strong><small>requires --confirm</small></div></div>
+      <div class="gate"><span>$</span><div><strong>Paid provider</strong><small>approval + finite ceiling</small></div></div>
+      <div class="gate"><span>◈</span><div><strong>GPU execution</strong><small>requires --allow-gpu</small></div></div>
+      <div class="gate"><span>↗</span><div><strong>Performance capture</strong><small>requires --allow-performance</small></div></div>
+    </div>
+    <div class="card schema"><h2>Durable by design</h2><p><code>game_dev.result.v1</code> · closed hash rosters · resumable jobs · explicit evidence ceilings</p></div>
+    <div class="footer">No resident MCP server · no standing permission</div>
+  </aside>
+</main>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="../assets/icon.png">
+  <title>Game Development Studio — Skill Suite</title>
+  <style>
+    :root { color-scheme: dark; --cyan:#10c9d5; --ink:#071018; --panel:#0d1a25; --muted:#91a6b4; --copper:#e89658; }
+    * { box-sizing: border-box; }
+    body { margin:0; width:100vw; height:100vh; overflow:hidden; font:16px/1.42 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,sans-serif; color:#f4fbff; background:
+      radial-gradient(900px 500px at 8% 0%, #11364a 0%, transparent 65%),
+      radial-gradient(700px 520px at 100% 100%, #252044 0%, transparent 68%), #050a10; }
+    main { height:100%; padding:54px 66px 42px; display:grid; grid-template-rows:auto 1fr auto; gap:34px; }
+    header { display:flex; align-items:center; justify-content:space-between; }
+    .brand { display:flex; align-items:center; gap:24px; }
+    .brand img { width:98px; height:98px; object-fit:cover; border-radius:24px; box-shadow:0 22px 50px #0009,0 0 34px #10c9d533; }
+    .eyebrow { color:var(--cyan); letter-spacing:.16em; font-weight:750; font-size:13px; text-transform:uppercase; }
+    h1 { margin:5px 0 4px; font-size:42px; letter-spacing:-.035em; line-height:1.05; }
+    .subtitle { margin:0; color:#b9c8d2; font-size:18px; }
+    .badge { border:1px solid #275267; background:#0d2130cc; color:#bdf8fb; padding:11px 15px; border-radius:999px; font-weight:650; }
+    .grid { display:grid; grid-template-columns:1.1fr 1fr 1fr; grid-template-rows:1fr 1fr; gap:18px; }
+    .card { border:1px solid #1f3443; border-radius:22px; background:linear-gradient(145deg,#11212dE8,#0a141dE8); padding:24px; position:relative; overflow:hidden; box-shadow:inset 0 1px #ffffff0c,0 16px 36px #0005; }
+    .card:after { content:""; position:absolute; width:170px; height:170px; border-radius:50%; right:-85px; top:-95px; background:var(--glow,#10c9d5); filter:blur(60px); opacity:.13; }
+    .router { grid-row:1 / span 2; padding:30px; background:linear-gradient(160deg,#123246ee,#0a1722ee 58%,#15142bee); border-color:#1c6072; }
+    .router .number { font-size:76px; color:#ffffff0c; position:absolute; right:20px; bottom:4px; font-weight:900; }
+    .icon { width:42px; height:42px; display:grid; place-items:center; border-radius:13px; background:#102b38; border:1px solid #285064; color:var(--cyan); font-weight:900; font-size:20px; margin-bottom:28px; }
+    .router .icon { width:58px; height:58px; border-radius:17px; font-size:27px; background:#0c3945; box-shadow:0 0 28px #10c9d52a; }
+    h2 { font-size:23px; letter-spacing:-.02em; margin:0 0 10px; }
+    .router h2 { font-size:31px; max-width:340px; }
+    p { margin:0; color:var(--muted); max-width:390px; }
+    .route-list { margin:28px 0 0; padding:0; list-style:none; display:grid; gap:12px; }
+    .route-list li { display:flex; align-items:center; gap:10px; color:#c9d9e3; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--cyan); box-shadow:0 0 12px var(--cyan); }
+    .production { --glow:#10c9d5; } .vendoring { --glow:#e89658; } .visual { --glow:#8a7dff; } .performance { --glow:#54e28d; }
+    footer { display:flex; align-items:center; justify-content:space-between; border-top:1px solid #18303e; padding-top:20px; color:#91a6b4; }
+    .pillset { display:flex; gap:10px; }
+    .pill { padding:8px 12px; background:#0b1721; border:1px solid #1b3442; border-radius:10px; color:#bed0da; font-size:14px; }
+    .mark { color:#b9f8fb; font-weight:700; letter-spacing:.02em; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">
+      <img src="../assets/icon.png" alt="">
+      <div><div class="eyebrow">Local-first game development tools</div><h1>Game Development Studio</h1><p class="subtitle">One router. Four focused production skills.</p></div>
+    </div>
+    <div class="badge">Skills-only plugin · v1.0.0</div>
+  </header>
+  <section class="grid">
+    <article class="card router">
+      <div class="icon">⌘</div>
+      <h2>Game Development Studio</h2>
+      <p>Routes each request to the smallest workflow, preserves approval boundaries, and keeps the evidence ceiling visible.</p>
+      <ul class="route-list">
+        <li><span class="dot"></span> Production → provider, mesh, package</li>
+        <li><span class="dot"></span> Vendoring → integrity, license, admission</li>
+        <li><span class="dot"></span> Visual → capture, telemetry, heatmap</li>
+        <li><span class="dot"></span> Performance → metrics, bounded goal</li>
+      </ul>
+      <span class="number">01</span>
+    </article>
+    <article class="card production"><div class="icon">◇</div><h2>Asset Production</h2><p>Create, inspect, normalize, validate, and package game-ready assets with durable provenance.</p></article>
+    <article class="card vendoring"><div class="icon" style="color:#e89658">✓</div><h2>Asset Vendoring</h2><p>Verify hashes and licenses, plan admission, and record exactly what entered the project.</p></article>
+    <article class="card visual"><div class="icon" style="color:#a89fff">◉</div><h2>Visual Debugging</h2><p>Combine windowless captures, semantic attachments, telemetry, metrics, and deterministic diffs.</p></article>
+    <article class="card performance"><div class="icon" style="color:#54e28d">↗</div><h2>Performance Optimization</h2><p>Compare equivalent sealed runs and stop at a finite target, iteration limit, and path allowlist.</p></article>
+  </section>
+  <footer>
+    <div class="pillset"><span class="pill">No MCP server</span><span class="pill">Dry-run first</span><span class="pill">Explicit spend + GPU gates</span></div>
+    <div class="mark">game-dev · JSON / JSONL</div>
+  </footer>
+</main>
+</body>
+</html>

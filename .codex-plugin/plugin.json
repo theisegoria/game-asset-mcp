@@ -1,0 +1,50 @@
+{
+  "name": "game-development-studio",
+  "version": "1.0.0",
+  "description": "Local-first game asset production, vendoring, render diagnosis, and bounded performance workflows.",
+  "author": {
+    "name": "Benjamin Michael Haire",
+    "url": "https://github.com/theisegoria"
+  },
+  "homepage": "https://github.com/theisegoria/game-development-studio-skills",
+  "repository": "https://github.com/theisegoria/game-development-studio-skills",
+  "license": "MIT",
+  "keywords": [
+    "game-development",
+    "game-assets",
+    "blender",
+    "render-debugging",
+    "performance",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Game Development Studio",
+    "shortDescription": "Produce assets and diagnose game renders",
+    "longDescription": "Route game asset production, canonical package vendoring, sealed render-capture diagnosis, and bounded performance work through a local-first evidence-aware workflow. Execution uses the separately installed game-dev CLI; the skills never add an MCP server or silently authorize provider spend, project writes, GPU work, or performance measurement.",
+    "developerName": "Benjamin Michael Haire",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Asset production",
+      "Project vendoring",
+      "Visual debugging",
+      "Performance analysis"
+    ],
+    "websiteURL": "https://github.com/theisegoria/game-development-studio-skills",
+    "privacyPolicyURL": "https://github.com/theisegoria/game-development-studio-skills/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/theisegoria/game-development-studio-skills/blob/main/TERMS.md",
+    "defaultPrompt": [
+      "Plan a game-ready asset package from this brief.",
+      "Diagnose this sealed render capture and telemetry.",
+      "Compare these runs without overstating the evidence."
+    ],
+    "brandColor": "#10C9D5",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "screenshots": [
+      "./assets/screenshots/01-skill-suite.png",
+      "./assets/screenshots/02-cli-contract.png",
+      "./assets/screenshots/03-visual-debugging.png"
+    ]
+  }
+}

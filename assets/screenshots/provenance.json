@@ -1,0 +1,30 @@
+{
+  "schema": "game_dev.marketing_screenshots.v1",
+  "generatedOn": "2026-08-28",
+  "renderer": "Playwright CLI Chromium",
+  "viewport": {
+    "width": 1440,
+    "height": 900,
+    "deviceScaleFactor": 1
+  },
+  "screenshots": [
+    {
+      "path": "01-skill-suite.png",
+      "source": "../../marketing/01-skill-suite.html",
+      "sha256": "9ddee22e9610efdd9c8095c15a576851ffd32a3857e89612021a2112661726fb",
+      "claim": "Product composition using the shipped skill names and metadata."
+    },
+    {
+      "path": "02-cli-contract.png",
+      "source": "../../marketing/02-cli-contract.html",
+      "sha256": "a5976347328dc37bd4823d9702238f86c4dbec2e4c11f83813c5f8bc2cf4c2e9",
+      "claim": "Marketing composition based on actual v1.0.0 CLI outputs, shortened for display."
+    },
+    {
+      "path": "03-visual-debugging.png",
+      "source": "../../marketing/03-visual-debugging.html",
+      "sha256": "ebf6833604362b22a6db0a33c5156938401ea1d5353457d2762e3bb5d7cf7028",
+      "claim": "Explicitly labelled synthetic validation fixture; not a target-game, GPU, pixel-approval, causality, or performance claim."
+    }
+  ]
+}
