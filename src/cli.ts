@@ -18,6 +18,7 @@ import {
   GAME_DEV_VERSION,
 } from './version.js';
 import type { DurableJob } from './jobs/durable.js';
+import { isSpendingTool } from './domain/spend.js';
 
 const HELP = `Game Development Studio local harness
 
@@ -68,6 +69,30 @@ function positiveIntegerFlag(parsed: ParsedArguments, name: string, fallback: nu
     throw invalidInput(`--${name} must be a positive integer`);
   }
   return value;
+}
+
+function optionalPositiveIntegerFlag(parsed: ParsedArguments, name: string): number | undefined {
+  if (!parsed.flags.has(name)) return undefined;
+  return positiveIntegerFlag(parsed, name, 1);
+}
+
+function approvalRequired(tool: string, parsed: ParsedArguments): DispatchResult | undefined {
+  const spendLimitCents = optionalPositiveIntegerFlag(parsed, 'spend-limit-cents');
+  if (booleanFlag(parsed, 'approve-spend') && spendLimitCents !== undefined) return undefined;
+  return {
+    operation: `approval.${tool}`,
+    isError: true,
+    data: {
+      error: 'APPROVAL_REQUIRED',
+      message: 'Paid provider work requires an explicit per-invocation approval and spend ceiling.',
+      tool,
+      approval: {
+        requiredFlags: ['--approve-spend', '--spend-limit-cents N'],
+        estimatedOnly: true,
+        note: 'The ceiling is a refusal guard based on published or pessimistic estimated prices; it is not an invoice.',
+      },
+    },
+  };
 }
 
 function payloadFromResult(result: ToolResult): Record<string, unknown> {
@@ -160,6 +185,36 @@ async function followJob(
 ): Promise<DispatchResult> {
   const maximumSeconds = positiveIntegerFlag(parsed, 'max-seconds', 120);
   const deadline = Date.now() + maximumSeconds * 1_000;
+
+  if (jobId.startsWith('job_')) {
+    let afterSequence = -1;
+    let job = await runtime.durableJobs.get(jobId);
+    while (true) {
+      const persisted = await runtime.durableJobs.readEvents(jobId, { afterSequence });
+      for (const event of persisted) {
+        events.replay(event);
+        if (typeof event.sequence === 'number') afterSequence = Math.max(afterSequence, event.sequence);
+      }
+      job = await runtime.durableJobs.get(jobId);
+      if (['completed', 'failed', 'cancelled'].includes(job.status) || Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(500, deadline - Date.now())));
+    }
+    return {
+      operation: 'job.follow',
+      data: {
+        jobId: job.id,
+        status: job.status,
+        terminal: ['completed', 'failed', 'cancelled'].includes(job.status),
+        timedOut: !['completed', 'failed', 'cancelled'].includes(job.status),
+        eventCount: job.eventCount,
+        updatedAt: job.updatedAt,
+        ...(job.receiptPath ? { receiptPath: job.receiptPath } : {}),
+        ...(job.error ? { error: job.error } : {}),
+      },
+      ...(job.status === 'failed' ? { isError: true } : {}),
+    };
+  }
+
   let job = await runtime.context.store.get(jobId);
 
   while (!isTerminal(job.status) && Date.now() < deadline) {
@@ -219,6 +274,10 @@ async function dispatch(
 
   if (family === 'tool' && action === 'call') {
     const name = requirePositional(parsed, 2, 'local command name');
+    if (isSpendingTool(name)) {
+      const approval = approvalRequired(name, parsed);
+      if (approval) return approval;
+    }
     return callLocal(runtime, `tool.${name}`, name, await readRequest(parsed));
   }
 
@@ -233,6 +292,8 @@ async function dispatch(
     };
     const command = mapping[operation];
     if (!command) throw invalidInput(`unsupported Tripo operation: ${operation}`);
+    const approval = approvalRequired(command, parsed);
+    if (approval) return approval;
     return callLocal(runtime, `provider.tripo.${operation}`, command, await readRequest(parsed));
   }
 
@@ -244,6 +305,8 @@ async function dispatch(
     };
     const command = mapping[operation];
     if (!command) throw invalidInput(`unsupported Leonardo operation: ${operation}`);
+    const approval = approvalRequired(command, parsed);
+    if (approval) return approval;
     return callLocal(runtime, `provider.leonardo.${operation}`, command, await readRequest(parsed));
   }
 
@@ -307,16 +370,7 @@ async function dispatch(
       };
     }
     if (jobId.startsWith('job_')) {
-      const durable = await runtime.durableJobs.get(jobId);
-      if (!['completed', 'failed', 'cancelled'].includes(durable.status)) {
-        durable.status = 'cancelled';
-        durable.completedAt = new Date().toISOString();
-        durable.error = {
-          error: 'LOCALLY_CANCELLED',
-          message: 'Local orchestration was cancelled. External work may continue.',
-        };
-        await runtime.durableJobs.save(durable);
-      }
+      const durable = await runtime.durableJobs.cancel(jobId);
       return {
         operation: 'job.cancel',
         data: { jobId: durable.id, status: durable.status, externalCancellationProved: false },
@@ -374,11 +428,22 @@ function needsDurableJob(runtime: GameDevRuntime, parsed: ParsedArguments): bool
   return false;
 }
 
-function durableRequest(parsed: ParsedArguments): Record<string, unknown> {
+async function durableRequest(parsed: ParsedArguments): Promise<Record<string, unknown>> {
   const flags = Object.fromEntries(
-    [...parsed.flags.entries()].filter(([name]) => !['json', 'jsonl'].includes(name)),
+    [...parsed.flags.entries()].filter(([name]) => ![
+      'json',
+      'jsonl',
+      'request',
+      'input',
+      'approve-spend',
+    ].includes(name)),
   );
-  return { positionals: parsed.positionals, flags };
+  const hasInput = parsed.flags.has('request') || parsed.flags.has('input');
+  return {
+    positionals: parsed.positionals,
+    flags,
+    ...(hasInput ? { input: await readRequest(parsed) } : {}),
+  };
 }
 
 function outputResult(
@@ -388,7 +453,14 @@ function outputResult(
   events: EventStream,
 ): void {
   if (jsonLines) {
-    events.emit(result.isError ? 'failed' : 'completed', result.data);
+    events.emit(
+      result.data.error === 'APPROVAL_REQUIRED'
+        ? 'approval_required'
+        : result.isError
+          ? 'failed'
+          : 'completed',
+      result.data,
+    );
     return;
   }
   process.stdout.write(`${JSON.stringify({
@@ -422,13 +494,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   let durable: DurableJob | undefined;
 
   try {
-    runtime = await createGameDevRuntime({ outputDir: stringFlag(parsed, 'output-dir') });
+    const spendLimitCents = optionalPositiveIntegerFlag(parsed, 'spend-limit-cents');
+    runtime = await createGameDevRuntime({
+      outputDir: stringFlag(parsed, 'output-dir'),
+      ...(spendLimitCents !== undefined
+        ? { env: { ASSET_SPEND_LIMIT_CENTS: String(spendLimitCents) } }
+        : {}),
+    });
     if (needsDurableJob(runtime, parsed)) {
-      durable = await runtime.durableJobs.create(operation, durableRequest(parsed));
-      durable.status = 'running';
-      durable.startedAt = new Date().toISOString();
-      durable.attempts += 1;
-      await runtime.durableJobs.save(durable);
+      durable = await runtime.durableJobs.create(operation, await durableRequest(parsed));
+      durable = await runtime.durableJobs.markRunning(durable.id);
     }
     events = new EventStream(
       operation,
@@ -442,7 +517,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const result = await dispatch(runtime, parsed, events);
     outputResult(result.operation, result, jsonLines, events);
     if (durable) {
-      if (result.isError) await runtime.durableJobs.fail(durable.id, result.data);
+      if (result.data.error === 'APPROVAL_REQUIRED') {
+        await runtime.durableJobs.markApprovalRequired(durable.id, result.data);
+      } else if (result.isError) await runtime.durableJobs.fail(durable.id, result.data);
       else await runtime.durableJobs.complete(durable.id, {
         schema: 'game_dev.receipt.v1',
         operation: result.operation,
