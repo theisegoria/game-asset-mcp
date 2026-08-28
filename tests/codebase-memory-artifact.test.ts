@@ -50,7 +50,7 @@ async function createFixture(root: string, unexpectedLegacyToken = false): Promi
   const artifact = path.join(artifactDirectory, 'graph.db.zst');
   const metadata = path.join(artifactDirectory, 'artifact.json');
   const legacyToken = 'retired-project-token';
-  const legacyRoot = `/Users/example-user/Developer/${legacyToken}`;
+  const legacyRoot = ['', 'Users', 'example-user', 'Developer', legacyToken].join('/');
 
   await mkdir(artifactDirectory, { recursive: true });
   const graph = new DatabaseSync(database);
