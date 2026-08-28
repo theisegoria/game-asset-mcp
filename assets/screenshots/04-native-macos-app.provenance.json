@@ -1,0 +1,18 @@
+{
+  "schema": "game_dev.native_macos_runtime_screenshot.v1",
+  "path": "04-native-macos-app.png",
+  "sha256": "f440c12a94414cb9696fc10d123decd3d48ddfa65ad4a009e880be114322c9bf",
+  "kind": "native macOS runtime capture",
+  "appVersion": "1.0.0",
+  "minimumSystemVersion": "26.0",
+  "sourceRevision": "24c702a3dbc5f2b1560001e90b081d19cc877519",
+  "capturedOn": "2026-08-28",
+  "appearance": "Dark",
+  "workspace": "Visual Debugging",
+  "runtimeChecks": [
+    "capabilities",
+    "doctor"
+  ],
+  "claim": "A live native macOS 26 Visual Debugging workspace in the default Dark appearance after successful credential-free capabilities and doctor checks against the bundled closed runtime.",
+  "evidenceCeiling": "This proves one visually reviewed runtime state and the displayed local health-check outcomes. It does not prove target-game execution, GPU capture, pixel correctness across the app, accessibility, performance, Developer ID signing, notarization, or human acceptance of any game output."
+}

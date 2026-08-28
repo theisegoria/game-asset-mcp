@@ -149,7 +149,6 @@ async function main() {
     invariant(allowedInterfaceFields.has(field), `unsupported plugin interface field: ${field}`);
   }
   invariant(manifest.interface?.shortDescription.length <= 30, 'short description exceeds the 30-character limit');
-  invariant(manifest.interface?.screenshots === undefined, 'skills-only plugins must not declare manifest screenshots');
 
   const iconPath = localPath(manifest.interface.composerIcon, 'composerIcon');
   invariant(iconPath === localPath(manifest.interface.logo, 'logo'), 'composer icon and logo must share the suite mark');
@@ -163,6 +162,10 @@ async function main() {
     './assets/screenshots/02-cli-contract.png',
     './assets/screenshots/03-visual-debugging.png',
   ];
+  invariant(
+    JSON.stringify(manifest.interface?.screenshots) === JSON.stringify(screenshots),
+    'plugin manifest must declare the exact three release screenshots',
+  );
   for (const screenshot of screenshots) {
     const screenshotPath = localPath(screenshot, 'screenshot');
     const entry = screenshotProvenance.screenshots.find((item) => item.path === path.basename(screenshotPath));

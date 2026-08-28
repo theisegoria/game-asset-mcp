@@ -19,6 +19,39 @@ MARKETING_SCREENSHOT_PROVENANCE="$SCREENSHOT_SOURCE_DIR/provenance.json"
 RUNTIME_SCREENSHOT_PROVENANCE="$SCREENSHOT_SOURCE_DIR/04-native-macos-app.provenance.json"
 CLI_RUNTIME_NAME="GameDevelopmentStudioRuntime"
 CLI_RUNTIME_VERIFIER="$ROOT_DIR/scripts/verify-cli-runtime.mjs"
+CLI_RUNTIME_PROVENANCE_VERIFIER="$ROOT_DIR/scripts/verify-macos-runtime-provenance.mjs"
+THIRD_PARTY_NOTICE_NAME="THIRD_PARTY_NOTICES.md"
+THIRD_PARTY_PROVENANCE_NAME="THIRD_PARTY_PROVENANCE.json"
+THIRD_PARTY_LICENSE_DIRECTORY_NAME="ThirdPartyLicenses"
+THIRD_PARTY_LICENSE_SOURCE_DIR="$TEMPLATE_DIR/legal/third-party-licenses"
+THIRD_PARTY_LICENSE_PATHS=(
+  "brotli-1.2.0-MIT.txt"
+  "c-ares-1.34.6-MIT.txt"
+  "game-development-studio-1.0.1-MIT.txt"
+  "icu4c-78.3-ICU.txt"
+  "libuv-1.51.0-BSD-2-Clause-tree.h.txt"
+  "libuv-1.51.0-ISC-inet.c.txt"
+  "libuv-1.51.0-MIT.txt"
+  "libuv-1.51.0-extra-MIT-BSD-2-ISC-index.txt"
+  "nghttp2-1.68.0-MIT.txt"
+  "nghttp3-1.13.1-MIT.txt"
+  "ngtcp2-1.18.0-MIT.txt"
+  "node-25.2.1-LICENSE.txt"
+  "npm-gltf-transform-core-4.4.2-MIT.txt"
+  "npm-jpeg-js-0.4.4-BSD-3-Clause.txt"
+  "npm-pngjs-7.0.0-MIT.txt"
+  "npm-property-graph-4.1.0-MIT.txt"
+  "npm-zod-3.25.76-MIT.txt"
+  "openssl-3.6.3-Apache-2.0.txt"
+  "simdjson-4.2.3-Apache-2.0.txt"
+  "simdjson-4.2.3-MIT.txt"
+  "sqlite-3.53.4-public-domain.txt"
+  "uvwasi-0.0.23-Apache-2.0.txt"
+  "zstd-1.5.7-BSD-3-Clause.txt"
+  "zstd-1.5.7-GPL-2.0-alternative.txt"
+  "zstd-1.5.7-source-archive-ancillary-BSD-2-Clause.txt"
+  "zstd-1.5.7-source-archive-ancillary-MIT.txt"
+)
 VALIDATED_RUNTIME_TREE_SHA256=""
 VALIDATED_RUNTIME_ENTRY_COUNT=""
 VALIDATED_RUNTIME_NODE_VERSION=""
@@ -233,8 +266,12 @@ assert_no_source_material() {
 
 assert_no_publication_placeholders() {
   local root="$1"
+  local excluded_directory="${2:-}"
   local file
   while IFS= read -r -d '' file; do
+    if [[ -n "$excluded_directory" && "$file" == "$excluded_directory/"* ]]; then
+      continue
+    fi
     if /usr/bin/grep -I -n -E 'TODO|TBD|PLACEHOLDER|\{\{[^}]+\}\}' "$file"; then
       die "publication file contains unresolved text: ${file#"$root"/}"
     fi
@@ -274,21 +311,182 @@ assert_exact_tree_roster() {
   trap - RETURN
 }
 
+validate_third_party_provenance() {
+  local provenance="$1"
+  local source_license_directory="$2"
+  local index=0
+  local license_path
+  local recorded_hash
+  local recorded_bytes
+  local actual_bytes
+
+  [[ -f "$provenance" ]] || die "third-party provenance is missing: $provenance"
+  [[ "$(json_value "$provenance" "schema")" == "game_dev.macos_bundled_third_party_provenance.v1" ]] \
+    || die "third-party provenance schema mismatch"
+  [[ "$(json_value "$provenance" "release.appVersion")" == "1.0.0" ]] \
+    || die "third-party provenance app version mismatch"
+  [[ "$(json_value "$provenance" "release.bundleIdentifier")" == "$BUNDLE_IDENTIFIER" ]] \
+    || die "third-party provenance bundle identifier mismatch"
+  [[ "$(json_value "$provenance" "release.licenseDirectory")" == "$THIRD_PARTY_LICENSE_DIRECTORY_NAME" ]] \
+    || die "third-party provenance license directory mismatch"
+  [[ "$(json_value "$provenance" "bundledRuntime.gameDevCli.version")" == "$BUNDLED_GAME_DEV_CLI" ]] \
+    || die "third-party provenance bundled game-dev CLI version mismatch"
+  [[ "$(json_value "$provenance" "bundledRuntime.node.version")" == "25.2.1" ]] \
+    || die "third-party provenance bundled Node version mismatch"
+  [[ "$(json_value "$provenance" "bundledRuntime.nonSystemDylibCount")" == "18" ]] \
+    || die "third-party provenance non-system dylib count mismatch"
+  [[ "$(json_value "$provenance" "npmProductionPackages.0.name")" == "@gltf-transform/core" ]] \
+    || die "third-party provenance npm production package roster mismatch"
+  [[ "$(json_value "$provenance" "npmProductionPackages.0.lockedVersion")" == "4.4.2" ]] \
+    || die "third-party provenance @gltf-transform/core version mismatch"
+  [[ "$(json_value "$provenance" "npmProductionPackages.4.name")" == "zod" ]] \
+    || die "third-party provenance npm production package roster is incomplete"
+  assert_json_key_absent "$provenance" "npmProductionPackages.5.name"
+  [[ "$(json_value "$provenance" "zstdScopeQualification.sourceArchiveSbomFilesAnalyzed")" == "false" ]] \
+    || die "third-party provenance must qualify zstd source-archive scope"
+  [[ "$(json_value "$provenance" "zstdScopeQualification.sourceArchiveSbomLicenseConcluded")" == "(BSD-3-Clause OR GPL-2.0-only) AND BSD-2-Clause AND MIT" ]] \
+    || die "third-party provenance zstd source-archive license expression mismatch"
+  [[ "$(json_value "$provenance" "versionQualification.examples.0.auditedSourceVersion")" == "1.51.0" ]] \
+    || die "third-party provenance libuv version qualification mismatch"
+
+  for license_path in "${THIRD_PARTY_LICENSE_PATHS[@]}"; do
+    [[ "$(json_value "$provenance" "legalAssets.$index.path")" == "$license_path" ]] \
+      || die "third-party provenance legal asset roster mismatch at index $index"
+    recorded_hash="$(json_value "$provenance" "legalAssets.$index.sha256")"
+    assert_valid_sha256 "$recorded_hash" "third-party provenance hash at index $index"
+    [[ "$recorded_hash" == "$(sha256_file "$source_license_directory/$license_path")" ]] \
+      || die "third-party provenance hash does not bind $license_path"
+    recorded_bytes="$(json_value "$provenance" "legalAssets.$index.bytes")"
+    [[ "$recorded_bytes" =~ ^[1-9][0-9]*$ ]] \
+      || die "third-party provenance byte count is invalid at index $index"
+    actual_bytes="$(/usr/bin/wc -c < "$source_license_directory/$license_path" | /usr/bin/tr -d '[:space:]')"
+    [[ "$recorded_bytes" == "$actual_bytes" ]] \
+      || die "third-party provenance byte count does not bind $license_path"
+    index=$((index + 1))
+  done
+  assert_json_key_absent "$provenance" "legalAssets.$index.path"
+}
+
+validate_third_party_license_source() {
+  [[ -d "$THIRD_PARTY_LICENSE_SOURCE_DIR" ]] \
+    || die "third-party license source directory is missing: $THIRD_PARTY_LICENSE_SOURCE_DIR"
+  assert_no_symlinks "$THIRD_PARTY_LICENSE_SOURCE_DIR"
+  assert_no_sensitive_names "$THIRD_PARTY_LICENSE_SOURCE_DIR"
+  assert_no_source_material "$THIRD_PARTY_LICENSE_SOURCE_DIR"
+  assert_exact_tree_roster "$THIRD_PARTY_LICENSE_SOURCE_DIR" "${THIRD_PARTY_LICENSE_PATHS[@]}"
+  validate_third_party_provenance \
+    "$TEMPLATE_DIR/$THIRD_PARTY_PROVENANCE_NAME" "$THIRD_PARTY_LICENSE_SOURCE_DIR"
+}
+
+validate_runtime_third_party_provenance() {
+  local cli_runtime="$1"
+  local provenance="$2"
+  local node_version
+
+  [[ -d "$cli_runtime" ]] || die "closed Studio CLI runtime is missing: $cli_runtime"
+  [[ -f "$provenance" ]] || die "third-party provenance resource is missing: $provenance"
+  [[ -f "$CLI_RUNTIME_VERIFIER" && -f "$CLI_RUNTIME_PROVENANCE_VERIFIER" ]] \
+    || die "closed Studio CLI runtime verifier is missing"
+  node "$CLI_RUNTIME_VERIFIER" --runtime "$cli_runtime" >/dev/null \
+    || die "closed Studio CLI runtime verification failed"
+  node_version="$("$cli_runtime/payload/node/bin/node" --version | /usr/bin/head -n 1)"
+  node "$CLI_RUNTIME_PROVENANCE_VERIFIER" \
+    --runtime "$cli_runtime" \
+    --provenance "$provenance" \
+    --node-version "$node_version" >/dev/null \
+    || die "closed Studio CLI runtime does not match third-party provenance"
+}
+
+validate_third_party_resources() {
+  local resource_root="$1"
+  local destination_license_directory="$resource_root/$THIRD_PARTY_LICENSE_DIRECTORY_NAME"
+  local license_path
+
+  [[ -f "$resource_root/$THIRD_PARTY_NOTICE_NAME" ]] \
+    || die "third-party notice resource is missing: $resource_root/$THIRD_PARTY_NOTICE_NAME"
+  [[ -f "$resource_root/$THIRD_PARTY_PROVENANCE_NAME" ]] \
+    || die "third-party provenance resource is missing: $resource_root/$THIRD_PARTY_PROVENANCE_NAME"
+  /usr/bin/cmp -s "$TEMPLATE_DIR/$THIRD_PARTY_NOTICE_NAME" \
+    "$resource_root/$THIRD_PARTY_NOTICE_NAME" \
+    || die "third-party notice resource differs from the canonical template"
+  /usr/bin/cmp -s "$TEMPLATE_DIR/$THIRD_PARTY_PROVENANCE_NAME" \
+    "$resource_root/$THIRD_PARTY_PROVENANCE_NAME" \
+    || die "third-party provenance resource differs from the canonical template"
+  assert_no_symlinks "$destination_license_directory"
+  assert_exact_tree_roster "$destination_license_directory" "${THIRD_PARTY_LICENSE_PATHS[@]}"
+  for license_path in "${THIRD_PARTY_LICENSE_PATHS[@]}"; do
+    /usr/bin/cmp -s "$THIRD_PARTY_LICENSE_SOURCE_DIR/$license_path" \
+      "$destination_license_directory/$license_path" \
+      || die "third-party license resource differs from the canonical template: $license_path"
+  done
+  validate_third_party_provenance \
+    "$resource_root/$THIRD_PARTY_PROVENANCE_NAME" "$THIRD_PARTY_LICENSE_SOURCE_DIR"
+}
+
+assert_third_party_resources_identical() {
+  local first_resource_root="$1"
+  local second_resource_root="$2"
+  local license_path
+
+  validate_third_party_resources "$first_resource_root"
+  validate_third_party_resources "$second_resource_root"
+  /usr/bin/cmp -s "$first_resource_root/$THIRD_PARTY_NOTICE_NAME" \
+    "$second_resource_root/$THIRD_PARTY_NOTICE_NAME" \
+    || die "signed-app and public third-party notices differ"
+  /usr/bin/cmp -s "$first_resource_root/$THIRD_PARTY_PROVENANCE_NAME" \
+    "$second_resource_root/$THIRD_PARTY_PROVENANCE_NAME" \
+    || die "signed-app and public third-party provenance records differ"
+  for license_path in "${THIRD_PARTY_LICENSE_PATHS[@]}"; do
+    /usr/bin/cmp -s \
+      "$first_resource_root/$THIRD_PARTY_LICENSE_DIRECTORY_NAME/$license_path" \
+      "$second_resource_root/$THIRD_PARTY_LICENSE_DIRECTORY_NAME/$license_path" \
+      || die "signed-app and public third-party license resources differ: $license_path"
+  done
+}
+
+stage_third_party_resources() {
+  local resource_root="$1"
+  local destination_license_directory="$resource_root/$THIRD_PARTY_LICENSE_DIRECTORY_NAME"
+  local license_path
+
+  mkdir -p "$destination_license_directory"
+  cp "$TEMPLATE_DIR/$THIRD_PARTY_NOTICE_NAME" \
+    "$resource_root/$THIRD_PARTY_NOTICE_NAME"
+  cp "$TEMPLATE_DIR/$THIRD_PARTY_PROVENANCE_NAME" \
+    "$resource_root/$THIRD_PARTY_PROVENANCE_NAME"
+  for license_path in "${THIRD_PARTY_LICENSE_PATHS[@]}"; do
+    cp "$THIRD_PARTY_LICENSE_SOURCE_DIR/$license_path" \
+      "$destination_license_directory/$license_path"
+  done
+  validate_third_party_resources "$resource_root"
+}
+
 validate_template() {
   local template="$1"
+  local -a template_roster=(
+    "LICENSE"
+    "PRIVACY.md"
+    "README.md"
+    "RELEASE_NOTES.md"
+    "SECURITY.md"
+    "SUPPORT.md"
+    "$THIRD_PARTY_NOTICE_NAME"
+    "$THIRD_PARTY_PROVENANCE_NAME"
+    "legal/"
+    "legal/third-party-licenses/"
+  )
+  local license_path
+
   [[ -d "$template" ]] || die "distribution template is missing: $template"
   assert_no_symlinks "$template"
   assert_no_sensitive_names "$template"
   assert_no_source_material "$template"
-  assert_exact_tree_roster "$template" \
-    "LICENSE" \
-    "PRIVACY.md" \
-    "README.md" \
-    "RELEASE_NOTES.md" \
-    "SECURITY.md" \
-    "SUPPORT.md" \
-    "THIRD_PARTY_NOTICES.md"
-  assert_no_publication_placeholders "$template"
+  for license_path in "${THIRD_PARTY_LICENSE_PATHS[@]}"; do
+    template_roster+=("legal/third-party-licenses/$license_path")
+  done
+  assert_exact_tree_roster "$template" "${template_roster[@]}"
+  assert_no_publication_placeholders "$template" "$THIRD_PARTY_LICENSE_SOURCE_DIR"
+  validate_third_party_license_source
 }
 
 validate_app_bundle() {
@@ -300,6 +498,7 @@ validate_app_bundle() {
   local runtime_roster="$cli_runtime/runtime-roster.json"
   local runtime_path
   local runtime_rel
+  local license_path
   local -a app_roster
   local signature
   local architectures
@@ -314,13 +513,15 @@ validate_app_bundle() {
   [[ -f "$app/Contents/Resources/AppIcon.icns" ]] \
     || die "compiled AppIcon.icns is missing"
   [[ -d "$cli_runtime" ]] || die "closed Studio CLI runtime is missing"
-  [[ -f "$CLI_RUNTIME_VERIFIER" ]] || die "closed Studio CLI runtime verifier is missing"
+  [[ -f "$CLI_RUNTIME_VERIFIER" && -f "$CLI_RUNTIME_PROVENANCE_VERIFIER" ]] \
+    || die "closed Studio CLI runtime verifier is missing"
 
   assert_no_symlinks "$app"
   assert_no_sensitive_names "$app"
   assert_no_source_material "$app" "$cli_runtime"
-  node "$CLI_RUNTIME_VERIFIER" --runtime "$cli_runtime" >/dev/null \
-    || die "closed Studio CLI runtime verification failed"
+  validate_third_party_resources "$app/Contents/Resources"
+  validate_runtime_third_party_provenance \
+    "$cli_runtime" "$app/Contents/Resources/$THIRD_PARTY_PROVENANCE_NAME"
   [[ "$(json_value "$runtime_roster" "schema")" == "$CLI_RUNTIME_ROSTER_SCHEMA" ]] \
     || die "closed Studio CLI runtime roster schema mismatch"
   VALIDATED_RUNTIME_TREE_SHA256="$(json_value "$runtime_roster" "treeSha256")"
@@ -337,7 +538,6 @@ validate_app_bundle() {
   )"
   [[ "$VALIDATED_RUNTIME_CLI_VERSION" == "$BUNDLED_GAME_DEV_CLI" ]] \
     || die "bundled game-dev CLI version mismatch"
-
   app_roster=(
     "Contents/" \
     "Contents/Info.plist" \
@@ -346,6 +546,9 @@ validate_app_bundle() {
     "Contents/Resources/" \
     "Contents/Resources/AppIcon.icns" \
     "Contents/Resources/$CLI_RUNTIME_NAME/" \
+    "Contents/Resources/$THIRD_PARTY_NOTICE_NAME" \
+    "Contents/Resources/$THIRD_PARTY_PROVENANCE_NAME" \
+    "Contents/Resources/$THIRD_PARTY_LICENSE_DIRECTORY_NAME/" \
     "Contents/_CodeSignature/" \
     "Contents/_CodeSignature/CodeResources"
   )
@@ -359,6 +562,9 @@ validate_app_bundle() {
       die "unsupported closed runtime entry: $runtime_rel"
     fi
   done < <(find "$cli_runtime" -mindepth 1 -print0)
+  for license_path in "${THIRD_PARTY_LICENSE_PATHS[@]}"; do
+    app_roster+=("Contents/Resources/$THIRD_PARTY_LICENSE_DIRECTORY_NAME/$license_path")
+  done
   assert_exact_tree_roster "$app" "${app_roster[@]}"
 
   [[ "$(plist_value "$plist" CFBundleIdentifier)" == "$BUNDLE_IDENTIFIER" ]] \
@@ -695,32 +901,42 @@ validate_public_repository() {
   local observed_cdhash="$4"
   local file
   local mode_file
+  local license_path
+  local -a repository_roster=(
+    "CHECKSUMS.txt"
+    "LICENSE"
+    "PRIVACY.md"
+    "README.md"
+    "RELEASE_NOTES.md"
+    "SECURITY.md"
+    "SUPPORT.md"
+    "$THIRD_PARTY_NOTICE_NAME"
+    "$THIRD_PARTY_PROVENANCE_NAME"
+    "$THIRD_PARTY_LICENSE_DIRECTORY_NAME/"
+    "release-metadata.json"
+    "screenshots/"
+    "screenshots/01-skill-suite.png"
+    "screenshots/02-cli-contract.png"
+    "screenshots/03-visual-debugging.png"
+    "screenshots/04-native-macos-app.png"
+    "screenshots/provenance.json"
+  )
 
   [[ -d "$repository" ]] || die "public repository staging directory is missing"
   assert_no_symlinks "$repository"
   assert_no_sensitive_names "$repository"
   assert_no_source_material "$repository"
-  assert_exact_tree_roster "$repository" \
-    "CHECKSUMS.txt" \
-    "LICENSE" \
-    "PRIVACY.md" \
-    "README.md" \
-    "RELEASE_NOTES.md" \
-    "SECURITY.md" \
-    "SUPPORT.md" \
-    "THIRD_PARTY_NOTICES.md" \
-    "release-metadata.json" \
-    "screenshots/" \
-    "screenshots/01-skill-suite.png" \
-    "screenshots/02-cli-contract.png" \
-    "screenshots/03-visual-debugging.png" \
-    "screenshots/04-native-macos-app.png" \
-    "screenshots/provenance.json"
+  for license_path in "${THIRD_PARTY_LICENSE_PATHS[@]}"; do
+    repository_roster+=("$THIRD_PARTY_LICENSE_DIRECTORY_NAME/$license_path")
+  done
+  assert_exact_tree_roster "$repository" "${repository_roster[@]}"
 
   mode_file="$(find "$repository" -path "$repository/.git" -prune -o -type f -perm -111 -print -quit)"
   [[ -z "$mode_file" ]] || die "public metadata file must not be executable: $mode_file"
 
-  assert_no_publication_placeholders "$repository"
+  assert_no_publication_placeholders \
+    "$repository" "$repository/$THIRD_PARTY_LICENSE_DIRECTORY_NAME"
+  validate_third_party_resources "$repository"
 
   [[ "$(cat "$repository/CHECKSUMS.txt")" == "$artifact_hash  $artifact_name" ]] \
     || die "CHECKSUMS.txt does not exactly match the release artifact"
@@ -790,7 +1006,7 @@ copy_public_repository_template() {
   cp "$TEMPLATE_DIR/RELEASE_NOTES.md" "$destination/RELEASE_NOTES.md"
   cp "$TEMPLATE_DIR/SECURITY.md" "$destination/SECURITY.md"
   cp "$TEMPLATE_DIR/SUPPORT.md" "$destination/SUPPORT.md"
-  cp "$TEMPLATE_DIR/THIRD_PARTY_NOTICES.md" "$destination/THIRD_PARTY_NOTICES.md"
+  stage_third_party_resources "$destination"
 }
 
 stage_screenshots() {
@@ -852,6 +1068,10 @@ prepare_release_bundle() {
   cp "$release_binary" "$staged_app/Contents/MacOS/$APP_PRODUCT"
   chmod 755 "$staged_app/Contents/MacOS/$APP_PRODUCT"
   /usr/bin/strip -S "$staged_app/Contents/MacOS/$APP_PRODUCT"
+  stage_third_party_resources "$staged_app/Contents/Resources"
+  validate_runtime_third_party_provenance \
+    "$staged_app/Contents/Resources/$CLI_RUNTIME_NAME" \
+    "$staged_app/Contents/Resources/$THIRD_PARTY_PROVENANCE_NAME"
   /usr/bin/xattr -cr "$staged_app"
   /usr/bin/codesign --force --sign - --identifier "$BUNDLE_IDENTIFIER" "$staged_app" >/dev/null
 
@@ -932,6 +1152,8 @@ package_release() {
     "$repository/release-metadata.json" "$version" "$artifact_name" "$artifact_hash" "$source_revision" \
     "$staged_cdhash"
   validate_public_repository "$repository" "$artifact_name" "$artifact_hash" "$staged_cdhash"
+  assert_third_party_resources_identical \
+    "$extraction_root/$APP_PRODUCT.app/Contents/Resources" "$repository"
 
   note "binary-only repository staging: $repository"
   note "release attachment: $artifact"
@@ -974,6 +1196,8 @@ verify_release() {
   trap 'rm -rf "$temp_root"' EXIT
   extract_and_validate_archive "$artifact" "$version" "$temp_root/extracted" "$observed_cdhash"
   validate_public_repository "$release_root/repository" "$artifact_name" "$artifact_hash" "$observed_cdhash"
+  assert_third_party_resources_identical \
+    "$temp_root/extracted/$APP_PRODUCT.app/Contents/Resources" "$release_root/repository"
   note "release staging verified: $release_root"
   note "SHA-256: $artifact_hash"
   rm -rf "$temp_root"
@@ -984,6 +1208,7 @@ self_test() {
   local fixture_root
   local repository
   local assets
+  local app_resources
   local dummy_artifact="GameDevelopmentStudio-1.0.0-macOS-arm64.zip"
   local dummy_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   local dummy_cdhash="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -992,6 +1217,7 @@ self_test() {
   local original_runtime_provenance
   local forbidden_output
   local provenance_backup
+  local notice_backup
   local first_screenshot_hash
 
   validate_template "$TEMPLATE_DIR"
@@ -999,6 +1225,7 @@ self_test() {
   trap 'rm -rf "$fixture_root"' EXIT
   repository="$fixture_root/repository"
   assets="$fixture_root/release-assets"
+  app_resources="$fixture_root/app-resources"
   runtime_screenshot="$fixture_root/04-native-macos-app.png"
   runtime_provenance="$fixture_root/04-native-macos-app.provenance.json"
   cp "$SCREENSHOT_SOURCE_DIR/01-skill-suite.png" "$runtime_screenshot"
@@ -1014,6 +1241,7 @@ self_test() {
   "evidenceCeiling": "Fixture validation proves metadata binding only, not runtime execution or visual review."
 }
 JSON
+  stage_third_party_resources "$app_resources"
   copy_public_repository_template "$repository"
   original_runtime_provenance="$RUNTIME_SCREENSHOT_PROVENANCE"
   RUNTIME_SCREENSHOT_PROVENANCE="$runtime_provenance"
@@ -1028,6 +1256,15 @@ JSON
     "$repository/release-metadata.json" "1.0.0" "$dummy_artifact" "$dummy_hash" \
     "0000000000000000000000000000000000000000" "$dummy_cdhash"
   validate_public_repository "$repository" "$dummy_artifact" "$dummy_hash" "$dummy_cdhash"
+  assert_third_party_resources_identical "$app_resources" "$repository"
+
+  notice_backup="$fixture_root/third-party-notice.backup.md"
+  cp "$repository/$THIRD_PARTY_NOTICE_NAME" "$notice_backup"
+  printf 'tampered third-party notice\n' >"$repository/$THIRD_PARTY_NOTICE_NAME"
+  if (assert_third_party_resources_identical "$app_resources" "$repository") >/dev/null 2>&1; then
+    die "self-test failed: a third-party notice mismatch was accepted"
+  fi
+  cp "$notice_backup" "$repository/$THIRD_PARTY_NOTICE_NAME"
 
   provenance_backup="$fixture_root/public-provenance.backup.json"
   first_screenshot_hash="$(sha256_file "$repository/screenshots/01-skill-suite.png")"
@@ -1130,7 +1367,7 @@ JSON
     die "self-test failed: an extra source file beside the release asset was accepted"
   fi
   rm -f "$assets/source.swift"
-  note "self-test passed: structured screenshot binding and source-root output rejection passed; source, ordinary-file, secret-name, AppleDouble, empty-directory, committed-ZIP, symlink, executable-file, and extra-release-asset fixtures were rejected"
+  note "self-test passed: screenshot binding, third-party notice identity, and source-root output rejection passed; source, ordinary-file, secret-name, AppleDouble, empty-directory, committed-ZIP, symlink, executable-file, and extra-release-asset fixtures were rejected"
   rm -rf "$fixture_root"
   trap - EXIT
 }
@@ -1145,7 +1382,7 @@ main() {
 
   for command in git node swift /usr/bin/awk /usr/bin/codesign /usr/bin/ditto \
     /usr/bin/file /usr/bin/lipo /usr/bin/otool /usr/bin/plutil /usr/bin/shasum \
-    /usr/bin/strings /usr/bin/strip /usr/bin/unzip /usr/bin/zip python3; do
+    /usr/bin/strings /usr/bin/strip /usr/bin/unzip /usr/bin/zip /usr/bin/cmp /usr/bin/wc python3; do
     require_command "$command"
   done
 

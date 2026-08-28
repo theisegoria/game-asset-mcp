@@ -40,6 +40,11 @@
     ],
     "brandColor": "#10C9D5",
     "composerIcon": "./assets/icon.png",
-    "logo": "./assets/icon.png"
+    "logo": "./assets/icon.png",
+    "screenshots": [
+      "./assets/screenshots/01-skill-suite.png",
+      "./assets/screenshots/02-cli-contract.png",
+      "./assets/screenshots/03-visual-debugging.png"
+    ]
   }
 }

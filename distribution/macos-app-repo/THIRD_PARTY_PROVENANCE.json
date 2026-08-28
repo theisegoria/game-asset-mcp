@@ -1,0 +1,463 @@
+{
+  "schema": "game_dev.macos_bundled_third_party_provenance.v1",
+  "release": {
+    "appVersion": "1.0.0",
+    "bundleIdentifier": "com.theisegoria.GameDevelopmentStudio",
+    "publicRoot": "THIRD_PARTY_NOTICES.md",
+    "appResourceRoot": "Contents/Resources/THIRD_PARTY_NOTICES.md",
+    "provenancePath": "THIRD_PARTY_PROVENANCE.json",
+    "licenseDirectory": "ThirdPartyLicenses",
+    "identityRule": "The packager and verifier require every public legal asset and its signed-app resource counterpart to be byte-identical."
+  },
+  "auditInputs": {
+    "runtimeRoster": "GameDevelopmentStudioRuntime/runtime-roster.json",
+    "runtimeVerifier": "scripts/verify-cli-runtime.mjs",
+    "cliPackageLock": "apps/macos/GameDevelopmentStudio/GameDevelopmentStudioRuntime/payload/app/package-lock.json",
+    "homebrewCellarRoot": "/opt/homebrew/Cellar",
+    "method": "The runtime roster establishes the staged byte closure. Local installed-formula licenses and lockfile package licenses supply the checked-in notice corpus."
+  },
+  "versionQualification": {
+    "rule": "A Mach-O install-name suffix is an ABI/library version and is not sufficient evidence of the source package version or Homebrew formula revision. Use the stated primary source and the staged runtime roster together.",
+    "examples": [
+      {
+        "runtimeFile": "libuv.1.0.0.dylib",
+        "auditedSourcePackage": "libuv",
+        "auditedSourceVersion": "1.51.0",
+        "evidence": "Homebrew Cellar libuv/1.51.0 and exact license/header texts."
+      },
+      {
+        "runtimeFile": "libcares.2.19.5.dylib",
+        "auditedSourcePackage": "c-ares",
+        "auditedSourceVersion": "1.34.6",
+        "evidence": "Homebrew Cellar c-ares/1.34.6 and its distributed LICENSE."
+      },
+      {
+        "runtimeFile": "libzstd.1.5.7.dylib",
+        "auditedSourcePackage": "zstd",
+        "auditedSourceVersion": "1.5.7",
+        "homebrewFormulaVersion": "1.5.7_1",
+        "evidence": "Homebrew Cellar zstd/1.5.7_1; _1 is a formula revision, not a different upstream source release."
+      }
+    ]
+  },
+  "bundledRuntime": {
+    "gameDevCli": {
+      "version": "1.0.1",
+      "license": "MIT",
+      "evidence": "The staged CLI package manifest and root package-lock entry.",
+      "licenseAssets": [
+        "game-development-studio-1.0.1-MIT.txt"
+      ]
+    },
+    "node": {
+      "version": "25.2.1",
+      "sourceFormula": "node",
+      "sourceFormulaVersion": "25.2.1",
+      "license": "Node.js distributed LICENSE, including embedded notices",
+      "licenseAssets": [
+        "node-25.2.1-LICENSE.txt"
+      ]
+    },
+    "nonSystemDylibCount": 18,
+    "nonSystemDylibs": [
+      {
+        "runtimeFiles": [
+          "libbrotlicommon.1.2.0.dylib",
+          "libbrotlidec.1.2.0.dylib",
+          "libbrotlienc.1.2.0.dylib"
+        ],
+        "sourceFormula": "brotli",
+        "sourceFormulaVersion": "1.2.0",
+        "licenseAssets": [
+          "brotli-1.2.0-MIT.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libcares.2.19.5.dylib"
+        ],
+        "sourceFormula": "c-ares",
+        "sourceFormulaVersion": "1.34.6",
+        "licenseAssets": [
+          "c-ares-1.34.6-MIT.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libcrypto.3.dylib",
+          "libssl.3.dylib"
+        ],
+        "sourceFormula": "openssl@3",
+        "sourceFormulaVersion": "3.6.3",
+        "licenseAssets": [
+          "openssl-3.6.3-Apache-2.0.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libicudata.78.3.dylib",
+          "libicui18n.78.3.dylib",
+          "libicuuc.78.3.dylib"
+        ],
+        "sourceFormula": "icu4c@78",
+        "sourceFormulaVersion": "78.3",
+        "licenseAssets": [
+          "icu4c-78.3-ICU.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libnghttp2.14.dylib"
+        ],
+        "sourceFormula": "libnghttp2",
+        "sourceFormulaVersion": "1.68.0",
+        "licenseAssets": [
+          "nghttp2-1.68.0-MIT.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libnghttp3.9.5.1.dylib"
+        ],
+        "sourceFormula": "libnghttp3",
+        "sourceFormulaVersion": "1.13.1",
+        "licenseAssets": [
+          "nghttp3-1.13.1-MIT.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libngtcp2.16.dylib"
+        ],
+        "sourceFormula": "libngtcp2",
+        "sourceFormulaVersion": "1.18.0",
+        "licenseAssets": [
+          "ngtcp2-1.18.0-MIT.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libnode.141.dylib"
+        ],
+        "sourceFormula": "node",
+        "sourceFormulaVersion": "25.2.1",
+        "licenseAssets": [
+          "node-25.2.1-LICENSE.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libsimdjson.29.0.0.dylib"
+        ],
+        "sourceFormula": "simdjson",
+        "sourceFormulaVersion": "4.2.3",
+        "licenseAssets": [
+          "simdjson-4.2.3-Apache-2.0.txt",
+          "simdjson-4.2.3-MIT.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libsqlite3.3.53.4.dylib"
+        ],
+        "sourceFormula": "sqlite",
+        "sourceFormulaVersion": "3.53.4",
+        "licenseAssets": [
+          "sqlite-3.53.4-public-domain.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libuv.1.0.0.dylib"
+        ],
+        "sourceFormula": "libuv",
+        "sourceFormulaVersion": "1.51.0",
+        "licenseAssets": [
+          "libuv-1.51.0-MIT.txt",
+          "libuv-1.51.0-extra-MIT-BSD-2-ISC-index.txt",
+          "libuv-1.51.0-BSD-2-Clause-tree.h.txt",
+          "libuv-1.51.0-ISC-inet.c.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libuvwasi.dylib"
+        ],
+        "sourceFormula": "uvwasi",
+        "sourceFormulaVersion": "0.0.23",
+        "licenseAssets": [
+          "uvwasi-0.0.23-Apache-2.0.txt"
+        ]
+      },
+      {
+        "runtimeFiles": [
+          "libzstd.1.5.7.dylib"
+        ],
+        "sourceFormula": "zstd",
+        "sourceFormulaVersion": "1.5.7",
+        "homebrewFormulaVersion": "1.5.7_1",
+        "licenseAssets": [
+          "zstd-1.5.7-BSD-3-Clause.txt",
+          "zstd-1.5.7-GPL-2.0-alternative.txt",
+          "zstd-1.5.7-source-archive-ancillary-BSD-2-Clause.txt",
+          "zstd-1.5.7-source-archive-ancillary-MIT.txt"
+        ]
+      }
+    ]
+  },
+  "npmProductionPackages": [
+    {
+      "name": "@gltf-transform/core",
+      "declaredRange": "^4.1.1",
+      "lockedVersion": "4.4.2",
+      "lockIntegrity": "sha512-qsWKwNSwK+2s834Mt4xbYcyHqCrgNFP7hIv5s487JxebngRfDgelpghNF+kSswGb2/NuapasfK3UViFoSJJoMg==",
+      "license": "MIT",
+      "licenseAssets": [
+        "npm-gltf-transform-core-4.4.2-MIT.txt"
+      ]
+    },
+    {
+      "name": "property-graph",
+      "declaredRange": "^4.1.0",
+      "lockedVersion": "4.1.0",
+      "lockIntegrity": "sha512-AvPcP7XECNWy4LGmFQ77k7un4lSKM4eS29PTvW4ck95uYeLxXPWJM7hLuBqK91FaHqCcgJvIUCuNJjjxKE7VKQ==",
+      "license": "MIT",
+      "licenseAssets": [
+        "npm-property-graph-4.1.0-MIT.txt"
+      ]
+    },
+    {
+      "name": "jpeg-js",
+      "declaredRange": "^0.4.4",
+      "lockedVersion": "0.4.4",
+      "lockIntegrity": "sha512-WZzeDOEtTOBK4Mdsar0IqEU5sMr3vSV2RqkAIzUEV2BHnUfKGyswWFPFwK5EeDo93K3FohSHbLAjj0s1Wzd+dg==",
+      "license": "BSD-3-Clause",
+      "licenseAssets": [
+        "npm-jpeg-js-0.4.4-BSD-3-Clause.txt"
+      ]
+    },
+    {
+      "name": "pngjs",
+      "declaredRange": "^7.0.0",
+      "lockedVersion": "7.0.0",
+      "lockIntegrity": "sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==",
+      "license": "MIT",
+      "licenseAssets": [
+        "npm-pngjs-7.0.0-MIT.txt"
+      ]
+    },
+    {
+      "name": "zod",
+      "declaredRange": "^3.23.8",
+      "lockedVersion": "3.25.76",
+      "lockIntegrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==",
+      "license": "MIT",
+      "licenseAssets": [
+        "npm-zod-3.25.76-MIT.txt"
+      ]
+    }
+  ],
+  "zstdScopeQualification": {
+    "shippedObject": "libzstd.1.5.7.dylib",
+    "upstreamLicenseChoice": "The root zstd LICENSE permits the BSD alternative; the release records that BSD alternative for the shipped dylib.",
+    "alternativeText": "The full GPL-2.0 text is retained because zstd publishes it as the alternative upstream license, not because this release selects it.",
+    "gplTextNormalization": "Homebrew's COPYING file ends without a terminal line feed. The checked-in full text adds one terminal LF only; all license characters before that normalized line ending match the local source.",
+    "sourceArchiveSbomLicenseConcluded": "(BSD-3-Clause OR GPL-2.0-only) AND BSD-2-Clause AND MIT",
+    "sourceArchiveSbomFilesAnalyzed": false,
+    "ancillaryScope": "BSD-2-Clause and MIT are conservative whole-source-archive ancillary disclosures. The archive-level SBOM is not file-level evidence and does not establish that either ancillary component is present in the staged libzstd dylib.",
+    "sourceArchiveSha256": "37d7284556b20954e56e1ca85b80226768902e2edabd3b649e9e72c0c9012ee3"
+  },
+  "notBundled": [
+    "Blender",
+    "game engines",
+    "Tripo provider SDK or service",
+    "Leonardo provider SDK or service",
+    "provider credentials",
+    "Apple system frameworks and system libraries"
+  ],
+  "legalAssets": [
+    {
+      "path": "brotli-1.2.0-MIT.txt",
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+      "bytes": 1084,
+      "source": "Homebrew Cellar brotli/1.2.0/LICENSE",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "c-ares-1.34.6-MIT.txt",
+      "sha256": "460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807",
+      "bytes": 1211,
+      "source": "Homebrew Cellar c-ares/1.34.6/LICENSE.md",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "game-development-studio-1.0.1-MIT.txt",
+      "sha256": "915b4af615fcf20f331b7aa09822ea6dff49cc8e39c1ab5860ed5b91fe4aa79d",
+      "bytes": 1066,
+      "source": "CLI package root LICENSE at version 1.0.1",
+      "scope": "Bundled game-dev CLI"
+    },
+    {
+      "path": "icu4c-78.3-ICU.txt",
+      "sha256": "e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af",
+      "bytes": 27718,
+      "source": "Homebrew Cellar icu4c@78/78.3/LICENSE",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "libuv-1.51.0-BSD-2-Clause-tree.h.txt",
+      "sha256": "05504284dee75c47d712644e7b06c6c1b1ebbaee5d03dd660646716c8be3e5c3",
+      "bytes": 1337,
+      "source": "libuv v1.51.0 include/uv/tree.h exact header",
+      "scope": "Bundled libuv supplementary notice"
+    },
+    {
+      "path": "libuv-1.51.0-ISC-inet.c.txt",
+      "sha256": "07edda5b9a6e713ccf1e14bad1b88b2b775bc4abc292fd32c29afd7a4957302f",
+      "bytes": 830,
+      "source": "libuv v1.51.0 src/inet.c exact header",
+      "scope": "Bundled libuv supplementary notice"
+    },
+    {
+      "path": "libuv-1.51.0-MIT.txt",
+      "sha256": "16de0c32b265cb7d46a6d3bd614f259dd4d693a5e26b3407b04aae8d73041f0c",
+      "bytes": 1079,
+      "source": "Homebrew Cellar libuv/1.51.0/LICENSE",
+      "scope": "Bundled libuv dependency"
+    },
+    {
+      "path": "libuv-1.51.0-extra-MIT-BSD-2-ISC-index.txt",
+      "sha256": "262c44bd2cdba037e6d2a82fba15f5800d292bc993a6f5d6b6ea487744d02836",
+      "bytes": 1603,
+      "source": "Homebrew Cellar libuv/1.51.0/LICENSE-extra",
+      "scope": "Bundled libuv external-notice index"
+    },
+    {
+      "path": "nghttp2-1.68.0-MIT.txt",
+      "sha256": "6b94f3abc1aabd0c72a7c7d92a77f79dda7c8a0cb3df839a97890b4116a2de2a",
+      "bytes": 1156,
+      "source": "Homebrew Cellar libnghttp2/1.68.0/COPYING",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "nghttp3-1.13.1-MIT.txt",
+      "sha256": "58cc3fc8c6d6cb2485ab35eb5918e849b5bf1e56522974e106d7a39a88d61dcd",
+      "bytes": 1081,
+      "source": "Homebrew Cellar libnghttp3/1.13.1/COPYING",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "ngtcp2-1.18.0-MIT.txt",
+      "sha256": "542dd526d2ea23565f0571cc68df6f05ed11248a90ff0f32de19d8ba589db513",
+      "bytes": 1080,
+      "source": "Homebrew Cellar libngtcp2/1.18.0/COPYING",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "node-25.2.1-LICENSE.txt",
+      "sha256": "537308465103a306d0e3eecf42632b4ff1b48aaaec044e9fc10a78c81fd00b34",
+      "bytes": 143310,
+      "source": "Homebrew Cellar node/25.2.1/LICENSE",
+      "scope": "Bundled Node executable and libnode dependency"
+    },
+    {
+      "path": "npm-gltf-transform-core-4.4.2-MIT.txt",
+      "sha256": "2c4f111d00dbf22b10d31a14813c5f5de6a828640f7311f26b9dda89b3fce165",
+      "bytes": 1078,
+      "source": "Locked npm package @gltf-transform/core@4.4.2/LICENSE.md",
+      "scope": "Bundled CLI production package"
+    },
+    {
+      "path": "npm-jpeg-js-0.4.4-BSD-3-Clause.txt",
+      "sha256": "c0a8512eabe960492fefd4f287523eb3b5ca1518ca37ef0ec83344cd7f089cb8",
+      "bytes": 1448,
+      "source": "Locked npm package jpeg-js@0.4.4/LICENSE",
+      "scope": "Bundled CLI production package"
+    },
+    {
+      "path": "npm-pngjs-7.0.0-MIT.txt",
+      "sha256": "be75ef59c5cf59715588a17a82dff7dd3e83c4dba3c458676bb9311e05fbedc5",
+      "bytes": 1150,
+      "source": "Locked npm package pngjs@7.0.0/LICENSE",
+      "scope": "Bundled CLI production package"
+    },
+    {
+      "path": "npm-property-graph-4.1.0-MIT.txt",
+      "sha256": "ec5114155d92f326802c964dcf9eb5261e09192c62f14d195d2a8be49eb1d489",
+      "bytes": 1078,
+      "source": "Locked npm package property-graph@4.1.0/LICENSE",
+      "scope": "Bundled CLI production package"
+    },
+    {
+      "path": "npm-zod-3.25.76-MIT.txt",
+      "sha256": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8",
+      "bytes": 1072,
+      "source": "Locked npm package zod@3.25.76/LICENSE",
+      "scope": "Bundled CLI production package"
+    },
+    {
+      "path": "openssl-3.6.3-Apache-2.0.txt",
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+      "bytes": 10175,
+      "source": "Homebrew Cellar openssl@3/3.6.3/LICENSE.txt",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "simdjson-4.2.3-Apache-2.0.txt",
+      "sha256": "5fa8894e890bd77958f93b165433e0fb0dffa5bc982bfb147e4748e95bad24e5",
+      "bytes": 11355,
+      "source": "Homebrew Cellar simdjson/4.2.3/LICENSE",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "simdjson-4.2.3-MIT.txt",
+      "sha256": "9ed0a34979f22fc33fc13d942233f22d44906c236d876bd05fadf18cb5abf7da",
+      "bytes": 1065,
+      "source": "Homebrew Cellar simdjson/4.2.3/LICENSE-MIT",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "sqlite-3.53.4-public-domain.txt",
+      "sha256": "f979dfe565f426a86cc3ca9c7290f8f340fd2e126dfd9a24036f8ca657733453",
+      "bytes": 266,
+      "source": "Homebrew Cellar sqlite/3.53.4/include/sqlite3.h public-domain declaration",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "uvwasi-0.0.23-Apache-2.0.txt",
+      "sha256": "3a94b84af77767e64afdf5fc31d4196810c9717ce2ac2be089f06fec4bfc0e99",
+      "bytes": 1085,
+      "source": "Homebrew Cellar uvwasi/0.0.23/LICENSE",
+      "scope": "Bundled dylib dependency"
+    },
+    {
+      "path": "zstd-1.5.7-BSD-3-Clause.txt",
+      "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+      "bytes": 1549,
+      "source": "Homebrew Cellar zstd/1.5.7_1/LICENSE",
+      "scope": "Bundled libzstd BSD license choice"
+    },
+    {
+      "path": "zstd-1.5.7-GPL-2.0-alternative.txt",
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+      "bytes": 18092,
+      "source": "Homebrew Cellar zstd/1.5.7_1/COPYING; complete text with one normalized terminal LF",
+      "scope": "Upstream alternative license text; not selected for shipped libzstd"
+    },
+    {
+      "path": "zstd-1.5.7-source-archive-ancillary-BSD-2-Clause.txt",
+      "sha256": "9b3c623ede02027141023931b1f4120fe92534872cd2f5ea7baaa55615b90b0c",
+      "bytes": 1326,
+      "source": "Conservative full text for the BSD-2-Clause term named by Homebrew's zstd source-archive SBOM conclusion",
+      "scope": "Whole-source-archive ancillary disclosure; not an object-level libzstd composition claim"
+    },
+    {
+      "path": "zstd-1.5.7-source-archive-ancillary-MIT.txt",
+      "sha256": "795347a24bd3a7daa9df413fe3e39389a340f048392bdaea103864cf50381f39",
+      "bytes": 1071,
+      "source": "Conservative full text for the MIT term named by Homebrew's zstd source-archive SBOM conclusion",
+      "scope": "Whole-source-archive ancillary disclosure; not an object-level libzstd composition claim"
+    }
+  ],
+  "evidenceCeiling": "This record identifies the audited release composition and checked-in notice assets. It does not by itself prove runtime execution, signature trust, notarization, provider availability, target-game import, GPU execution, visual approval, or performance."
+}

@@ -158,15 +158,19 @@ Recommended evidence set after real capture:
 ## System requirements and current distribution status
 
 - macOS 26 or later
-- Local `game-dev` installation or an explicitly configured executable path
+- Apple silicon (`arm64`) for the published 1.0.0 app bundle
+- The bundled, closed `game-dev` runtime; no separate CLI or Node installation
+  is required for normal app use. An explicitly configured executable remains
+  available only for credential-free diagnostics.
 - Blender only for workflows whose CLI operation requires Blender
 - Tripo or Leonardo account and credential only for that provider's paid route
 - A project adapter only for project-owned capture scenarios
 
-The repository helper currently creates an ad-hoc-signed local development
-bundle. It is not a Developer ID-signed or notarized release, has not passed Mac
-App Store review, and should not be marketed as an externally distributable Mac
-download until those gates are completed.
+The 1.0.0 binary-distribution contract is deliberately ad-hoc signed. It is not
+Developer ID signed or notarized, has no stapled ticket, and is not a Mac App
+Store build. Publish it only with its checksum, exact trust-state disclosure,
+and the documented Finder **Open** or System Settings **Open Anyway** route;
+never imply Apple publisher authentication that the artifact does not carry.
 
 ## Claims checklist before publication
 

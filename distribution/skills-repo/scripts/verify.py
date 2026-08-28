@@ -168,7 +168,6 @@ def verify_tree() -> dict:
     require(not unexpected_interface_fields, f"unsupported plugin interface fields: {unexpected_interface_fields}")
     short_description = interface.get("shortDescription")
     require(isinstance(short_description, str) and len(short_description) <= 30, "short description exceeds 30 characters")
-    require("screenshots" not in interface, "skills-only manifest must not declare screenshots")
 
     marketplace = load_json(ROOT / ".agents" / "plugins" / "marketplace.json")
     entry = marketplace["plugins"][0]
@@ -203,6 +202,7 @@ def verify_tree() -> dict:
         "./assets/screenshots/03-visual-debugging.png",
     ]
     require(len(screenshots) == 3, "three screenshots required")
+    require(interface.get("screenshots") == screenshots, "plugin manifest must declare the exact three release screenshots")
     for relative in screenshots:
         path = PLUGIN / relative.removeprefix("./")
         record = next(item for item in screenshot_provenance["screenshots"] if item["path"] == path.name)

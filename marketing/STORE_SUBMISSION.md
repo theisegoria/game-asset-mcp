@@ -168,9 +168,8 @@ requirement.
 - repository, support, privacy, and terms URLs publicly reachable
 - final ZIP created from the tagged repository
 - all five skills pass the local validator
-- icon passes manifest validation; the three product screenshots pass the
-  separate GitHub/release asset checks and are not declared in the skills-only
-  manifest
+- icon and all three product screenshots pass manifest, provenance, dimension,
+  and closed-release checks
 - five positive and three negative tests entered
 - availability selected only where support and terms are ready
 - product-specific local execution disclosure included in the listing and

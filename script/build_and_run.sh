@@ -17,6 +17,12 @@ ICON_COMPILED="$ROOT_DIR/assets/macos/AppIcon.icns"
 RUNTIME_NAME="GameDevelopmentStudioRuntime"
 RUNTIME_BUILDER="$ROOT_DIR/scripts/build-cli-runtime.mjs"
 RUNTIME_VERIFIER="$ROOT_DIR/scripts/verify-cli-runtime.mjs"
+RUNTIME_PROVENANCE_VERIFIER="$ROOT_DIR/scripts/verify-macos-runtime-provenance.mjs"
+THIRD_PARTY_TEMPLATE_DIR="$ROOT_DIR/distribution/macos-app-repo"
+THIRD_PARTY_NOTICE="$THIRD_PARTY_TEMPLATE_DIR/THIRD_PARTY_NOTICES.md"
+THIRD_PARTY_PROVENANCE="$THIRD_PARTY_TEMPLATE_DIR/THIRD_PARTY_PROVENANCE.json"
+THIRD_PARTY_LICENSE_SOURCE="$THIRD_PARTY_TEMPLATE_DIR/legal/third-party-licenses"
+THIRD_PARTY_LICENSE_DESTINATION_NAME="ThirdPartyLicenses"
 
 case "$MODE" in
   run|--test|test|--build-only|build-only|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify) ;;
@@ -39,8 +45,17 @@ if [[ ! -f "$ICON_SOURCE" || ! -f "$ICON_COMPILED" ]]; then
   echo "missing app icon master or compiled ICNS asset" >&2
   exit 1
 fi
-if [[ ! -f "$RUNTIME_BUILDER" || ! -f "$RUNTIME_VERIFIER" ]]; then
+if [[ ! -f "$RUNTIME_BUILDER" || ! -f "$RUNTIME_VERIFIER" || ! -f "$RUNTIME_PROVENANCE_VERIFIER" ]]; then
   echo "missing closed CLI runtime builder or verifier" >&2
+  exit 1
+fi
+if [[ ! -f "$THIRD_PARTY_NOTICE" || ! -f "$THIRD_PARTY_PROVENANCE" \
+  || ! -d "$THIRD_PARTY_LICENSE_SOURCE" ]]; then
+  echo "missing canonical macOS third-party notice resources" >&2
+  exit 1
+fi
+if [[ -n "$(find "$THIRD_PARTY_LICENSE_SOURCE" -type l -print -quit)" ]]; then
+  echo "refusing symlinked macOS third-party license resources" >&2
   exit 1
 fi
 
@@ -95,6 +110,29 @@ node "$RUNTIME_BUILDER" \
   --output "$APP_RESOURCES/$RUNTIME_NAME" >/dev/null
 node "$RUNTIME_VERIFIER" \
   --runtime "$APP_RESOURCES/$RUNTIME_NAME" >/dev/null
+STAGED_NODE_VERSION="$("$APP_RESOURCES/$RUNTIME_NAME/payload/node/bin/node" --version | /usr/bin/head -n 1)"
+node "$RUNTIME_PROVENANCE_VERIFIER" \
+  --runtime "$APP_RESOURCES/$RUNTIME_NAME" \
+  --provenance "$THIRD_PARTY_PROVENANCE" \
+  --node-version "$STAGED_NODE_VERSION" >/dev/null
+
+cp "$THIRD_PARTY_NOTICE" "$APP_RESOURCES/THIRD_PARTY_NOTICES.md"
+cp "$THIRD_PARTY_PROVENANCE" "$APP_RESOURCES/THIRD_PARTY_PROVENANCE.json"
+cp -R "$THIRD_PARTY_LICENSE_SOURCE" \
+  "$APP_RESOURCES/$THIRD_PARTY_LICENSE_DESTINATION_NAME"
+[[ "$(/usr/bin/plutil -extract schema raw -o - \
+  "$APP_RESOURCES/THIRD_PARTY_PROVENANCE.json")" \
+  == "game_dev.macos_bundled_third_party_provenance.v1" ]] \
+  || { echo "staged third-party provenance schema is invalid" >&2; exit 1; }
+/usr/bin/cmp -s "$THIRD_PARTY_NOTICE" \
+  "$APP_RESOURCES/THIRD_PARTY_NOTICES.md" \
+  || { echo "staged third-party notice differs from its canonical source" >&2; exit 1; }
+/usr/bin/cmp -s "$THIRD_PARTY_PROVENANCE" \
+  "$APP_RESOURCES/THIRD_PARTY_PROVENANCE.json" \
+  || { echo "staged third-party provenance differs from its canonical source" >&2; exit 1; }
+/usr/bin/diff -qr "$THIRD_PARTY_LICENSE_SOURCE" \
+  "$APP_RESOURCES/$THIRD_PARTY_LICENSE_DESTINATION_NAME" >/dev/null \
+  || { echo "staged third-party license tree differs from its canonical source" >&2; exit 1; }
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
