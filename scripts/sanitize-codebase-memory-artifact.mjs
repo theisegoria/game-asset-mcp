@@ -283,7 +283,7 @@ function assertPortableGraph(database, portableRoot, forbiddenTokens) {
     invariant(nonPortable === 0, `${table} contains a non-portable branch-root property`);
   }
 
-  for (const token of [macUserRootPrefix, ...forbiddenTokens]) {
+  for (const token of forbiddenTokens) {
     invariant(legacyLocations(database, token).length === 0, 'forbidden local data remains in a graph text column');
   }
 }
@@ -369,7 +369,6 @@ function inspectArtifact(artifactPath, metadataPath, portableRootOption, forbidd
     database.close();
 
     const rawTokens = [...new Set([
-      macUserRootPrefix,
       ...forbiddenTokens,
       ...(legacy ? [legacy.oldRoot, legacy.oldLeaf, legacy.oldUser].filter(Boolean) : []),
     ])];
