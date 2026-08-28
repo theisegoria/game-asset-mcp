@@ -8,7 +8,7 @@ BUNDLE_ID="com.theisegoria.GameDevelopmentStudio"
 MIN_SYSTEM_VERSION="26.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PACKAGE_DIR="$ROOT_DIR/macos/GameDevelopmentStudio"
+PACKAGE_DIR="$ROOT_DIR/apps/macos/GameDevelopmentStudio"
 DIST_DIR="$PACKAGE_DIR/dist"
 FINAL_APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_MODULE_CACHE="$PACKAGE_DIR/.build/ModuleCache"

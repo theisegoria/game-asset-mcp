@@ -92,15 +92,15 @@ jobs:
           swift --version
 
       - name: Build the macOS 26 app
-        run: swift build --package-path macos/GameDevelopmentStudio
+        run: swift build --package-path apps/macos/GameDevelopmentStudio
 
       - name: Test the app model, process boundary, and credential boundary
-        run: swift test --package-path macos/GameDevelopmentStudio
+        run: swift test --package-path apps/macos/GameDevelopmentStudio
 
       - name: Stage and ad-hoc sign the local app bundle
         run: ./script/build_and_run.sh --build-only
 
       - name: Validate the staged bundle
         run: |
-          plutil -lint macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app/Contents/Info.plist
-          codesign --verify --deep --strict macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app
+          plutil -lint apps/macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app/Contents/Info.plist
+          codesign --verify --deep --strict apps/macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app

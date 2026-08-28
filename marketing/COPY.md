@@ -8,13 +8,13 @@ game they land in.
 ## One sentence
 
 Game Development Studio is a local-first CLI and skill suite for producing,
-packaging, vendoring, capturing, diagnosing, and optimizing game assets without
-running an MCP server.
+packaging, vendoring, capturing, diagnosing, and optimizing game assets through
+one inspectable JSON/JSONL contract.
 
 ## GitHub description
 
 Local-first game asset production, vendoring, sealed render capture, visual
-debugging, and bounded performance skills—no MCP server required.
+debugging, and bounded performance tools for developers and coding agents.
 
 ## Short store description
 
@@ -32,9 +32,9 @@ Capture windowless renders with semantic attachments and structured telemetry,
 then compare sealed runs with deterministic statistics, heatmaps, and bounded
 performance goals.
 
-The plugin is skills-only: it adds no MCP server and sends no analytics to the
-publisher. Execution requires the separately installed `game-dev` CLI in a
-local Codex environment. ChatGPT can still route workflows and analyze
+The plugin is skills-only and sends no analytics to the publisher. Execution
+requires the separately installed `game-dev` CLI in a local Codex environment.
+ChatGPT can still route workflows and analyze
 user-supplied manifests, telemetry, metrics, and capture summaries. Paid
 provider calls, project writes, GPU work, and performance measurements remain
 separately authorized for each invocation.
@@ -51,7 +51,7 @@ separately authorized for each invocation.
 - Color, depth, normal, object-ID, material-ID, motion, and overdraw evidence
 - Sealed telemetry, log, raster, and performance run bundles
 - Deterministic heatmaps and bounded optimization goals
-- Local CLI authority; no resident MCP service
+- Inspectable local CLI with no standing permissions
 
 ## Who it is for
 
@@ -84,18 +84,17 @@ It combines a local `game-dev` CLI with five skills for:
 - deterministic visual comparisons
 - bounded performance goals
 
-It is intentionally not an MCP server. Codex invokes the same inspectable CLI a
-developer can run, and every sensitive capability—spend, writes, GPU work, and
-performance capture—has its own per-invocation gate.
+Codex invokes the same inspectable CLI a developer can run, and every sensitive
+capability—spend, writes, GPU work, and performance capture—has its own
+per-invocation gate.
 
 The first public release is open source under MIT.
 
 ## Compact social post
 
 Game Development Studio: local-first skills + CLI for game assets, sealed
-render captures, telemetry-led visual debugging, and bounded optimization. No
-MCP daemon. Dry-run-first writes, explicit spend/GPU gates, provenance all the
-way down.
+render captures, telemetry-led visual debugging, and bounded optimization.
+Dry-run-first writes, explicit spend/GPU gates, provenance all the way down.
 
 ## Screenshot captions and alt text
 

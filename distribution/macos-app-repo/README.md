@@ -3,7 +3,7 @@
 Game Development Studio is a native macOS control surface for the local
 `game-dev` toolchain. It brings asset production, canonical package vendoring,
 evidence-rich visual debugging, and performance comparison into four focused
-workspaces without adding an MCP server or hosted application backend.
+workspaces without a publisher-hosted application backend.
 
 ![Game Development Studio running on macOS 26](screenshots/04-native-macos-app.png)
 

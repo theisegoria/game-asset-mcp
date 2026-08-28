@@ -1,6 +1,6 @@
 {
   "name": "game-development-studio",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local-first game asset production, vendoring, render diagnosis, and bounded performance workflows.",
   "author": {
     "name": "Benjamin Michael Haire",
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Game Development Studio",
     "shortDescription": "Build assets. Debug renders.",
-    "longDescription": "Route game asset production, canonical package vendoring, sealed render-capture diagnosis, and bounded performance work through a local-first evidence-aware workflow. Execution uses the separately installed game-dev CLI; the skills never add an MCP server or silently authorize provider spend, project writes, GPU work, or performance measurement.",
+    "longDescription": "Route game asset production, canonical package vendoring, sealed render-capture diagnosis, and bounded performance work through a local-first evidence-aware workflow. Execution uses the separately installed game-dev CLI, while provider spend, project writes, GPU work, and performance measurement remain separately authorized for each invocation.",
     "developerName": "Benjamin Michael Haire",
     "category": "Developer Tools",
     "capabilities": [

@@ -1,6 +1,6 @@
 {
   "name": "@theisegoria/game-development-studio",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local-first CLI and native macOS studio for game-asset production, deterministic captures, visual debugging, and performance analysis.",
   "keywords": [
     "game-development",

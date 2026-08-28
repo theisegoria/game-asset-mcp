@@ -15,8 +15,8 @@ Produce, vendor, diagnose, and measure game assets from one local Mac workspace.
 
 A native macOS 26 companion for the local-first `game-dev` toolchain. Generate
 and package assets, admit verified packages into projects, inspect evidence-rich
-captures, and compare performance without routing the workflow through a hosted
-backend or MCP server.
+captures, and compare performance without routing the workflow through a
+publisher-hosted backend.
 
 ## Store-length summary
 
@@ -77,7 +77,7 @@ boundaries.
   inspector
 - macOS Keychain storage with masked entry and configured-state-only display
 - Local CLI execution through the stable `game_dev.result.v1` protocol
-- No MCP server or hosted application backend required
+- No publisher-hosted application backend or standing operation permissions
 
 ## Trust and approval copy
 
@@ -117,11 +117,13 @@ performance comparison into four local workspaces backed by the same open
 
 Provider credentials stay in Keychain. Paid calls, project writes, scenario
 execution, GPU work, and hardware timing collection receive explicit one-shot
-approval. The CLI and Codex skills still work independently; no MCP server or
-hosted backend is required.
+approval. The CLI and Codex skills still work independently; no
+publisher-hosted backend is required.
 
 Use the “available now” version of this post only after a release artifact has
-been signed, notarized, published, and independently downloaded and launched.
+been packaged, published, independently downloaded, verified, and launched.
+Describe its actual signing and notarization state rather than implying a trust
+identity the artifact does not have.
 
 ## Screenshot plan and captions
 

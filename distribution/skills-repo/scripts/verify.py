@@ -30,7 +30,7 @@ def png_size(path: pathlib.Path) -> tuple[int, int]:
 
 manifest = load_json(PLUGIN / ".codex-plugin" / "plugin.json")
 require(manifest["name"] == "game-development-studio", "unexpected plugin name")
-require(manifest["version"] == "1.0.0", "unexpected plugin version")
+require(manifest["version"] == "1.0.1", "unexpected plugin version")
 require(manifest["skills"] == "./skills/", "unexpected skills path")
 require("mcpServers" not in manifest and "apps" not in manifest, "plugin must be skills-only")
 require(not (PLUGIN / ".mcp.json").exists(), "plugin ships .mcp.json")

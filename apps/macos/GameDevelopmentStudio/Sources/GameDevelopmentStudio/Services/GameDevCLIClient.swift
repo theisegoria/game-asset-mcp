@@ -603,13 +603,17 @@ private final class ManagedProcess: @unchecked Sendable {
         standardOutputReadSource = outputSource
         outputSource.setEventHandler { [weak self] in
             guard let self,
-                  let source = self.standardOutputReadSource,
-                  source.data > 0
+                  let source = self.standardOutputReadSource
             else { return }
+            let availableBytes = source.data
+            guard availableBytes > 0 else {
+                self.quiesceReadSource(for: .standardOutput)
+                return
+            }
             self.drainAvailableData(
                 from: outputHandle,
                 stream: .standardOutput,
-                availableBytes: source.data
+                availableBytes: availableBytes
             )
         }
         outputSource.resume()
@@ -621,23 +625,31 @@ private final class ManagedProcess: @unchecked Sendable {
         standardErrorReadSource = errorSource
         errorSource.setEventHandler { [weak self] in
             guard let self,
-                  let source = self.standardErrorReadSource,
-                  source.data > 0
+                  let source = self.standardErrorReadSource
             else { return }
+            let availableBytes = source.data
+            guard availableBytes > 0 else {
+                self.quiesceReadSource(for: .standardError)
+                return
+            }
             self.drainAvailableData(
                 from: errorHandle,
                 stream: .standardError,
-                availableBytes: source.data
+                availableBytes: availableBytes
             )
         }
         errorSource.resume()
 
-        // Wait for the direct PID on a detached queue. Process' termination
-        // callback can be delayed by inherited pipe holders on some macOS
-        // releases; waitUntilExit gives us the direct process boundary while
-        // the readability handlers continue draining capped output.
+        // Observe the direct PID on a detached queue. Process.waitUntilExit()
+        // can remain in Foundation's run-loop wait when several short-lived
+        // NSTask instances are used in one suite. Polling isRunning gives us
+        // the direct process boundary without waiting for inherited pipe
+        // holders, while the readability handlers continue draining capped
+        // output.
         DispatchQueue.global(qos: .utility).async { [weak self, process] in
-            process.waitUntilExit()
+            while process.isRunning {
+                Thread.sleep(forTimeInterval: 0.005)
+            }
             self?.stateQueue.async { [weak self] in
                 self?.finish(process: process)
             }
@@ -699,8 +711,29 @@ private final class ManagedProcess: @unchecked Sendable {
             guard let baseAddress = rawBuffer.baseAddress else { return 0 }
             return Darwin.read(handle.fileDescriptor, baseAddress, rawBuffer.count)
         }
+        if bytesRead == 0 {
+            // A readable dispatch source is also signalled for EOF. Leaving
+            // it armed after the descriptor reaches EOF causes an event
+            // storm that can starve the bounded finish timer on a busy test
+            // suite. The other pipe may still be held by a descendant; only
+            // this stream is quiesced, and descriptor closure remains owned
+            // by complete(process:).
+            quiesceReadSource(for: stream)
+            return
+        }
         guard bytesRead > 0 else { return }
         append(Data(bytes: buffer, count: bytesRead), to: stream)
+    }
+
+    private func quiesceReadSource(for stream: ProcessOutputStream) {
+        switch stream {
+        case .standardOutput:
+            standardOutputReadSource?.cancel()
+            standardOutputReadSource = nil
+        case .standardError:
+            standardErrorReadSource?.cancel()
+            standardErrorReadSource = nil
+        }
     }
 
     private func append(_ data: Data, to stream: ProcessOutputStream) {

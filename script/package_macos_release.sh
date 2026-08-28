@@ -9,7 +9,7 @@ EXPECTED_ARCHITECTURES="arm64"
 RELEASE_REPOSITORY="theisegoria/game-development-studio-macos"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PACKAGE_DIR="$ROOT_DIR/macos/GameDevelopmentStudio"
+PACKAGE_DIR="$ROOT_DIR/apps/macos/GameDevelopmentStudio"
 DEFAULT_APP="$PACKAGE_DIR/dist/$APP_PRODUCT.app"
 TEMPLATE_DIR="$ROOT_DIR/distribution/macos-app-repo"
 SCREENSHOT_SOURCE_DIR="$ROOT_DIR/assets/screenshots"
@@ -31,7 +31,7 @@ Usage:
     --version 1.0.0 \
     --screenshot assets/screenshots/04-native-macos-app.png \
     --output /private/tmp/GameDevelopmentStudio-1.0.0-release \
-    [--app macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app]
+    [--app apps/macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app]
 
   ./script/package_macos_release.sh verify \
     --version 1.0.0 \

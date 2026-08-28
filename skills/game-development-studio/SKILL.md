@@ -5,7 +5,8 @@ description: Route local game-asset production, package vendoring, offscreen ren
 
 # Game Development Studio
 
-Use the local `game-dev` CLI as the durable interface. It does not require an MCP server.
+Use the local `game-dev` CLI as the durable, inspectable interface shared by
+developers and coding agents.
 
 ## Route the request
 

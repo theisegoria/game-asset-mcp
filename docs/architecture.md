@@ -1,8 +1,9 @@
 # Architecture
 
-Game Development Studio is a local library and command-line program. It is not
-an MCP server. Agent products use the same `game-dev` executable a developer
-can inspect and run in a terminal.
+Game Development Studio is a local library and command-line program. The
+`game-dev` CLI is the supported integration boundary for developers, coding
+agents, CI, and the native app, so every caller uses the same executable and
+inspectable JSON/JSONL contract.
 
 ```text
 developer / Codex / Claude / native app

@@ -41,8 +41,8 @@ files, or capture bundles.
 
 Use of the public plugin is also subject to the privacy terms of the OpenAI
 product in which it runs. A skills-only plugin contains instructions and
-static assets. It has no Game Development Studio MCP server and no publisher
-backend. Local CLI execution is available only in an environment that exposes
+static assets. It runs no publisher backend or resident Game Development Studio
+service. Local CLI execution is available only in an environment that exposes
 that local executable and files to the model under the user's approval policy.
 
 ## Contact

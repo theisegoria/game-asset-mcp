@@ -3,9 +3,9 @@ dist/
 *.tsbuildinfo
 
 # Native macOS companion build products
-macos/GameDevelopmentStudio/.build/
-macos/GameDevelopmentStudio/.swiftpm/
-macos/GameDevelopmentStudio/dist/
+apps/macos/GameDevelopmentStudio/.build/
+apps/macos/GameDevelopmentStudio/.swiftpm/
+apps/macos/GameDevelopmentStudio/dist/
 
 # Secrets — never commit. See .env.example.
 .env

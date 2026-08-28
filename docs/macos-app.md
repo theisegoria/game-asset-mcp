@@ -3,17 +3,17 @@
 Game Development Studio includes a native macOS 26 companion for developers
 who prefer a desktop control surface over issuing `game-dev` commands directly.
 It uses the same local CLI and structured `game_dev.result.v1` contract as the
-skills. It does not introduce an MCP server, hosted backend, or alternate asset
-format, and the CLI and skills remain independently usable.
+skills. The app has no publisher-hosted backend or alternate asset format, and
+the CLI and skills remain independently usable.
 
 ## Status and requirements
 
-- Source package: `macos/GameDevelopmentStudio`
+- Source package: `apps/macos/GameDevelopmentStudio`
 - Product: `GameDevelopmentStudio`
 - Interface: SwiftUI with Swift Observation
 - Package format: SwiftPM, Swift tools 6.2, Swift language mode 6
 - Deployment target: macOS 26
-- Local bundle: `macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app`
+- Local bundle: `apps/macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app`
 
 The application source compiles and has automated model, credential-store, CLI
 client, and value-model tests. The repository helper builds a local app bundle

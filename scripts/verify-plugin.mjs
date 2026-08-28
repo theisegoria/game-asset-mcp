@@ -35,7 +35,7 @@ async function png(file, width, height) {
 async function main() {
   const manifest = await json('.codex-plugin/plugin.json');
   invariant(manifest.name === 'game-development-studio', 'unexpected plugin name');
-  invariant(manifest.version === '1.0.0', 'unexpected plugin version');
+  invariant(manifest.version === '1.0.1', 'unexpected plugin version');
   invariant(manifest.skills === './skills/', 'plugin must publish the canonical skills directory');
   invariant(manifest.mcpServers === undefined && manifest.apps === undefined, 'skills-only plugin must not declare MCP or apps');
   await Promise.all(['.mcp.json', '.app.json'].map(async (relative) => {

@@ -153,7 +153,7 @@ remove this disclosure to make a scan pass.
 
 ## Release notes
 
-Initial 1.0.0 submission. Five skills route local game asset production,
+Version 1.0.1 submission. Five skills route local game asset production,
 canonical package vendoring, sealed capture diagnosis, and bounded performance
 analysis through the separately installed `game-dev` CLI. The plugin contains
 no MCP server or hosted service. Sensitive operations retain separate

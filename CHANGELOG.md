@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.1
+
+Release-candidate hardening and public-product alignment:
+
+- assigns one immutable 1.0.1 identity to the CLI and five-skill bundle after
+  the already-published skills v1.0.0 archive
+- adds byte-verifiable macOS icon provenance and refreshed publication metadata
+- hardens native CLI identity checks, exact operation validation, credential
+  routing, cancellation, process cleanup, and bounded output draining
+- hardens detached Blender/scenario cleanup and caps hostile receipt/output
+  streams without changing the per-invocation authority model
+
 ## 1.0.0
 
 Game Development Studio replaces the retired MCP entry point with a local-first

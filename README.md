@@ -5,9 +5,9 @@
 # Game Development Studio
 
 Local-first tools for producing, packaging, vendoring, capturing, debugging,
-and optimizing game assets and renders. The stable interface is the
-`game-dev` command-line program and its JSON/JSONL protocol. No MCP server is
-required.
+and optimizing game assets and renders. The stable automation interface is the
+`game-dev` command-line program and its JSON/JSONL protocol; five focused skills
+and a native macOS companion build on that same inspectable boundary.
 
 The project is designed for human developers and local coding agents that need
 more than a screenshot: immutable run bundles can combine render attachments,
@@ -45,6 +45,21 @@ diagnosis has inspectable evidence behind it.
 The native companion requires macOS 26 and a Swift 6.2 toolchain to build from
 source. It remains optional: the CLI and skills do not require the app.
 
+## Repository layout
+
+| Path | Owns |
+| --- | --- |
+| `src/` | Cross-platform `game-dev` CLI and reusable TypeScript core |
+| `skills/` | Router plus four focused Codex/ChatGPT skills |
+| `adapters/` | Declarative game-specific capture adapters |
+| `apps/macos/GameDevelopmentStudio/` | Native macOS 26 SwiftUI companion |
+| `docs/` | Protocol, architecture, package, adapter, and app contracts |
+| `distribution/` | Reproducible public skills and binary-app repository templates |
+| `assets/` and `marketing/` | Byte-provenanced product art, screenshots, and publication copy |
+
+See [Repository layout](docs/repository-layout.md) for what each distribution
+ships and which outputs are generated rather than source-controlled.
+
 ## Product tour
 
 ![Five-skill Game Development Studio suite](assets/screenshots/01-skill-suite.png)
@@ -64,7 +79,7 @@ workspaces: Production, Library & Vendoring, Visual Debugging, and Performance.
 It presents the existing local `game-dev` protocol through a
 `NavigationSplitView`, system search and toolbar controls, a result inspector,
 keyboard commands, a dedicated Settings scene, and explicit empty, loading, and
-error states. It does not add an MCP server or hosted backend.
+error states. It calls the same local CLI and has no publisher-hosted backend.
 
 Provider credentials are entered in masked fields, stored in the macOS
 Keychain, and shown only as configured or not configured. Paid provider calls,
@@ -83,7 +98,7 @@ From the repository root:
 ```
 
 The helper produces
-`macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app` with an ad-hoc
+`apps/macos/GameDevelopmentStudio/dist/GameDevelopmentStudio.app` with an ad-hoc
 signature for local development. It is not a Developer ID-signed, notarized, or
 Mac App Store build. The `--verify` mode finding a live process after two
 seconds does not prove window readiness, pixel correctness, workflow behavior,

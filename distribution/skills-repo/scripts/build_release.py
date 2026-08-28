@@ -7,7 +7,7 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "game-development-studio"
-OUTPUT = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else ROOT / "dist" / "game-development-studio-plugin-1.0.0.zip"
+OUTPUT = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else ROOT / "dist" / "game-development-studio-plugin-1.0.1.zip"
 
 if OUTPUT.exists():
     raise SystemExit(f"refusing to overwrite {OUTPUT}")
