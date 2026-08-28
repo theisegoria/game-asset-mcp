@@ -106,4 +106,29 @@ describe('a failed Blender is never a success', () => {
     await expect(run(await stub(`echo 'just chatter'\nexit 0`)))
       .rejects.toThrow(/without emitting a normalisation receipt/);
   }, 60_000);
+
+  it('rejects an oversized newline-free receipt candidate within a fixed bound', async () => {
+    await expect(run(await stub(
+      `printf 'NORMALIZE_RECEIPT='\n` +
+      `awk 'BEGIN { for (i = 0; i < 300000; i++) printf "x" }'\nsleep 30`,
+    ))).rejects.toThrow(/receipt line larger than 262144 bytes/);
+  }, 60_000);
+
+  it('does not inherit unrelated parent secrets or configuration', async () => {
+    const previous = process.env.GAME_DEV_SECRET_SENTINEL;
+    process.env.GAME_DEV_SECRET_SENTINEL = 'must-not-reach-blender';
+    try {
+      const result = await run(await stub(
+        `if [ -n "\${GAME_DEV_SECRET_SENTINEL:-}" ]; then\n` +
+        `  ${RECEIPT('"leaked":true')}\n` +
+        `else\n` +
+        `  ${RECEIPT('"leaked":false')}\n` +
+        `fi\nexit 0`,
+      ));
+      expect(result.receipt.leaked).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.GAME_DEV_SECRET_SENTINEL;
+      else process.env.GAME_DEV_SECRET_SENTINEL = previous;
+    }
+  }, 60_000);
 });

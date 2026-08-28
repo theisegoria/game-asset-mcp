@@ -6,6 +6,7 @@ import { canonicalJson } from '../packages/format.js';
 import { sha256 } from '../storage/filesystem.js';
 import { describeError, invalidInput, invalidState, notFound } from '../util/errors.js';
 import { redact } from '../util/logging.js';
+import { registerOwnedProcessTerminator, type OwnedProcessSignal } from '../util/process-lifecycle.js';
 import type { LoadedAdapter, ScenarioRunPlan } from './adapter.js';
 import { serializableAdapterSnapshot } from './adapter.js';
 import { normalizeGenomeHemeraCapture, validateCaptureManifest, type CaptureValidation } from './capture.js';
@@ -37,28 +38,57 @@ async function writeCanonicalExclusive(target: string, value: unknown): Promise<
   }
 }
 
-async function collectOutput(stream: Readable | null): Promise<{ bytes: Buffer; truncated: boolean }> {
-  if (!stream) return { bytes: Buffer.alloc(0), truncated: false };
+interface OutputCollector {
+  result: Promise<{ bytes: Buffer; truncated: boolean }>;
+  stop(): void;
+}
+
+function collectOutput(stream: Readable | null): OutputCollector {
+  if (!stream) {
+    return {
+      result: Promise.resolve({ bytes: Buffer.alloc(0), truncated: false }),
+      stop() {},
+    };
+  }
   const chunks: Buffer[] = [];
   let retained = 0;
   let truncated = false;
-  for await (const raw of stream) {
-    const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as Uint8Array);
-    const available = OUTPUT_LIMIT - retained;
-    if (available > 0) {
-      const slice = chunk.length <= available ? chunk : chunk.subarray(0, available);
-      chunks.push(slice);
-      retained += slice.length;
-    }
-    if (chunk.length > available) truncated = true;
-  }
-  return { bytes: Buffer.concat(chunks), truncated };
+  let settled = false;
+  let finish: () => void = () => {};
+  const result = new Promise<{ bytes: Buffer; truncated: boolean }>((resolve) => {
+    finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve({ bytes: Buffer.concat(chunks), truncated });
+    };
+    stream.on('data', (raw: Buffer | Uint8Array) => {
+      const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+      const available = Math.max(0, OUTPUT_LIMIT - retained);
+      if (available > 0) {
+        const slice = chunk.length <= available ? chunk : chunk.subarray(0, available);
+        chunks.push(slice);
+        retained += slice.length;
+      }
+      if (chunk.length > available) truncated = true;
+    });
+    stream.once('end', finish);
+    stream.once('close', finish);
+    stream.once('error', finish);
+  });
+  return {
+    result,
+    stop() {
+      stream.destroy();
+      finish();
+    },
+  };
 }
 
 interface ProcessOutcome {
   exitCode: number | null;
   signal: string | null;
   timedOut: boolean;
+  cancelled: boolean;
   stdout: Buffer;
   stderr: Buffer;
   stdoutTruncated: boolean;
@@ -83,7 +113,7 @@ function safeChildEnvironment(plan: ScenarioRunPlan): NodeJS.ProcessEnv {
   return environment;
 }
 
-async function runProcess(plan: ScenarioRunPlan): Promise<ProcessOutcome> {
+async function runProcess(plan: ScenarioRunPlan, signal?: AbortSignal): Promise<ProcessOutcome> {
   let child;
   try {
     child = spawn(plan.executable, plan.arguments, {
@@ -98,6 +128,7 @@ async function runProcess(plan: ScenarioRunPlan): Promise<ProcessOutcome> {
       exitCode: null,
       signal: null,
       timedOut: false,
+      cancelled: false,
       stdout: Buffer.alloc(0),
       stderr: Buffer.alloc(0),
       stdoutTruncated: false,
@@ -106,28 +137,42 @@ async function runProcess(plan: ScenarioRunPlan): Promise<ProcessOutcome> {
     };
   }
 
-  const stdoutPromise = collectOutput(child.stdout);
-  const stderrPromise = collectOutput(child.stderr);
+  const stdoutCollector = collectOutput(child.stdout);
+  const stderrCollector = collectOutput(child.stderr);
   let timedOut = false;
+  let cancelled = false;
   let forceTimer: NodeJS.Timeout | undefined;
+  const signalTree = (ownedSignal: OwnedProcessSignal): void => {
+    if (child.pid === undefined) return;
+    try {
+      process.kill(-child.pid, ownedSignal);
+    } catch {
+      try {
+        child.kill(ownedSignal);
+      } catch {
+        // The process group is already gone.
+      }
+    }
+  };
+  const scheduleForceKill = (): void => {
+    if (forceTimer) return;
+    forceTimer = setTimeout(() => signalTree('SIGKILL'), 2_000);
+    forceTimer.unref();
+  };
+  const requestStop = (): void => {
+    signalTree('SIGTERM');
+    scheduleForceKill();
+  };
+  const unregisterOwnedProcess = registerOwnedProcessTerminator(signalTree);
+  const onAbort = (): void => {
+    cancelled = true;
+    requestStop();
+  };
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
   const timeout = setTimeout(() => {
     timedOut = true;
-    if (child.pid !== undefined) {
-      try {
-        process.kill(-child.pid, 'SIGTERM');
-      } catch {
-        child.kill('SIGTERM');
-      }
-      forceTimer = setTimeout(() => {
-        if (child.pid === undefined) return;
-        try {
-          process.kill(-child.pid, 'SIGKILL');
-        } catch {
-          child.kill('SIGKILL');
-        }
-      }, 2_000);
-      forceTimer.unref();
-    }
+    requestStop();
   }, plan.timeoutSeconds * 1_000);
   timeout.unref();
 
@@ -138,19 +183,32 @@ async function runProcess(plan: ScenarioRunPlan): Promise<ProcessOutcome> {
       settled = true;
       resolve({ exitCode: null, signal: null, error });
     });
-    child.once('close', (exitCode, signal) => {
+    child.once('exit', (exitCode, signal) => {
       if (settled) return;
       settled = true;
       resolve({ exitCode, signal });
     });
   });
   clearTimeout(timeout);
+  // The direct group leader can exit while one of its descendants ignores
+  // SIGTERM.  Once cancellation or timeout has been requested, the group must
+  // receive the bounded escalation before we unregister its owner; otherwise a
+  // surviving descendant would outlive a result that says the run stopped.
+  if (cancelled || timedOut) signalTree('SIGKILL');
   if (forceTimer) clearTimeout(forceTimer);
-  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+  signal?.removeEventListener('abort', onAbort);
+  unregisterOwnedProcess();
+  const drainTimer = setTimeout(() => {
+    stdoutCollector.stop();
+    stderrCollector.stop();
+  }, 100);
+  const [stdout, stderr] = await Promise.all([stdoutCollector.result, stderrCollector.result]);
+  clearTimeout(drainTimer);
   return {
     exitCode: completion.exitCode,
     signal: completion.signal,
     timedOut,
+    cancelled,
     stdout: stdout.bytes,
     stderr: stderr.bytes,
     stdoutTruncated: stdout.truncated,
@@ -263,6 +321,7 @@ export async function executeScenarioRun(options: {
   confirm: boolean;
   allowGpu: boolean;
   allowPerformance: boolean;
+  signal?: AbortSignal;
 }): Promise<RunExecutionResult> {
   if (!options.confirm) throw invalidInput('scenario execution requires explicit confirmation');
   if (options.plan.requiredAuthorizations.includes('gpu') && !options.allowGpu) {
@@ -293,17 +352,20 @@ export async function executeScenarioRun(options: {
 
   const startedAt = new Date();
   const started = performance.now();
-  const outcome = await runProcess(options.plan);
+  const outcome = await runProcess(options.plan, options.signal);
   await fs.writeFile(path.join(runPath, 'stdout.log'), outcome.stdout, { flag: 'wx', mode: 0o600 });
   await fs.writeFile(path.join(runPath, 'stderr.log'), outcome.stderr, { flag: 'wx', mode: 0o600 });
 
-  let status: RunManifest['status'] = outcome.timedOut
-    ? 'timed_out'
+  let status: RunManifest['status'] = outcome.cancelled
+    ? 'failed'
+    : outcome.timedOut
+      ? 'timed_out'
     : outcome.exitCode === 0 && outcome.spawnError === undefined
       ? 'completed'
       : 'failed';
   let failure: RunManifest['failure'];
   if (outcome.spawnError) failure = { code: 'SPAWN_FAILED', message: outcome.spawnError.message };
+  else if (outcome.cancelled) failure = { code: 'CANCELLED', message: 'scenario execution was cancelled' };
   else if (outcome.timedOut) failure = { code: 'TIMEOUT', message: `scenario exceeded ${options.plan.timeoutSeconds} seconds` };
   else if (outcome.exitCode !== 0) {
     failure = {

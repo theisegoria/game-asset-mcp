@@ -34,6 +34,7 @@ import { analyzeRunCapture, compareRunVisuals } from './harness/visual.js';
 import { compareRunPerformance, summarizeRunPerformance } from './harness/performance.js';
 import { createOptimizationGoal, evaluateOptimizationGoal } from './harness/goals.js';
 import { installSkillBundle, listSkillBundle } from './skills/bundle.js';
+import { installProcessSignalHandlers } from './util/process-lifecycle.js';
 
 const HELP = `Game Development Studio local harness
 
@@ -356,6 +357,7 @@ async function dispatch(
   runtime: GameDevRuntime,
   parsed: ParsedArguments,
   events: EventStream,
+  signal?: AbortSignal,
 ): Promise<DispatchResult> {
   const [family, action] = parsed.positionals;
 
@@ -506,6 +508,7 @@ async function dispatch(
       confirm: true,
       allowGpu: booleanFlag(parsed, 'allow-gpu'),
       allowPerformance: booleanFlag(parsed, 'allow-performance'),
+      signal,
     });
     events.emit('artifact', {
       kind: 'run_bundle',
@@ -1186,7 +1189,10 @@ function requestedOperation(parsed: ParsedArguments): string {
   return segments.join('.') || 'unknown';
 }
 
-export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+export async function main(
+  argv: string[] = process.argv.slice(2),
+  signal?: AbortSignal,
+): Promise<number> {
   const parsed = parseArguments(argv);
   if (booleanFlag(parsed, 'help') || parsed.positionals[0] === 'help') {
     process.stdout.write(`${HELP}\n`);
@@ -1209,6 +1215,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   let durable: DurableJob | undefined;
 
   try {
+    signal?.throwIfAborted();
     const spendLimitCents = optionalPositiveIntegerFlag(parsed, 'spend-limit-cents');
     runtime = await createGameDevRuntime({
       outputDir: stringFlag(parsed, 'output-dir'),
@@ -1229,7 +1236,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         : undefined,
     );
     events.emit('started', { version: GAME_DEV_VERSION });
-    const result = await dispatch(runtime, parsed, events);
+    const result = await dispatch(runtime, parsed, events, signal);
+    signal?.throwIfAborted();
     outputResult(result.operation, result, jsonLines, events);
     if (durable) {
       if (result.data.error === 'APPROVAL_REQUIRED') {
@@ -1244,7 +1252,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
     return result.isError ? 1 : 0;
   } catch (error) {
-    const described = describeError(error);
+    const described = signal?.aborted
+      ? { error: 'CANCELLED', message: 'game-dev was cancelled', retryable: false }
+      : describeError(error);
     const failure = {
       error: described.error,
       message: described.message,
@@ -1268,14 +1278,20 @@ function canonical(target: string): string {
 
 const invokedPath = process.argv[1] ? canonical(process.argv[1]) : undefined;
 if (invokedPath && canonical(fileURLToPath(import.meta.url)) === invokedPath) {
-  main().then((code) => {
-    process.exitCode = code;
+  const controller = new AbortController();
+  const signalHandlers = installProcessSignalHandlers(controller);
+  main(process.argv.slice(2), controller.signal).then((code) => {
+    const requestedExitCode = signalHandlers.requestedExitCode();
+    signalHandlers.dispose();
+    process.exitCode = requestedExitCode ?? code;
   }).catch((error: unknown) => {
+    const requestedExitCode = signalHandlers.requestedExitCode();
+    signalHandlers.dispose();
     process.stderr.write(`${JSON.stringify({
       level: 'error',
       msg: 'fatal',
       error: error instanceof Error ? error.message : String(error),
     })}\n`);
-    process.exitCode = 1;
+    process.exitCode = requestedExitCode ?? 1;
   });
 }

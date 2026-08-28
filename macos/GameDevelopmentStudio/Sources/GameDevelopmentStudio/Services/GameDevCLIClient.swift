@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Darwin
 
 public protocol GameDevCLIClientProtocol: Sendable {
@@ -16,6 +17,10 @@ public enum ProcessOutputStream: String, Equatable, Sendable {
 
 public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
     case invalidInvocation(String)
+    case trustedExecutableRequired
+    case executableNotRegular
+    case executableIdentityChanged
+    case handshakeFailed(String)
     case credentialInArguments(CredentialProvider)
     case standardInputTooLarge(limit: Int)
     case launchFailed(executable: String, reason: String)
@@ -32,6 +37,14 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
         switch self {
         case let .invalidInvocation(reason):
             "Invalid game-dev invocation: \(reason)"
+        case .trustedExecutableRequired:
+            "Credential-bearing and write or capture operations require a configured absolute executable path."
+        case .executableNotRegular:
+            "The configured game-dev executable must be an absolute executable regular file."
+        case .executableIdentityChanged:
+            "The configured game-dev executable changed after approval; review the operation again."
+        case let .handshakeFailed(reason):
+            "The configured game-dev executable failed its no-secret identity handshake: \(reason)"
         case let .credentialInArguments(provider):
             "The \(provider.displayName) credential must be passed through the process environment, not an argument."
         case let .standardInputTooLarge(limit):
@@ -58,27 +71,149 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
+public struct GameDevCLIExecutableIdentity: Codable, Equatable, Sendable, CustomStringConvertible {
+    public let canonicalPath: String
+    public let sha256: String
+    public let version: String
+    public let resultSchema: String
+    public let capabilitiesSchema: String
+
+    public init(
+        canonicalPath: String,
+        sha256: String,
+        version: String,
+        resultSchema: String,
+        capabilitiesSchema: String
+    ) {
+        self.canonicalPath = canonicalPath
+        self.sha256 = sha256
+        self.version = version
+        self.resultSchema = resultSchema
+        self.capabilitiesSchema = capabilitiesSchema
+    }
+
+    public var description: String {
+        "path=\(canonicalPath), sha256=\(sha256), version=\(version), resultSchema=\(resultSchema), capabilitiesSchema=\(capabilitiesSchema)"
+    }
+}
+
+public extension CredentialProvider {
+    var officialHostname: String {
+        switch self {
+        case .tripo:
+            "api.tripo3d.ai"
+        case .leonardo:
+            "cloud.leonardo.ai"
+        }
+    }
+}
+
 public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
     public static let resultSchema = "game_dev.result.v1"
+    public static let capabilitiesSchema = "game_dev.capabilities.v1"
 
     private let executableURL: URL?
     private let executableName: String
     private let baseEnvironment: [String: String]
     private let maximumOutputBytesPerStream: Int
     private let maximumStandardInputBytes: Int
+    private let pinnedIdentity: GameDevCLIExecutableIdentity?
 
     public init(
         executableURL: URL? = nil,
         executableName: String = "game-dev",
-        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        baseEnvironment: [String: String]? = nil,
         maximumOutputBytesPerStream: Int = 4 * 1024 * 1024,
         maximumStandardInputBytes: Int = 4 * 1024 * 1024
     ) {
         self.executableURL = executableURL
         self.executableName = executableName
-        self.baseEnvironment = baseEnvironment
+        self.baseEnvironment = Self.sanitizedEnvironment(
+            baseEnvironment ?? ProcessInfo.processInfo.environment
+        )
         self.maximumOutputBytesPerStream = max(1, maximumOutputBytesPerStream)
         self.maximumStandardInputBytes = max(1, maximumStandardInputBytes)
+        self.pinnedIdentity = nil
+    }
+
+    private init(
+        executableURL: URL?,
+        executableName: String,
+        baseEnvironment: [String: String],
+        maximumOutputBytesPerStream: Int,
+        maximumStandardInputBytes: Int,
+        pinnedIdentity: GameDevCLIExecutableIdentity?
+    ) {
+        self.executableURL = executableURL
+        self.executableName = executableName
+        self.baseEnvironment = baseEnvironment
+        self.maximumOutputBytesPerStream = maximumOutputBytesPerStream
+        self.maximumStandardInputBytes = maximumStandardInputBytes
+        self.pinnedIdentity = pinnedIdentity
+    }
+
+    public func pinned(to identity: GameDevCLIExecutableIdentity) -> GameDevCLIClient {
+        GameDevCLIClient(
+            executableURL: executableURL,
+            executableName: executableName,
+            baseEnvironment: baseEnvironment,
+            maximumOutputBytesPerStream: maximumOutputBytesPerStream,
+            maximumStandardInputBytes: maximumStandardInputBytes,
+            pinnedIdentity: identity
+        )
+    }
+
+    public func noSecretHandshake(timeout: Duration = .seconds(5)) async throws -> GameDevCLIExecutableIdentity {
+        let canonicalURL = try Self.canonicalExecutableURL(executableURL)
+
+        let versionOutcome = try await runHandshakeProcess(
+            executableURL: canonicalURL,
+            arguments: ["--version"],
+            timeout: timeout
+        )
+        guard versionOutcome.exitCode == 0,
+              let version = Self.firstOutputLine(versionOutcome.standardOutput),
+              !version.isEmpty
+        else {
+            throw GameDevCLIClientError.handshakeFailed("--version did not return a version")
+        }
+
+        let capabilitiesOutcome = try await runHandshakeProcess(
+            executableURL: canonicalURL,
+            arguments: ["capabilities", "--json"],
+            timeout: timeout
+        )
+        guard capabilitiesOutcome.exitCode == 0 else {
+            throw GameDevCLIClientError.handshakeFailed("capabilities returned exit \(capabilitiesOutcome.exitCode)")
+        }
+
+        let envelope: CLIResultEnvelope
+        do {
+            envelope = try JSONDecoder().decode(CLIResultEnvelope.self, from: capabilitiesOutcome.standardOutput)
+        } catch {
+            throw GameDevCLIClientError.handshakeFailed("capabilities did not return the structured result schema")
+        }
+        guard envelope.schema == Self.resultSchema, envelope.ok,
+              envelope.data["schema"]?.stringValue == Self.capabilitiesSchema,
+              envelope.data["name"]?.stringValue == "game-development-studio",
+              envelope.data["version"]?.stringValue == version,
+              envelope.data["protocols"]?["result"]?.stringValue == Self.resultSchema
+        else {
+            throw GameDevCLIClientError.handshakeFailed("capabilities identity or schema did not match the supported contract")
+        }
+
+        // Hash after the no-secret probes as well as before launching them. This
+        // narrows the approval-to-use race and makes the returned identity the
+        // one that is actually about to be used.
+        let fileIdentity = try Self.fileIdentity(for: canonicalURL)
+
+        return GameDevCLIExecutableIdentity(
+            canonicalPath: fileIdentity.canonicalPath,
+            sha256: fileIdentity.sha256,
+            version: version,
+            resultSchema: Self.resultSchema,
+            capabilitiesSchema: Self.capabilitiesSchema
+        )
     }
 
     public func execute(
@@ -87,16 +222,45 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
         timeout: Duration?
     ) async throws -> CLIExecutionResult {
         try Task.checkCancellation()
-        try validate(invocation, credentials: credentials, timeout: timeout)
+        let requiresTrustedExecutable = Self.requiresTrustedExecutable(
+            arguments: invocation.arguments,
+            credentials: credentials
+        )
+        try validate(
+            invocation,
+            credentials: credentials,
+            timeout: timeout,
+            requiresTrustedExecutable: requiresTrustedExecutable
+        )
+
+        let trustedExecutableURL: URL?
+        if requiresTrustedExecutable {
+            trustedExecutableURL = try Self.canonicalExecutableURL(executableURL)
+            let currentIdentity = try Self.fileIdentity(for: trustedExecutableURL!)
+            if let pinnedIdentity,
+               pinnedIdentity.canonicalPath != currentIdentity.canonicalPath
+                || pinnedIdentity.sha256 != currentIdentity.sha256 {
+                throw GameDevCLIClientError.executableIdentityChanged
+            }
+            if pinnedIdentity == nil {
+                let handshakeIdentity = try await noSecretHandshake(timeout: .seconds(5))
+                // Keep the no-secret handshake and the launch bound to the
+                // same canonical path and bytes. A caller that supplied a pin
+                // has already performed the handshake during approval.
+                if handshakeIdentity.canonicalPath != currentIdentity.canonicalPath
+                    || handshakeIdentity.sha256 != currentIdentity.sha256 {
+                    throw GameDevCLIClientError.executableIdentityChanged
+                }
+            }
+        } else {
+            trustedExecutableURL = nil
+        }
 
         var arguments = invocation.arguments
         if !arguments.contains("--json") { arguments.append("--json") }
 
         var environment = baseEnvironment
-        for provider in CredentialProvider.allCases {
-            environment.removeValue(forKey: provider.environmentVariable)
-        }
-        environment.merge(invocation.environment) { _, invocationValue in invocationValue }
+        environment.merge(Self.sanitizedEnvironment(invocation.environment)) { _, invocationValue in invocationValue }
         for (provider, credential) in credentials where !credential.isEmpty {
             environment[provider.environmentVariable] = credential
         }
@@ -104,7 +268,7 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
         let launchURL: URL
         let launchArguments: [String]
         if let executableURL {
-            launchURL = executableURL
+            launchURL = trustedExecutableURL ?? executableURL
             launchArguments = arguments
         } else {
             launchURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -199,13 +363,17 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
     private func validate(
         _ invocation: CLIInvocation,
         credentials: [CredentialProvider: String],
-        timeout: Duration?
+        timeout: Duration?,
+        requiresTrustedExecutable: Bool
     ) throws {
         guard !executableName.isEmpty, !executableName.contains("\0") else {
             throw GameDevCLIClientError.invalidInvocation("the executable name is empty or contains a NUL byte")
         }
         if let executableURL, !executableURL.isFileURL {
             throw GameDevCLIClientError.invalidInvocation("the configured executable is not a file URL")
+        }
+        if requiresTrustedExecutable, executableURL == nil {
+            throw GameDevCLIClientError.trustedExecutableRequired
         }
         if invocation.arguments.contains(where: { $0.contains("\0") }) {
             throw GameDevCLIClientError.invalidInvocation("an argument contains a NUL byte")
@@ -237,6 +405,118 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
             }
         }
     }
+
+    private static let inheritedEnvironmentAllowlist: Set<String> = [
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+    ]
+
+    private static func sanitizedEnvironment(_ environment: [String: String]) -> [String: String] {
+        environment.filter { inheritedEnvironmentAllowlist.contains($0.key) }
+    }
+
+    private static func requiresTrustedExecutable(
+        arguments: [String],
+        credentials: [CredentialProvider: String]
+    ) -> Bool {
+        if credentials.values.contains(where: { !$0.isEmpty }) { return true }
+        guard let family = arguments.first?.lowercased() else { return false }
+        switch family {
+        case "provider", "scenario":
+            return family == "provider" || arguments.dropFirst().first == "run"
+        case "package":
+            return arguments.dropFirst().first == "build"
+        case "asset":
+            return arguments.dropFirst().first == "normalize"
+                || arguments.dropFirst().first == "preview-usdz"
+        case "catalog", "adapter", "vendor", "launch", "migrate", "performance", "skill":
+            return arguments.contains("--confirm")
+        default:
+            return false
+        }
+    }
+
+    private static func canonicalExecutableURL(_ url: URL?) throws -> URL {
+        guard let url,
+              url.isFileURL,
+              url.path.hasPrefix("/")
+        else { throw GameDevCLIClientError.trustedExecutableRequired }
+
+        let canonicalURL = url.standardizedFileURL.resolvingSymlinksInPath().standardizedFileURL
+        guard canonicalURL.path.hasPrefix("/") else {
+            throw GameDevCLIClientError.executableNotRegular
+        }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: canonicalURL.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  let permissions = attributes[.posixPermissions] as? NSNumber,
+                  permissions.intValue & 0o111 != 0
+            else { throw GameDevCLIClientError.executableNotRegular }
+        } catch let error as GameDevCLIClientError {
+            throw error
+        } catch {
+            throw GameDevCLIClientError.executableNotRegular
+        }
+        return canonicalURL
+    }
+
+    private static func fileIdentity(for url: URL) throws -> (canonicalPath: String, sha256: String) {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        } catch {
+            throw GameDevCLIClientError.executableNotRegular
+        }
+        let digest = SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return (url.path, digest)
+    }
+
+    private static func firstOutputLine(_ data: Data) -> String? {
+        String(decoding: data, as: UTF8.self)
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init)
+    }
+
+    private func runHandshakeProcess(
+        executableURL: URL,
+        arguments: [String],
+        timeout: Duration
+    ) async throws -> RawProcessOutcome {
+        let execution = ManagedProcess(
+            executableURL: executableURL,
+            arguments: arguments,
+            environment: baseEnvironment,
+            workingDirectory: nil,
+            standardInput: nil,
+            maximumOutputBytesPerStream: maximumOutputBytesPerStream
+        )
+        try execution.start()
+
+        let timeoutTask = Task {
+            do {
+                try await ContinuousClock().sleep(for: timeout)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            execution.requestStop(.timedOut(timeout))
+        }
+        defer { timeoutTask.cancel() }
+
+        return try await withTaskCancellationHandler {
+            try await execution.outcome()
+        } onCancel: {
+            execution.requestStop(.cancelled)
+        }
+    }
 }
 
 private struct RawProcessOutcome: Sendable {
@@ -257,12 +537,16 @@ private final class ManagedProcess: @unchecked Sendable {
     private let stateQueue = DispatchQueue(label: "GameDevelopmentStudio.GameDevCLIClient.state")
     private let inputQueue = DispatchQueue(label: "GameDevelopmentStudio.GameDevCLIClient.input")
     private let forcedTerminationGrace: DispatchTimeInterval = .milliseconds(350)
+    private let pipeDrainGrace: DispatchTimeInterval = .milliseconds(150)
 
+    private var standardOutputReadSource: DispatchSourceRead?
+    private var standardErrorReadSource: DispatchSourceRead?
     private var standardOutput = Data()
     private var standardError = Data()
     private var completion: Result<RawProcessOutcome, any Error>?
     private var waiters: [CheckedContinuation<RawProcessOutcome, any Error>] = []
     private var pendingFailure: GameDevCLIClientError?
+    private var finishScheduled = false
     private var startedAt = Date()
 
     init(
@@ -289,34 +573,48 @@ private final class ManagedProcess: @unchecked Sendable {
     func start() throws {
         let outputHandle = standardOutputPipe.fileHandleForReading
         let errorHandle = standardErrorPipe.fileHandleForReading
-
-        outputHandle.readabilityHandler = { [weak self] handle in
-            self?.stateQueue.async { [weak self] in
-                self?.drainAvailableData(from: handle, stream: .standardOutput)
-            }
-        }
-        errorHandle.readabilityHandler = { [weak self] handle in
-            self?.stateQueue.async { [weak self] in
-                self?.drainAvailableData(from: handle, stream: .standardError)
-            }
-        }
-        process.terminationHandler = { [weak self] process in
-            self?.stateQueue.async { [weak self] in
-                self?.finish(process: process)
-            }
-        }
-
+        makeNonBlocking(outputHandle)
+        makeNonBlocking(errorHandle)
         startedAt = Date()
         do {
             try process.run()
         } catch {
-            outputHandle.readabilityHandler = nil
-            errorHandle.readabilityHandler = nil
             process.terminationHandler = nil
             try? standardInputPipe.fileHandleForWriting.close()
             try? outputHandle.close()
             try? errorHandle.close()
             throw error
+        }
+
+        let outputSource = DispatchSource.makeReadSource(
+            fileDescriptor: outputHandle.fileDescriptor,
+            queue: stateQueue
+        )
+        outputSource.setEventHandler { [weak self] in
+            self?.drainAvailableData(from: outputHandle, stream: .standardOutput)
+        }
+        outputSource.resume()
+        standardOutputReadSource = outputSource
+
+        let errorSource = DispatchSource.makeReadSource(
+            fileDescriptor: errorHandle.fileDescriptor,
+            queue: stateQueue
+        )
+        errorSource.setEventHandler { [weak self] in
+            self?.drainAvailableData(from: errorHandle, stream: .standardError)
+        }
+        errorSource.resume()
+        standardErrorReadSource = errorSource
+
+        // Wait for the direct PID on a detached queue. Process' termination
+        // callback can be delayed by inherited pipe holders on some macOS
+        // releases; waitUntilExit gives us the direct process boundary while
+        // the readability handlers continue draining capped output.
+        DispatchQueue.global(qos: .utility).async { [weak self, process] in
+            process.waitUntilExit()
+            self?.stateQueue.async { [weak self] in
+                self?.finish(process: process)
+            }
         }
 
         inputQueue.async { [weak self] in
@@ -361,7 +659,26 @@ private final class ManagedProcess: @unchecked Sendable {
 
     private func drainAvailableData(from handle: FileHandle, stream: ProcessOutputStream) {
         guard completion == nil else { return }
-        append(handle.availableData, to: stream)
+        var buffer = [UInt8](repeating: 0, count: min(maximumOutputBytesPerStream, 64 * 1024))
+        while completion == nil {
+            let bytesRead = buffer.withUnsafeMutableBytes { rawBuffer -> Int in
+                guard let baseAddress = rawBuffer.baseAddress else { return 0 }
+                return Darwin.read(handle.fileDescriptor, baseAddress, rawBuffer.count)
+            }
+            if bytesRead > 0 {
+                append(Data(bytes: buffer, count: bytesRead), to: stream)
+                continue
+            }
+            if bytesRead == 0 || errno == EAGAIN || errno == EWOULDBLOCK { return }
+            return
+        }
+    }
+
+    private func makeNonBlocking(_ handle: FileHandle) {
+        let descriptor = handle.fileDescriptor
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0 else { return }
+        _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)
     }
 
     private func append(_ data: Data, to stream: ProcessOutputStream) {
@@ -398,14 +715,31 @@ private final class ManagedProcess: @unchecked Sendable {
     }
 
     private func finish(process: Process) {
+        guard completion == nil, !finishScheduled else { return }
+        finishScheduled = true
+
+        // A descendant can retain either pipe after the direct child exits.
+        // Keep the capped readability drains alive for a small grace period,
+        // then close our descriptors without a blocking read-to-EOF. The
+        // direct process' termination result (including cancellation/timeout)
+        // remains authoritative regardless of inherited pipe holders.
+        stateQueue.asyncAfter(deadline: .now() + pipeDrainGrace) { [weak self] in
+            guard let self, completion == nil else { return }
+            complete(process: process)
+        }
+    }
+
+    private func complete(process: Process) {
         guard completion == nil else { return }
 
         let outputHandle = standardOutputPipe.fileHandleForReading
         let errorHandle = standardErrorPipe.fileHandleForReading
-        outputHandle.readabilityHandler = nil
-        errorHandle.readabilityHandler = nil
-        append(outputHandle.readDataToEndOfFile(), to: .standardOutput)
-        append(errorHandle.readDataToEndOfFile(), to: .standardError)
+        standardOutputReadSource?.cancel()
+        standardErrorReadSource?.cancel()
+        standardOutputReadSource = nil
+        standardErrorReadSource = nil
+        drainAvailableData(from: outputHandle, stream: .standardOutput)
+        drainAvailableData(from: errorHandle, stream: .standardError)
         try? outputHandle.close()
         try? errorHandle.close()
 

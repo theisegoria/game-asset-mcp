@@ -24,11 +24,23 @@ struct SettingsView: View {
 
 private struct GeneralSettingsPane: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(AppearancePreference.storageKey)
+    private var appearanceRawValue = AppearancePreference.defaultValue.rawValue
 
     var body: some View {
         @Bindable var model = model
 
         Form {
+            Section("Appearance") {
+                Picker("Appearance", selection: $appearanceRawValue) {
+                    ForEach(AppearancePreference.allCases) { appearance in
+                        Text(appearance.title)
+                            .tag(appearance.rawValue)
+                    }
+                }
+                .accessibilityHint("Choose Dark, System, or Light appearance for the studio and settings windows")
+            }
+
             Section("Command-line tool") {
                 TextField("CLI executable", text: $model.cliExecutable)
                     .textFieldStyle(.roundedBorder)

@@ -182,7 +182,16 @@ struct AppModelTests {
         let client = RecordingCLIClient()
         let store = SuspendingCredentialStore()
         let model = makeModel(client: client, store: store)
-        let operation = Task { await model.runDoctor() }
+        let operation = Task {
+            await model.generateAsset(
+                provider: .tripo,
+                operation: "generate",
+                prompt: "A lighthouse",
+                name: "lighthouse",
+                spendLimitCents: 25,
+                approved: true
+            )
+        }
 
         for _ in 0..<100 {
             if await store.credentialRequestCount() >= 1 { break }
@@ -190,12 +199,12 @@ struct AppModelTests {
         }
 
         #expect(await store.credentialRequestCount() == 1)
-        #expect(model.executionState == ExecutionState.running("Environment doctor"))
+        #expect(model.executionState == ExecutionState.running("Tripo generate"))
 
         let rejected = Task { await model.refreshCapabilities() }
         await rejected.value
 
-        #expect(model.executionState == ExecutionState.running("Environment doctor"))
+        #expect(model.executionState == ExecutionState.running("Tripo generate"))
         #expect(await client.records().isEmpty)
         #expect(await store.credentialRequestCount() == 1)
 
@@ -204,6 +213,23 @@ struct AppModelTests {
 
         #expect(await client.records().count == 1)
         #expect(model.executionState.summary == "Completed")
+    }
+
+    @Test("Doctor and capability discovery never read provider credentials")
+    func diagnosticsNeverReadProviderCredentials() async {
+        let client = RecordingCLIClient()
+        let store = InMemoryCredentialStore(credentials: [
+            .tripo: "tripo-secret",
+            .leonardo: "leonardo-secret",
+        ])
+        let model = makeModel(client: client, store: store)
+
+        await model.runDoctor()
+        await model.refreshCapabilities()
+
+        let records = await client.records()
+        #expect(records.count == 2)
+        #expect(records.allSatisfy { $0.credentials.isEmpty })
     }
 
     @Test("Cancellation remains authoritative after a rejected concurrent start")

@@ -8,10 +8,12 @@
  */
 
 import { spawn } from 'node:child_process';
-import { accessSync, constants, existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AssetPipelineError } from './errors.js';
+import { registerOwnedProcessTerminator, type OwnedProcessSignal } from './process-lifecycle.js';
 
 /** Where Blender actually lives on each platform, in preference order. */
 const CANDIDATE_PATHS: readonly string[] = [
@@ -102,6 +104,34 @@ export interface BlenderRunResult {
 
 const RECEIPT_PREFIX = 'NORMALIZE_RECEIPT=';
 const MAX_CAPTURE_BYTES = 4 << 20;
+const MAX_RECEIPT_LINE_BYTES = 256 << 10;
+
+function safeBlenderEnvironment(isolatedHome: string): NodeJS.ProcessEnv {
+  const allowed = [
+    'LANG', 'LC_ALL', 'DISPLAY', 'WAYLAND_DISPLAY', 'DEVELOPER_DIR', 'SDKROOT',
+  ];
+  const environment: NodeJS.ProcessEnv = {};
+  for (const name of allowed) {
+    const value = process.env[name];
+    if (value !== undefined) environment[name] = value;
+  }
+  const systemSearchPaths = process.platform === 'win32'
+    ? [path.dirname(process.execPath), `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32`]
+    : [path.dirname(process.execPath), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  const temporary = path.join(isolatedHome, 'tmp');
+  mkdirSync(temporary, { recursive: true, mode: 0o700 });
+  environment.PATH = [...new Set(systemSearchPaths)].join(path.delimiter);
+  environment.HOME = isolatedHome;
+  environment.TMPDIR = temporary;
+  if (process.platform === 'win32') {
+    environment.USERPROFILE = isolatedHome;
+    environment.TEMP = temporary;
+    environment.TMP = temporary;
+    if (process.env.SystemRoot) environment.SystemRoot = process.env.SystemRoot;
+    if (process.env.WINDIR) environment.WINDIR = process.env.WINDIR;
+  }
+  return environment;
+}
 
 /**
  * Run a packaged Blender script with a JSON option blob.
@@ -116,6 +146,7 @@ export async function runBlenderScript(
   settings: { timeoutMs: number; blenderPath?: string },
 ): Promise<BlenderRunResult> {
   const executable = settings.blenderPath ?? requireBlender();
+  const isolatedHome = mkdtempSync(path.join(os.tmpdir(), 'game-dev-blender-'));
 
   return new Promise<BlenderRunResult>((resolve, reject) => {
     // detached puts the child in its OWN process group, so the timeout can kill
@@ -126,29 +157,36 @@ export async function runBlenderScript(
     const child = spawn(
       executable,
       ['--background', '--factory-startup', '--python', scriptPath, '--', JSON.stringify(options)],
-      { stdio: ['ignore', 'pipe', 'pipe'], detached: true },
+      { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: safeBlenderEnvironment(isolatedHome) },
     );
 
-    let stdout = '';
     let stderr = '';
     let lastReceiptLine: string | undefined;
     let stdoutTruncated = false;
     let killedForTimeout = false;
+    let receiptLineTooLong = false;
+    let externallyStopping = false;
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
 
-    const killTree = (): void => {
+    const killTree = (signal: OwnedProcessSignal = 'SIGKILL'): void => {
       // Negative pid targets the group. Falling back to the child alone matters
       // where process groups are unavailable; either way we must not throw out
       // of a timer.
       try {
-        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+        if (child.pid !== undefined) process.kill(-child.pid, signal);
       } catch {
         try {
-          child.kill('SIGKILL');
+          child.kill(signal);
         } catch {
           // The process is already gone.
         }
       }
     };
+    const unregisterOwnedProcess = registerOwnedProcessTerminator((signal) => {
+      if (signal === 'SIGTERM') externallyStopping = true;
+      killTree(signal);
+    });
 
     const timer = setTimeout(() => {
       killedForTimeout = true;
@@ -163,27 +201,64 @@ export async function runBlenderScript(
     // of padding dictated every non-measured field in the response, including
     // the Blender version it claimed to be running.
     let pendingLine = '';
-    const scanForReceipt = (text: string): void => {
+    let discardingOversizedNoiseLine = false;
+    const scanForReceipt = (incoming: string): void => {
+      let text = incoming;
+      if (discardingOversizedNoiseLine) {
+        const newline = text.indexOf('\n');
+        if (newline < 0) return;
+        discardingOversizedNoiseLine = false;
+        text = text.slice(newline + 1);
+      }
       const combined = pendingLine + text;
       const lines = combined.split('\n');
       pendingLine = lines.pop() ?? '';
+      if (Buffer.byteLength(pendingLine, 'utf8') > MAX_RECEIPT_LINE_BYTES) {
+        if (pendingLine.startsWith(RECEIPT_PREFIX)) {
+          receiptLineTooLong = true;
+          pendingLine = '';
+          killTree();
+          return;
+        }
+        // Blender and wrappers can emit long progress/noise lines. Drop those
+        // incrementally rather than retaining them, while continuing to scan
+        // subsequent complete lines for the final receipt.
+        pendingLine = '';
+        discardingOversizedNoiseLine = true;
+      }
       for (const entry of lines) {
-        if (entry.startsWith(RECEIPT_PREFIX)) lastReceiptLine = entry;
+        if (!entry.startsWith(RECEIPT_PREFIX)) continue;
+        if (Buffer.byteLength(entry, 'utf8') > MAX_RECEIPT_LINE_BYTES) {
+          receiptLineTooLong = true;
+          killTree();
+          return;
+        }
+        lastReceiptLine = entry;
       }
     };
 
     child.stdout.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       scanForReceipt(text);
-      if (stdout.length < MAX_CAPTURE_BYTES) stdout += text;
-      else stdoutTruncated = true;
+      const remaining = Math.max(0, MAX_CAPTURE_BYTES - stdoutBytes);
+      if (remaining > 0) {
+        const retained = chunk.subarray(0, remaining);
+        stdoutBytes += retained.length;
+      }
+      if (chunk.length > remaining) stdoutTruncated = true;
     });
     child.stderr.on('data', (chunk: Buffer) => {
-      if (stderr.length < MAX_CAPTURE_BYTES) stderr += chunk.toString('utf8');
+      const remaining = Math.max(0, MAX_CAPTURE_BYTES - stderrBytes);
+      if (remaining > 0) {
+        const retained = chunk.subarray(0, remaining);
+        stderr += retained.toString('utf8');
+        stderrBytes += retained.length;
+      }
     });
 
     child.on('error', (err) => {
       clearTimeout(timer);
+      unregisterOwnedProcess();
       reject(
         new AssetPipelineError('INVALID_STATE', `could not start Blender: ${err.message}`, {
           cause: err,
@@ -201,6 +276,11 @@ export async function runBlenderScript(
     });
 
     const finish = (code: number | null): void => {
+      // The wrapper/group leader may exit on SIGTERM while a Blender descendant
+      // ignores it.  Preserve the CLI-wide cancellation guarantee by escalating
+      // the group before removing this process from the ownership registry.
+      if (externallyStopping) killTree('SIGKILL');
+      unregisterOwnedProcess();
       const stderrTail = stderr.split('\n').slice(-40).join('\n');
 
       if (killedForTimeout) {
@@ -209,6 +289,17 @@ export async function runBlenderScript(
             'TIMEOUT',
             `Blender exceeded ${settings.timeoutMs}ms; its process group was sent SIGKILL`,
             { retryable: true, details: { stderrTail } },
+          ),
+        );
+        return;
+      }
+
+      if (receiptLineTooLong) {
+        reject(
+          new AssetPipelineError(
+            'INSPECTION_FAILED',
+            `Blender emitted a receipt line larger than ${MAX_RECEIPT_LINE_BYTES} bytes`,
+            { details: { stderrTail } },
           ),
         );
         return;
@@ -274,5 +365,7 @@ export async function runBlenderScript(
         );
       }
     };
+  }).finally(() => {
+    rmSync(isolatedHome, { recursive: true, force: true });
   });
 }

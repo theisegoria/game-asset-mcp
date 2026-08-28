@@ -1,5 +1,40 @@
 import Foundation
 
+public enum AppearancePreference: String, CaseIterable, Identifiable, Sendable {
+    case dark
+    case system
+    case light
+
+    public static let defaultValue: AppearancePreference = .dark
+    public static let storageKey = "gameDevelopmentStudio.appearance"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .dark:
+            "Dark"
+        case .system:
+            "System"
+        case .light:
+            "Light"
+        }
+    }
+
+    /// Stable, testable names for the native SwiftUI color-scheme mapping.
+    /// `nil` means that the system appearance should be inherited.
+    public var preferredColorSchemeName: String? {
+        switch self {
+        case .dark:
+            "dark"
+        case .system:
+            nil
+        case .light:
+            "light"
+        }
+    }
+}
+
 public enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable, Sendable {
     case production
     case library

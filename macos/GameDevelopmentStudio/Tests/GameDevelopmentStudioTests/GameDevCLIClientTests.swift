@@ -44,11 +44,15 @@ struct GameDevCLIClientTests {
 
     @Test("Credential environment is injected and all returned text is redacted")
     func credentialInjectionAndRedaction() async throws {
-        let script = #"import json,os,sys; key=os.environ['TRIPO_API_KEY']; sys.stderr.write('diagnostic='+key); print(json.dumps({'schema':'game_dev.result.v1','operation':'test.redaction','ok':True,'data':{'message':key}}))"#
+        let executable = try makeHandshakeExecutable(body: #"""
+            printf 'diagnostic=%s' "$TRIPO_API_KEY" >&2
+            printf '{"schema":"game_dev.result.v1","operation":"test.redaction","ok":true,"data":{"message":"%s"}}\n' "$TRIPO_API_KEY"
+            """#)
+        defer { try? FileManager.default.removeItem(at: executable) }
         let secret = "tripo-super-secret-123"
-        let client = GameDevCLIClient(executableURL: python, baseEnvironment: [:])
+        let client = GameDevCLIClient(executableURL: executable, baseEnvironment: [:])
         let result = try await client.execute(
-            CLIInvocation(arguments: ["-c", script]),
+            CLIInvocation(arguments: ["provider", "tripo", "generate"]),
             credentials: [.tripo: secret],
             timeout: .seconds(5)
         )
@@ -62,9 +66,14 @@ struct GameDevCLIClientTests {
 
     @Test("Provider keys are stripped from inherited environment and only explicit credentials win")
     func inheritedCredentialEnvironmentIsStripped() async throws {
-        let script = #"import json,os; print(json.dumps({'schema':'game_dev.result.v1','operation':'test.environment','ok':True,'data':{'tripo':os.environ.get('TRIPO_API_KEY'),'leonardoPresent':'LEONARDO_API_KEY' in os.environ}}))"#
+        let executable = try makeHandshakeExecutable(body: #"""
+            tripo=${TRIPO_API_KEY:-null}
+            if [ -n "${LEONARDO_API_KEY:-}" ]; then leonardo=true; else leonardo=false; fi
+            printf '{"schema":"game_dev.result.v1","operation":"test.environment","ok":true,"data":{"tripo":"%s","leonardoPresent":%s}}\n' "$tripo" "$leonardo"
+            """#)
+        defer { try? FileManager.default.removeItem(at: executable) }
         let client = GameDevCLIClient(
-            executableURL: python,
+            executableURL: executable,
             baseEnvironment: [
                 "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
                 "TRIPO_API_KEY": "inherited-tripo-secret",
@@ -72,7 +81,7 @@ struct GameDevCLIClientTests {
             ]
         )
         let result = try await client.execute(
-            CLIInvocation(arguments: ["-c", script]),
+            CLIInvocation(arguments: ["provider", "tripo", "generate"]),
             credentials: [.tripo: "explicit-tripo-secret"],
             timeout: .seconds(5)
         )
@@ -184,11 +193,20 @@ struct GameDevCLIClientTests {
     @Test("Invalid JSON diagnostics redact JSON-escaped credential forms")
     func invalidJSONDiagnosticRedaction() async {
         let secret = "quoted\"secret\nline"
-        let script = #"import json,os; print(json.dumps(os.environ['TRIPO_API_KEY']))"#
-        let client = GameDevCLIClient(executableURL: python, baseEnvironment: [:])
+        let executable: URL
+        do {
+            executable = try makeHandshakeExecutable(body: #"""
+                printf '%s\n' "$TRIPO_API_KEY"
+                """#)
+        } catch {
+            Issue.record("Could not create executable fixture: \(error)")
+            return
+        }
+        defer { try? FileManager.default.removeItem(at: executable) }
+        let client = GameDevCLIClient(executableURL: executable, baseEnvironment: [:])
         do {
             _ = try await client.execute(
-                CLIInvocation(arguments: ["-c", script]),
+                CLIInvocation(arguments: ["provider", "tripo", "generate"]),
                 credentials: [.tripo: secret],
                 timeout: .seconds(5)
             )
@@ -204,6 +222,152 @@ struct GameDevCLIClientTests {
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
+    }
+
+    @Test("Minimal child environment excludes base URLs, data roots, loader variables, and unrelated secrets")
+    func sensitiveEnvironmentIsMinimal() async throws {
+        let executable = try makeHandshakeExecutable(body: #"""
+            if [ -n "${TRIPO_BASE_URL+x}" ]; then tripoBase=true; else tripoBase=false; fi
+            if [ -n "${LEONARDO_BASE_URL+x}" ]; then leonardoBase=true; else leonardoBase=false; fi
+            if [ -n "${GAME_DEV_DATA_ROOT+x}" ]; then dataRoot=true; else dataRoot=false; fi
+            if [ -n "${ASSET_OUTPUT_DIR+x}" ]; then assetOutput=true; else assetOutput=false; fi
+            if [ -n "${DYLD_INSERT_LIBRARIES+x}" ] || [ -n "${LD_PRELOAD+x}" ]; then loader=true; else loader=false; fi
+            if [ -n "${UNRELATED_TOKEN+x}" ] || [ -n "${UNRELATED_API_TOKEN+x}" ]; then unrelatedSecret=true; else unrelatedSecret=false; fi
+            if [ -n "${PATH+x}" ]; then path=true; else path=false; fi
+            printf '{"schema":"game_dev.result.v1","operation":"test.environment.minimal","ok":true,"data":{"tripoBase":%s,"leonardoBase":%s,"dataRoot":%s,"assetOutput":%s,"loader":%s,"unrelatedSecret":%s,"path":%s}}\n' "$tripoBase" "$leonardoBase" "$dataRoot" "$assetOutput" "$loader" "$unrelatedSecret" "$path"
+            """#)
+        defer { try? FileManager.default.removeItem(at: executable) }
+
+        let client = GameDevCLIClient(
+            executableURL: executable,
+            baseEnvironment: [
+                "PATH": "/usr/bin:/bin",
+                "TRIPO_BASE_URL": "https://attacker.invalid",
+                "LEONARDO_BASE_URL": "https://attacker.invalid",
+                "GAME_DEV_DATA_ROOT": "/tmp/attacker-data",
+                "ASSET_OUTPUT_DIR": "/tmp/attacker-assets",
+                "DYLD_INSERT_LIBRARIES": "/tmp/injected.dylib",
+                "UNRELATED_TOKEN": "unrelated-secret",
+            ]
+        )
+        let result = try await client.execute(
+            CLIInvocation(
+                arguments: ["provider", "tripo", "generate"],
+                environment: [
+                    "TRIPO_BASE_URL": "https://invocation.invalid",
+                    "GAME_DEV_DATA_ROOT": "/tmp/invocation-data",
+                    "ASSET_OUTPUT_DIR": "/tmp/invocation-assets",
+                    "LD_PRELOAD": "/tmp/invocation.dylib",
+                    "UNRELATED_API_TOKEN": "another-secret",
+                ]
+            ),
+            credentials: [.tripo: "explicit-provider-secret"],
+            timeout: .seconds(5)
+        )
+
+        #expect(result.envelope.data["tripoBase"] == .bool(false))
+        #expect(result.envelope.data["leonardoBase"] == .bool(false))
+        #expect(result.envelope.data["dataRoot"] == .bool(false))
+        #expect(result.envelope.data["assetOutput"] == .bool(false))
+        #expect(result.envelope.data["loader"] == .bool(false))
+        #expect(result.envelope.data["unrelatedSecret"] == .bool(false))
+        #expect(result.envelope.data["path"] == .bool(true))
+        #expect(!result.standardOutput.contains("attacker.invalid"))
+        #expect(!result.standardOutput.contains("unrelated-secret"))
+        #expect(!result.standardOutput.contains("explicit-provider-secret"))
+    }
+
+    @Test("Sensitive operations reject PATH lookup and require a canonical executable")
+    func sensitiveOperationsRejectPATHLookup() async throws {
+        let executable = try makeHandshakeExecutable(body: #"""
+            printf '{"schema":"game_dev.result.v1","operation":"test.path","ok":true,"data":{}}\n'
+            """#)
+        defer { try? FileManager.default.removeItem(at: executable) }
+
+        let client = GameDevCLIClient(
+            executableName: executable.lastPathComponent,
+            baseEnvironment: ["PATH": executable.deletingLastPathComponent().path]
+        )
+        do {
+            _ = try await client.execute(
+                CLIInvocation(arguments: ["provider", "tripo", "generate"]),
+                credentials: [.tripo: "must-not-enter-path-lookup"],
+                timeout: .seconds(5)
+            )
+            Issue.record("Expected trustedExecutableRequired")
+        } catch let error as GameDevCLIClientError {
+            #expect(error == .trustedExecutableRequired)
+            #expect(!error.localizedDescription.contains("must-not-enter-path-lookup"))
+        }
+    }
+
+    @Test("No-secret handshake returns a canonical identity and pins changed bytes")
+    func handshakeAndIdentityPin() async throws {
+        let executable = try makeHandshakeExecutable(body: #"""
+            printf '{"schema":"game_dev.result.v1","operation":"test.identity","ok":true,"data":{}}\n'
+            """#)
+        defer { try? FileManager.default.removeItem(at: executable) }
+
+        let client = GameDevCLIClient(executableURL: executable, baseEnvironment: [:])
+        let identity = try await client.noSecretHandshake()
+        #expect(identity.canonicalPath == executable.resolvingSymlinksInPath().path)
+        #expect(identity.sha256.count == 64)
+        #expect(identity.version == "1.0.0")
+        #expect(identity.resultSchema == GameDevCLIClient.resultSchema)
+        #expect(identity.capabilitiesSchema == GameDevCLIClient.capabilitiesSchema)
+
+        let pinned = client.pinned(to: identity)
+        try Data((try String(contentsOf: executable, encoding: .utf8) + "\n# changed after approval\n").utf8)
+            .write(to: executable)
+        do {
+            _ = try await pinned.execute(
+                CLIInvocation(arguments: ["provider", "tripo", "generate"]),
+                credentials: [.tripo: "never-used-secret"],
+                timeout: .seconds(5)
+            )
+            Issue.record("Expected executableIdentityChanged")
+        } catch let error as GameDevCLIClientError {
+            #expect(error == .executableIdentityChanged)
+        }
+    }
+
+    @Test("Direct child exit does not wait for descendants holding output pipes")
+    func descendantPipeHolderDoesNotHang() async throws {
+        let script = #"import json,subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(2)']); print(json.dumps({'schema':'game_dev.result.v1','operation':'test.pipe-holder','ok':True,'data':{}}))"#
+        let client = GameDevCLIClient(executableURL: python, baseEnvironment: [:])
+        let clock = ContinuousClock()
+        let started = clock.now
+        let result = try await client.execute(
+            CLIInvocation(arguments: ["-c", script]),
+            credentials: [:],
+            timeout: .seconds(5)
+        )
+
+        #expect(result.envelope.operation == "test.pipe-holder")
+        #expect(started.duration(to: clock.now) < .seconds(2))
+    }
+
+    private func makeHandshakeExecutable(body: String) throws -> URL {
+        let executable = FileManager.default.temporaryDirectory
+            .appendingPathComponent("game-dev-test-\(UUID().uuidString)")
+        let script = """
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then
+            printf '1.0.0\\n'
+            exit 0
+        fi
+        if [ "$1" = "capabilities" ]; then
+            printf '%s\\n' '{"schema":"game_dev.result.v1","operation":"capabilities","ok":true,"data":{"schema":"game_dev.capabilities.v1","name":"game-development-studio","version":"1.0.0","protocols":{"result":"game_dev.result.v1"}}}'
+            exit 0
+        fi
+        \(body)
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o755)],
+            ofItemAtPath: executable.path
+        )
+        return executable
     }
 
     @Test("Output is bounded and terminates a noisy process")

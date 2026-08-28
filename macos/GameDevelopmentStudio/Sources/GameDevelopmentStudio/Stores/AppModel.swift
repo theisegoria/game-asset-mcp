@@ -27,6 +27,7 @@ public final class AppModel {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var currentOperationToken: UUID?
     @ObservationIgnored private var currentExecution: Task<CLIExecutionResult, Error>?
+    @ObservationIgnored private var currentTrustCheck: Task<GameDevCLIExecutableIdentity, Error>?
 
     private static let logger = Logger(
         subsystem: "com.theisegoria.GameDevelopmentStudio",
@@ -114,16 +115,14 @@ public final class AppModel {
     public func runDoctor() async {
         await execute(
             label: "Environment doctor",
-            arguments: ["doctor"],
-            credentialProviders: Set(CredentialProvider.allCases)
+            arguments: ["doctor"]
         )
     }
 
     public func refreshCapabilities() async {
         await execute(
             label: "Capability discovery",
-            arguments: ["capabilities"],
-            credentialProviders: Set(CredentialProvider.allCases)
+            arguments: ["capabilities"]
         )
     }
 
@@ -149,7 +148,9 @@ public final class AppModel {
         name: String,
         version: String,
         license: String,
-        confirmed: Bool
+        confirmed: Bool,
+        expectedExecutableIdentity: GameDevCLIExecutableIdentity? = nil,
+        expectedOutputDirectory: String? = nil
     ) async {
         guard confirmed else {
             failLocally(
@@ -172,7 +173,10 @@ public final class AppModel {
                 "--name", name,
                 "--version", version,
                 "--license", license,
-            ]
+            ],
+            requiresTrustedExecutable: true,
+            expectedExecutableIdentity: expectedExecutableIdentity,
+            expectedOutputDirectory: expectedOutputDirectory
         )
     }
 
@@ -180,7 +184,9 @@ public final class AppModel {
         reference: String,
         project: String,
         destination: String,
-        confirmed: Bool
+        confirmed: Bool,
+        expectedExecutableIdentity: GameDevCLIExecutableIdentity? = nil,
+        expectedOutputDirectory: String? = nil
     ) async {
         guard
             let reference = required(reference, label: "Package reference"),
@@ -194,7 +200,10 @@ public final class AppModel {
 
         await execute(
             label: confirmed ? "Package admission" : "Package admission plan",
-            arguments: arguments
+            arguments: arguments,
+            requiresTrustedExecutable: confirmed,
+            expectedExecutableIdentity: expectedExecutableIdentity,
+            expectedOutputDirectory: expectedOutputDirectory
         )
     }
 
@@ -204,7 +213,9 @@ public final class AppModel {
         prompt: String,
         name: String,
         spendLimitCents: Int,
-        approved: Bool
+        approved: Bool,
+        expectedExecutableIdentity: GameDevCLIExecutableIdentity? = nil,
+        expectedOutputDirectory: String? = nil
     ) async {
         guard approved else {
             failLocally(
@@ -264,7 +275,10 @@ public final class AppModel {
             ],
             standardInput: request,
             credentialProviders: [provider],
-            timeout: .seconds(300)
+            timeout: .seconds(300),
+            requiresTrustedExecutable: true,
+            expectedExecutableIdentity: expectedExecutableIdentity,
+            expectedOutputDirectory: expectedOutputDirectory
         )
     }
 
@@ -289,7 +303,9 @@ public final class AppModel {
         project: String,
         allowGPU: Bool,
         allowPerformance: Bool,
-        confirmed: Bool
+        confirmed: Bool,
+        expectedExecutableIdentity: GameDevCLIExecutableIdentity? = nil,
+        expectedOutputDirectory: String? = nil
     ) async {
         guard confirmed else {
             failLocally(
@@ -306,7 +322,14 @@ public final class AppModel {
         var arguments = ["scenario", "run", id, "--project", project, "--confirm"]
         if allowGPU { arguments.append("--allow-gpu") }
         if allowPerformance { arguments.append("--allow-performance") }
-        await execute(label: "Scenario run", arguments: arguments, timeout: .seconds(900))
+        await execute(
+            label: "Scenario run",
+            arguments: arguments,
+            timeout: .seconds(900),
+            requiresTrustedExecutable: true,
+            expectedExecutableIdentity: expectedExecutableIdentity,
+            expectedOutputDirectory: expectedOutputDirectory
+        )
     }
 
     public func analyzeCapture(reference: String) async {
@@ -363,10 +386,80 @@ public final class AppModel {
         )
     }
 
+    /// Performs the no-secret executable handshake used to bind an approval to
+    /// the exact configured CLI. The reservation is authoritative while the
+    /// handshake is suspended, so no other command can start or overwrite its
+    /// state and Cancel remains available from the app command menu.
+    public func executableIdentityForApproval() async -> GameDevCLIExecutableIdentity? {
+        guard currentOperationToken == nil else {
+            Self.logger.notice("Rejected executable identity review because another local operation is running")
+            return nil
+        }
+        guard let client = makeClient() as? GameDevCLIClient else {
+            failLocally(
+                summary: "Executable verification unavailable",
+                message: "The configured native CLI identity cannot be verified for this approval."
+            )
+            return nil
+        }
+
+        let token = UUID()
+        let previousState = executionState
+        currentOperationToken = token
+        executionState = .running("Verifying CLI identity")
+        let task = Task<GameDevCLIExecutableIdentity, Error> {
+            try await client.noSecretHandshake()
+        }
+        currentTrustCheck = task
+
+        defer {
+            if currentOperationToken == token {
+                currentTrustCheck = nil
+                currentOperationToken = nil
+            }
+        }
+
+        do {
+            let identity = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            guard currentOperationToken == token else { return nil }
+            guard !task.isCancelled else {
+                executionState = .failed(
+                    summary: "Operation cancelled",
+                    errorMessage: "The local process was terminated."
+                )
+                return nil
+            }
+            executionState = previousState
+            return identity
+        } catch is CancellationError {
+            guard currentOperationToken == token else { return nil }
+            executionState = .failed(
+                summary: "Operation cancelled",
+                errorMessage: "The local process was terminated."
+            )
+            return nil
+        } catch {
+            guard currentOperationToken == token else { return nil }
+            executionState = .failed(
+                summary: "Executable verification failed",
+                errorMessage: error.localizedDescription
+            )
+            return nil
+        }
+    }
+
     public func cancelCurrentOperation() {
-        guard let currentExecution else { return }
-        Self.logger.notice("Cancelling current local CLI operation")
-        currentExecution.cancel()
+        if let currentExecution {
+            Self.logger.notice("Cancelling current local CLI operation")
+            currentExecution.cancel()
+        } else if let currentTrustCheck {
+            Self.logger.notice("Cancelling current CLI identity verification")
+            currentTrustCheck.cancel()
+        }
     }
 
     private func execute(
@@ -374,10 +467,23 @@ public final class AppModel {
         arguments: [String],
         standardInput: Data? = nil,
         credentialProviders: Set<CredentialProvider> = [],
-        timeout: Duration = .seconds(120)
+        timeout: Duration = .seconds(120),
+        requiresTrustedExecutable: Bool = false,
+        expectedExecutableIdentity: GameDevCLIExecutableIdentity? = nil,
+        expectedOutputDirectory: String? = nil
     ) async {
         guard currentOperationToken == nil else {
             Self.logger.notice("Rejected \(label, privacy: .public) because another local operation is running")
+            return
+        }
+
+        let output = outputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let expectedOutputDirectory,
+           output != expectedOutputDirectory.trimmingCharacters(in: .whitespacesAndNewlines) {
+            failLocally(
+                summary: "Approval expired",
+                message: "The output workspace changed after approval. Review the operation again."
+            )
             return
         }
 
@@ -386,7 +492,6 @@ public final class AppModel {
         executionState = .running(label)
 
         var arguments = arguments
-        let output = outputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         if !output.isEmpty { arguments += ["--output-dir", output] }
         if !arguments.contains("--json") && !arguments.contains("--jsonl") {
             arguments.append("--json")
@@ -401,6 +506,15 @@ public final class AppModel {
         let client = makeClient()
         let credentialStore = self.credentialStore
         let task = Task<CLIExecutionResult, Error> {
+            var executingClient: any GameDevCLIClientProtocol = client
+            if requiresTrustedExecutable, let nativeClient = client as? GameDevCLIClient {
+                let identity = try await nativeClient.noSecretHandshake()
+                if let expectedExecutableIdentity, identity != expectedExecutableIdentity {
+                    throw GameDevCLIClientError.executableIdentityChanged
+                }
+                executingClient = nativeClient.pinned(to: identity)
+            }
+
             var credentials: [CredentialProvider: String] = [:]
             do {
                 for provider in credentialProviders {
@@ -416,7 +530,7 @@ public final class AppModel {
             }
 
             try Task.checkCancellation()
-            return try await client.execute(invocation, credentials: credentials, timeout: timeout)
+            return try await executingClient.execute(invocation, credentials: credentials, timeout: timeout)
         }
         currentExecution = task
         Self.logger.info("Started \(label, privacy: .public)")

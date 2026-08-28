@@ -4,6 +4,19 @@ import Testing
 
 @Suite("App-facing models")
 struct ModelTests {
+    @Test("Appearance defaults to dark and maps to native color schemes")
+    func appearancePreference() {
+        #expect(AppearancePreference.defaultValue == .dark)
+        #expect(AppearancePreference.storageKey == "gameDevelopmentStudio.appearance")
+        #expect(AppearancePreference.allCases == [.dark, .system, .light])
+        #expect(AppearancePreference.dark.title == "Dark")
+        #expect(AppearancePreference.system.title == "System")
+        #expect(AppearancePreference.light.title == "Light")
+        #expect(AppearancePreference.dark.preferredColorSchemeName == "dark")
+        #expect(AppearancePreference.system.preferredColorSchemeName == nil)
+        #expect(AppearancePreference.light.preferredColorSchemeName == "light")
+    }
+
     @Test("Workspace metadata is stable and complete")
     func workspaceMetadata() {
         #expect(WorkspaceSection.allCases == [.production, .library, .visualDebugging, .performance])

@@ -96,7 +96,7 @@ struct ProductionWorkspaceView: View {
 
                 FormActions {
                     Button("Review Paid Generation…") {
-                        prepareProviderApproval()
+                        Task { await prepareProviderApproval() }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!canGenerate || model.executionState.isRunning)
@@ -142,7 +142,7 @@ struct ProductionWorkspaceView: View {
                     .disabled(assetPath.isEmpty || model.executionState.isRunning)
 
                     Button("Build Package…") {
-                        preparePackageApproval()
+                        Task { await preparePackageApproval() }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!canBuildPackage || model.executionState.isRunning)
@@ -196,12 +196,14 @@ struct ProductionWorkspaceView: View {
         }
     }
 
-    private func prepareProviderApproval() {
+    private func prepareProviderApproval() async {
         guard let provider else { return }
         let submittedOperation = operation
         let submittedPrompt = prompt
         let submittedName = generatedName
         let submittedLimit = spendLimitCents
+        let submittedOutputDirectory = model.outputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let identity = await model.executableIdentityForApproval() else { return }
 
         approvalRequest = ApprovalRequest(
             title: "Approve paid generation",
@@ -209,7 +211,14 @@ struct ProductionWorkspaceView: View {
             details: [
                 "Asset: \(submittedName)",
                 "Estimated ceiling: \(submittedLimit) cents",
-                "Prompt: \(submittedPrompt)"
+                "Prompt: \(submittedPrompt)",
+                "Official provider host: https://\(provider.officialHostname)",
+                "Executable: \(identity.canonicalPath)",
+                "Executable SHA-256: \(identity.sha256)",
+                "CLI version: \(identity.version)",
+                "Result schema: \(identity.resultSchema)",
+                "Capabilities schema: \(identity.capabilitiesSchema)",
+                "Output workspace: \(submittedOutputDirectory)"
             ],
             authorities: [.providerSpend],
             confirmationTitle: "Approve and Submit"
@@ -220,16 +229,20 @@ struct ProductionWorkspaceView: View {
                 prompt: submittedPrompt,
                 name: submittedName,
                 spendLimitCents: submittedLimit,
-                approved: true
+                approved: true,
+                expectedExecutableIdentity: identity,
+                expectedOutputDirectory: submittedOutputDirectory
             )
         }
     }
 
-    private func preparePackageApproval() {
+    private func preparePackageApproval() async {
         let submittedPath = assetPath
         let submittedName = packageName
         let submittedVersion = packageVersion
         let submittedLicense = packageLicense
+        let submittedOutputDirectory = model.outputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let identity = await model.executableIdentityForApproval() else { return }
 
         approvalRequest = ApprovalRequest(
             title: "Build canonical package",
@@ -237,7 +250,13 @@ struct ProductionWorkspaceView: View {
             details: [
                 "Source: \(submittedPath)",
                 "Package: \(submittedName) \(submittedVersion)",
-                "License: \(submittedLicense)"
+                "License: \(submittedLicense)",
+                "Executable: \(identity.canonicalPath)",
+                "Executable SHA-256: \(identity.sha256)",
+                "CLI version: \(identity.version)",
+                "Result schema: \(identity.resultSchema)",
+                "Capabilities schema: \(identity.capabilitiesSchema)",
+                "Output workspace: \(submittedOutputDirectory)"
             ],
             authorities: [.processExecution],
             confirmationTitle: "Build Package"
@@ -247,7 +266,9 @@ struct ProductionWorkspaceView: View {
                 name: submittedName,
                 version: submittedVersion,
                 license: submittedLicense,
-                confirmed: true
+                confirmed: true,
+                expectedExecutableIdentity: identity,
+                expectedOutputDirectory: submittedOutputDirectory
             )
         }
     }
