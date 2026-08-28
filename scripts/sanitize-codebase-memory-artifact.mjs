@@ -10,6 +10,11 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schema = 'game_dev.codebase_memory_artifact_sanitization.v1';
+// Construct rather than spell the workstation-root prefix as a URL-like
+// literal. The graph indexer classifies slash-delimited string literals as
+// routes; keeping this diagnostic guard out of the route graph lets the
+// persisted artifact prove that any matching bytes came from local state.
+const macUserRootPrefix = ['', 'Users', ''].join('/');
 const requiredTables = [
   'projects',
   'project_summaries',
@@ -97,7 +102,7 @@ function normalizedPortableRoot(value, project) {
   const candidate = value ?? path.posix.join('/workspace', project);
   const normalized = path.posix.normalize(candidate);
   invariant(path.posix.isAbsolute(normalized), 'portable root must be a POSIX absolute path');
-  invariant(!normalized.startsWith('/Users/'), 'portable root must not be inside /Users');
+  invariant(!normalized.startsWith(macUserRootPrefix), 'portable root must not be inside a macOS user directory');
   invariant(normalized !== '/', 'portable root must identify a project directory');
   return normalized;
 }
@@ -278,7 +283,7 @@ function assertPortableGraph(database, portableRoot, forbiddenTokens) {
     invariant(nonPortable === 0, `${table} contains a non-portable branch-root property`);
   }
 
-  for (const token of ['/Users/', ...forbiddenTokens]) {
+  for (const token of [macUserRootPrefix, ...forbiddenTokens]) {
     invariant(legacyLocations(database, token).length === 0, 'forbidden local data remains in a graph text column');
   }
 }
@@ -364,7 +369,7 @@ function inspectArtifact(artifactPath, metadataPath, portableRootOption, forbidd
     database.close();
 
     const rawTokens = [...new Set([
-      '/Users/',
+      macUserRootPrefix,
       ...forbiddenTokens,
       ...(legacy ? [legacy.oldRoot, legacy.oldLeaf, legacy.oldUser].filter(Boolean) : []),
     ])];
