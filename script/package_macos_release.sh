@@ -451,6 +451,14 @@ validate_public_repository() {
   done
 }
 
+validate_release_assets() {
+  local assets="$1"
+  local artifact_name="$2"
+  [[ -d "$assets" ]] || die "release-assets directory is missing"
+  assert_no_symlinks "$assets"
+  assert_exact_file_roster "$assets" "$artifact_name"
+}
+
 assert_runtime_screenshot_provenance() {
   local screenshot="$1"
   local provenance="$2"
@@ -598,6 +606,7 @@ package_release() {
     || die "two normalized archive passes were not byte-identical"
 
   extract_and_validate_archive "$artifact" "$version" "$extraction_root"
+  validate_release_assets "$assets" "$artifact_name"
 
   copy_public_repository_template "$repository"
   stage_screenshots "$screenshot_path" "$repository/screenshots"
@@ -634,6 +643,7 @@ verify_release() {
   artifact_hash="$(sha256_file "$artifact")"
   expected_hash="$(/usr/bin/awk -v name="$artifact_name" '$2 == name {print $1}' "$release_root/repository/CHECKSUMS.txt")"
   [[ "$expected_hash" == "$artifact_hash" ]] || die "release artifact checksum mismatch"
+  validate_release_assets "$release_root/release-assets" "$artifact_name"
 
   temp_root="$(mktemp -d "${TMPDIR:-/tmp}/gds-macos-verify.XXXXXX")"
   trap 'rm -rf "$temp_root"' EXIT
@@ -648,6 +658,7 @@ verify_release() {
 self_test() {
   local fixture_root
   local repository
+  local assets
   local dummy_artifact="GameDevelopmentStudio-1.0.0-macOS-arm64.zip"
   local dummy_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   local hash_01
@@ -659,6 +670,7 @@ self_test() {
   fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/gds-release-self-test.XXXXXX")"
   trap 'rm -rf "$fixture_root"' EXIT
   repository="$fixture_root/repository"
+  assets="$fixture_root/release-assets"
   copy_public_repository_template "$repository"
   cp "$SCREENSHOT_SOURCE_DIR/01-skill-suite.png" "$repository/screenshots/01-skill-suite.png"
   cp "$SCREENSHOT_SOURCE_DIR/02-cli-contract.png" "$repository/screenshots/02-cli-contract.png"
@@ -704,7 +716,15 @@ self_test() {
   validate_public_repository "$repository" "$dummy_artifact" "$dummy_hash"
   git -C "$repository" init -q
   validate_public_repository "$repository" "$dummy_artifact" "$dummy_hash"
-  note "self-test passed: allowlisted trees with or without .git were accepted; source, ZIP, symlink, and executable-file fixtures rejected"
+  mkdir -p "$assets"
+  printf 'fixture archive\n' >"$assets/$dummy_artifact"
+  validate_release_assets "$assets" "$dummy_artifact"
+  printf 'forbidden adjacent source\n' >"$assets/source.swift"
+  if (validate_release_assets "$assets" "$dummy_artifact") >/dev/null 2>&1; then
+    die "self-test failed: an extra source file beside the release asset was accepted"
+  fi
+  rm -f "$assets/source.swift"
+  note "self-test passed: allowlisted trees with or without .git were accepted; source, committed ZIP, symlink, executable-file, and extra-release-asset fixtures rejected"
   rm -rf "$fixture_root"
   trap - EXIT
 }
@@ -719,7 +739,7 @@ main() {
 
   for command in git swift /usr/bin/awk /usr/bin/codesign /usr/bin/ditto \
     /usr/bin/file /usr/bin/lipo /usr/bin/otool /usr/bin/plutil /usr/bin/shasum \
-    /usr/bin/strip /usr/bin/unzip /usr/bin/zip; do
+    /usr/bin/strings /usr/bin/strip /usr/bin/unzip /usr/bin/zip; do
     require_command "$command"
   done
 

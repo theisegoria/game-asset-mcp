@@ -25,6 +25,7 @@ public final class AppModel {
     @ObservationIgnored private let credentialStore: any CredentialStoring
     @ObservationIgnored private let suppliedClient: (any GameDevCLIClientProtocol)?
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private var currentOperationToken: UUID?
     @ObservationIgnored private var currentExecution: Task<CLIExecutionResult, Error>?
 
     private static let logger = Logger(
@@ -54,6 +55,7 @@ public final class AppModel {
     }
 
     public func refreshCredentialStates() async {
+        let startedWhileOperationWasRunning = currentOperationToken != nil
         for provider in CredentialProvider.allCases {
             do {
                 credentialStates[provider] = CredentialState(
@@ -62,6 +64,7 @@ public final class AppModel {
                 )
             } catch {
                 Self.logger.error("Credential status failed for \(provider.rawValue, privacy: .public)")
+                guard !startedWhileOperationWasRunning, currentOperationToken == nil else { continue }
                 executionState = .failed(
                     summary: "Could not read credential status",
                     errorMessage: error.localizedDescription
@@ -77,23 +80,33 @@ public final class AppModel {
             return
         }
 
+        let startedWhileOperationWasRunning = currentOperationToken != nil
+
         do {
             try await credentialStore.setCredential(trimmed, for: provider)
             credentialStates[provider] = CredentialState(provider: provider, isConfigured: true)
-            executionState = .succeeded("\(provider.displayName) credential saved in Keychain")
+            if !startedWhileOperationWasRunning, currentOperationToken == nil {
+                executionState = .succeeded("\(provider.displayName) credential saved in Keychain")
+            }
             Self.logger.info("Saved credential metadata for \(provider.rawValue, privacy: .public)")
         } catch {
+            guard !startedWhileOperationWasRunning else { return }
             failLocally(summary: "Could not save credential", message: error.localizedDescription)
         }
     }
 
     public func deleteCredential(for provider: CredentialProvider) async {
+        let startedWhileOperationWasRunning = currentOperationToken != nil
+
         do {
             try await credentialStore.deleteCredential(for: provider)
             credentialStates[provider] = CredentialState(provider: provider, isConfigured: false)
-            executionState = .succeeded("\(provider.displayName) credential removed")
+            if !startedWhileOperationWasRunning, currentOperationToken == nil {
+                executionState = .succeeded("\(provider.displayName) credential removed")
+            }
             Self.logger.info("Removed credential metadata for \(provider.rawValue, privacy: .public)")
         } catch {
+            guard !startedWhileOperationWasRunning else { return }
             failLocally(summary: "Could not remove credential", message: error.localizedDescription)
         }
     }
@@ -363,25 +376,14 @@ public final class AppModel {
         credentialProviders: Set<CredentialProvider> = [],
         timeout: Duration = .seconds(120)
     ) async {
-        guard currentExecution == nil else {
-            failLocally(
-                summary: "Another operation is running",
-                message: "Cancel or wait for the current operation before starting another one."
-            )
+        guard currentOperationToken == nil else {
+            Self.logger.notice("Rejected \(label, privacy: .public) because another local operation is running")
             return
         }
 
-        var credentials: [CredentialProvider: String] = [:]
-        do {
-            for provider in credentialProviders {
-                if let credential = try await credentialStore.credential(for: provider) {
-                    credentials[provider] = credential
-                }
-            }
-        } catch {
-            failLocally(summary: "Could not read Keychain", message: error.localizedDescription)
-            return
-        }
+        let token = UUID()
+        currentOperationToken = token
+        executionState = .running(label)
 
         var arguments = arguments
         let output = outputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -397,17 +399,50 @@ public final class AppModel {
             environment: [:]
         )
         let client = makeClient()
+        let credentialStore = self.credentialStore
         let task = Task<CLIExecutionResult, Error> {
-            try await client.execute(invocation, credentials: credentials, timeout: timeout)
+            var credentials: [CredentialProvider: String] = [:]
+            do {
+                for provider in credentialProviders {
+                    try Task.checkCancellation()
+                    if let credential = try await credentialStore.credential(for: provider) {
+                        credentials[provider] = credential
+                    }
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw CredentialReadFailure(message: error.localizedDescription)
+            }
+
+            try Task.checkCancellation()
+            return try await client.execute(invocation, credentials: credentials, timeout: timeout)
         }
         currentExecution = task
-        executionState = .running(label)
         Self.logger.info("Started \(label, privacy: .public)")
 
-        defer { currentExecution = nil }
+        defer {
+            if currentOperationToken == token {
+                currentExecution = nil
+                currentOperationToken = nil
+            }
+        }
 
         do {
-            let result = try await task.value
+            let result = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            guard currentOperationToken == token else { return }
+            guard !task.isCancelled else {
+                executionState = .failed(
+                    summary: "Operation cancelled",
+                    errorMessage: "The local process was terminated."
+                )
+                Self.logger.notice("Cancelled \(label, privacy: .public)")
+                return
+            }
             latestResult = result.envelope
             history.insert(result.envelope, at: 0)
             if history.count > 50 { history.removeLast(history.count - 50) }
@@ -422,10 +457,15 @@ public final class AppModel {
                 )
                 Self.logger.error("CLI returned a structured failure for \(label, privacy: .public)")
             }
+        } catch let error as CredentialReadFailure {
+            guard currentOperationToken == token else { return }
+            executionState = .failed(summary: "Could not read Keychain", errorMessage: error.message)
         } catch is CancellationError {
+            guard currentOperationToken == token else { return }
             executionState = .failed(summary: "Operation cancelled", errorMessage: "The local process was terminated.")
             Self.logger.notice("Cancelled \(label, privacy: .public)")
         } catch {
+            guard currentOperationToken == token else { return }
             executionState = .failed(summary: "\(label) failed", errorMessage: error.localizedDescription)
             Self.logger.error("Failed \(label, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
@@ -454,8 +494,16 @@ public final class AppModel {
     }
 
     private func failLocally(summary: String, message: String) {
+        guard currentOperationToken == nil else {
+            Self.logger.notice("Ignored local validation while another operation is running")
+            return
+        }
         executionState = .failed(summary: summary, errorMessage: message)
         Self.logger.error("Local validation stopped an operation: \(summary, privacy: .public)")
+    }
+
+    private struct CredentialReadFailure: Error, Sendable {
+        let message: String
     }
 
     private enum PreferenceKey {

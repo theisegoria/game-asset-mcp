@@ -152,10 +152,14 @@ struct VisualDebuggingWorkspaceView: View {
         let project = projectPath
         let scenario = scenarioID
         let signature = scenarioSignature
+        let previousResultID = model.latestResult?.id
 
         Task { @MainActor in
             await model.planScenario(id: scenario, project: project)
-            if model.executionState.errorMessage == nil, model.latestResult?.ok == true {
+            if !model.executionState.isRunning,
+               model.executionState.errorMessage == nil,
+               model.latestResult?.ok == true,
+               model.latestResult?.id != previousResultID {
                 plannedSignature = signature
             }
         }

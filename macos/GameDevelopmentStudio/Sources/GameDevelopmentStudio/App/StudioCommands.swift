@@ -30,19 +30,19 @@ struct StudioCommands: Commands {
                 actions?.runDoctor()
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
-            .disabled(actions == nil)
+            .disabled(actions == nil || actions?.isOperationRunning == true)
 
             Button("Refresh Capabilities") {
                 actions?.refreshCapabilities()
             }
             .keyboardShortcut("k", modifiers: [.command, .shift])
-            .disabled(actions == nil)
+            .disabled(actions == nil || actions?.isOperationRunning == true)
 
             Button("Refresh Library") {
                 actions?.refreshLibrary()
             }
             .keyboardShortcut("r", modifiers: [.command])
-            .disabled(actions == nil)
+            .disabled(actions == nil || actions?.isOperationRunning == true)
 
             Divider()
 
@@ -50,7 +50,7 @@ struct StudioCommands: Commands {
                 actions?.focusSearch()
             }
             .keyboardShortcut("f", modifiers: [.command])
-            .disabled(actions == nil)
+            .disabled(actions == nil || actions?.isOperationRunning == true)
 
             Button("Toggle Inspector") {
                 actions?.toggleInspector()

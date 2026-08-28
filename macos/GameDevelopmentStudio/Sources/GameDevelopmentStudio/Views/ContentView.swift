@@ -26,6 +26,7 @@ struct ContentView: View {
         )
         .searchFocused($isSearchFocused)
         .onSubmit(of: .search) {
+            guard !model.executionState.isRunning else { return }
             Task { await model.refreshCatalog(query: model.searchText) }
         }
         .toolbar {
@@ -68,7 +69,10 @@ struct ContentView: View {
                 runDoctor: { Task { await model.runDoctor() } },
                 refreshCapabilities: { Task { await model.refreshCapabilities() } },
                 refreshLibrary: { Task { await model.refreshCatalog(query: model.searchText) } },
-                focusSearch: { isSearchFocused = true },
+                focusSearch: {
+                    guard !model.executionState.isRunning else { return }
+                    isSearchFocused = true
+                },
                 toggleInspector: { isInspectorPresented.toggle() },
                 cancelOperation: model.cancelCurrentOperation,
                 isOperationRunning: model.executionState.isRunning

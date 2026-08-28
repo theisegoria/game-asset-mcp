@@ -122,7 +122,7 @@ private struct CredentialSettingsPane: View {
                             Button("Delete…", role: .destructive) {
                                 pendingDeletion = selectedProvider
                             }
-                            .disabled(isSaving)
+                            .disabled(isSaving || model.executionState.isRunning)
                             .accessibilityLabel("Delete saved \(selectedProvider.displayName) credential")
                         }
                     }
@@ -130,11 +130,11 @@ private struct CredentialSettingsPane: View {
             }
 
             Section("Keychain credential") {
-                SecureField("Enter a new credential", text: $credentialDraft)
-                    .textContentType(.password)
-                    .privacySensitive()
-                    .disabled(selectedProvider == nil || isSaving)
-                    .accessibilityHint("Saved values are never read back into this field")
+                    SecureField("Enter a new credential", text: $credentialDraft)
+                        .textContentType(.password)
+                        .privacySensitive()
+                        .disabled(selectedProvider == nil || isSaving || model.executionState.isRunning)
+                        .accessibilityHint("Saved values are never read back into this field")
 
                 HStack {
                     Text("The app can replace or delete a saved value, but never reveals it.")
@@ -155,7 +155,12 @@ private struct CredentialSettingsPane: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(selectedProvider == nil || credentialDraft.isEmpty || isSaving)
+                    .disabled(
+                        selectedProvider == nil
+                            || credentialDraft.isEmpty
+                            || isSaving
+                            || model.executionState.isRunning
+                    )
                 }
             }
 

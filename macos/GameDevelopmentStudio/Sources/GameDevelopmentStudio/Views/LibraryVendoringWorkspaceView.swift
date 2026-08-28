@@ -20,7 +20,9 @@ struct LibraryVendoringWorkspaceView: View {
                 HStack(spacing: 10) {
                     TextField("Search packages", text: $model.searchText)
                         .textFieldStyle(.roundedBorder)
+                        .disabled(model.executionState.isRunning)
                         .onSubmit {
+                            guard !model.executionState.isRunning else { return }
                             Task { await model.refreshCatalog(query: model.searchText) }
                         }
 
@@ -106,6 +108,7 @@ struct LibraryVendoringWorkspaceView: View {
         let project = projectPath
         let selectedDestination = destination
         let signature = vendorSignature
+        let previousResultID = model.latestResult?.id
 
         Task { @MainActor in
             await model.vendorPackage(
@@ -114,7 +117,10 @@ struct LibraryVendoringWorkspaceView: View {
                 destination: selectedDestination,
                 confirmed: false
             )
-            if model.executionState.errorMessage == nil, model.latestResult?.ok == true {
+            if !model.executionState.isRunning,
+               model.executionState.errorMessage == nil,
+               model.latestResult?.ok == true,
+               model.latestResult?.id != previousResultID {
                 plannedSignature = signature
             }
         }

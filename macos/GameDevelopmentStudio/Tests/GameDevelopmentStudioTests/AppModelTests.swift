@@ -177,9 +177,68 @@ struct AppModelTests {
         #expect(await client.observedCancellation())
     }
 
+    @Test("Busy reservation covers suspending credential lookup and admits one invocation")
+    func busyReservationBeforeCredentialLookup() async {
+        let client = RecordingCLIClient()
+        let store = SuspendingCredentialStore()
+        let model = makeModel(client: client, store: store)
+        let operation = Task { await model.runDoctor() }
+
+        for _ in 0..<100 {
+            if await store.credentialRequestCount() >= 1 { break }
+            await Task.yield()
+        }
+
+        #expect(await store.credentialRequestCount() == 1)
+        #expect(model.executionState == ExecutionState.running("Environment doctor"))
+
+        let rejected = Task { await model.refreshCapabilities() }
+        await rejected.value
+
+        #expect(model.executionState == ExecutionState.running("Environment doctor"))
+        #expect(await client.records().isEmpty)
+        #expect(await store.credentialRequestCount() == 1)
+
+        await store.releaseCredentialLookups()
+        await operation.value
+
+        #expect(await client.records().count == 1)
+        #expect(model.executionState.summary == "Completed")
+    }
+
+    @Test("Cancellation remains authoritative after a rejected concurrent start")
+    func cancellationRemainsAuthoritative() async {
+        let client = RecordingCLIClient(blockUntilCancelled: true)
+        let model = makeModel(client: client)
+        let operation = Task { await model.runDoctor() }
+
+        for _ in 0..<100 {
+            if !(await client.records()).isEmpty { break }
+            await Task.yield()
+        }
+
+        #expect(model.executionState == ExecutionState.running("Environment doctor"))
+        let rejected = Task { await model.refreshCatalog(query: "ignored while busy") }
+        await rejected.value
+        #expect(model.executionState == ExecutionState.running("Environment doctor"))
+
+        model.cancelCurrentOperation()
+        await operation.value
+
+        #expect(await client.records().count == 1)
+        #expect(await client.observedCancellation())
+        #expect(model.executionState.summary == "Operation cancelled")
+        #expect(model.executionState.errorMessage == "The local process was terminated.")
+
+        model.cancelCurrentOperation()
+        await Task.yield()
+        #expect(model.executionState.summary == "Operation cancelled")
+        #expect(model.executionState.errorMessage == "The local process was terminated.")
+    }
+
     private func makeModel(
         client: RecordingCLIClient,
-        store: InMemoryCredentialStore = InMemoryCredentialStore()
+        store: any CredentialStoring = InMemoryCredentialStore()
     ) -> AppModel {
         let suite = "GameDevelopmentStudioTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -252,4 +311,38 @@ private actor RecordingCLIClient: GameDevCLIClientProtocol {
 
     func records() -> [RecordedInvocation] { captured }
     func observedCancellation() -> Bool { cancellationObserved }
+}
+
+private actor SuspendingCredentialStore: CredentialStoring {
+    private var credentialRequests = 0
+    private var releaseImmediately = false
+    private var pendingLookups: [CheckedContinuation<String?, Never>] = []
+
+    func credential(for provider: CredentialProvider) async throws -> String? {
+        credentialRequests += 1
+        if releaseImmediately { return nil }
+
+        return await withCheckedContinuation { continuation in
+            pendingLookups.append(continuation)
+        }
+    }
+
+    func setCredential(_ credential: String, for provider: CredentialProvider) async throws {}
+
+    func deleteCredential(for provider: CredentialProvider) async throws {}
+
+    func isConfigured(_ provider: CredentialProvider) async throws -> Bool {
+        false
+    }
+
+    func credentialRequestCount() -> Int { credentialRequests }
+
+    func releaseCredentialLookups() {
+        releaseImmediately = true
+        let pending = pendingLookups
+        pendingLookups.removeAll()
+        for continuation in pending {
+            continuation.resume(returning: nil)
+        }
+    }
 }

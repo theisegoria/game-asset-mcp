@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ApprovalSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var isConfirming = false
 
     let request: ApprovalRequest
 
@@ -68,36 +67,27 @@ struct ApprovalSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
-                .disabled(isConfirming)
 
                 Button {
                     confirm()
                 } label: {
-                    if isConfirming {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel("Confirming")
-                    } else {
-                        Text(request.confirmationTitle)
-                    }
+                    Text(request.confirmationTitle)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
                 .keyboardShortcut(.defaultAction)
-                .disabled(isConfirming)
             }
         }
         .padding(24)
         .frame(width: 560)
-        .interactiveDismissDisabled(isConfirming)
     }
 
     private func confirm() {
-        isConfirming = true
+        let action = request.action
+        dismiss()
+
         Task { @MainActor in
-            await request.action()
-            isConfirming = false
-            dismiss()
+            await action()
         }
     }
 }
