@@ -83,7 +83,15 @@ function forbiddenArtifact(relative) {
 
 function checkedRoster(roster) {
   invariant(roster?.schema === 'game_dev.skills_release_roster.v1', 'unexpected skills release roster schema');
-  for (const field of ['repositoryFiles', 'pluginFiles', 'templateFiles', 'templateOnlyFiles', 'sourceOnlyFiles', 'sourceOnlyDirectoryPrefixes']) {
+  for (const field of [
+    'repositoryFiles',
+    'pluginFiles',
+    'templateFiles',
+    'templateOnlyFiles',
+    'repositorySourceFiles',
+    'sourceOnlyFiles',
+    'sourceOnlyDirectoryPrefixes',
+  ]) {
     invariant(Array.isArray(roster[field]), `release roster ${field} must be an array`);
   }
   for (const [field, entries] of Object.entries(roster)) {
@@ -185,14 +193,10 @@ async function validateScopedFiles(root, requiredFiles, optionalFiles, optionalD
 }
 
 async function validateScopedSource(root, roster) {
-  await validateScopedFiles(
-    root,
-    roster.pluginFiles,
-    roster.sourceOnlyFiles,
-    roster.sourceOnlyDirectoryPrefixes,
-    'source release scope',
-    true,
-  );
+  await validateScopedFiles(root, [
+    ...roster.pluginFiles,
+    ...roster.repositorySourceFiles,
+  ], roster.sourceOnlyFiles, roster.sourceOnlyDirectoryPrefixes, 'source release scope', true);
 }
 
 const rosterPath = path.join(template, 'release-roster.json');
@@ -237,22 +241,18 @@ for (const relative of ['LICENSE', 'PRIVACY.md', 'TERMS.md', 'SUPPORT.md', 'SECU
   await cp(path.join(sourceRoot, relative), path.join(plugin, relative));
 }
 
+for (const relative of roster.repositorySourceFiles) {
+  await mkdir(path.dirname(path.join(destination, relative)), { recursive: true });
+  await cp(path.join(sourceRoot, relative), path.join(destination, relative));
+}
+
 for (const relative of roster.pluginFiles) {
   if (['README.md', 'CHANGELOG.md', 'LICENSE', 'PRIVACY.md', 'TERMS.md', 'SUPPORT.md', 'SECURITY.md'].includes(relative)) continue;
   await mkdir(path.dirname(path.join(plugin, relative)), { recursive: true });
   await cp(path.join(sourceRoot, relative), path.join(plugin, relative));
 }
 
-await mkdir(path.join(plugin, 'marketing'), { recursive: true });
-for (const relative of ['COPY.md', 'STORE_SUBMISSION.md']) {
-  await cp(path.join(sourceRoot, 'marketing', relative), path.join(plugin, 'marketing', relative));
-}
-const repositoryReadme = await readFile(path.join(template, 'README.md'), 'utf8');
-await writeFile(
-  path.join(plugin, 'README.md'),
-  repositoryReadme.replaceAll('plugins/game-development-studio/assets/', 'assets/'),
-  { flag: 'wx' },
-);
+await writeFile(path.join(plugin, 'README.md'), await readFile(path.join(template, 'PLUGIN_README.md'), 'utf8'), { flag: 'wx' });
 await cp(path.join(template, 'CHANGELOG.md'), path.join(plugin, 'CHANGELOG.md'));
 
 const manifestPath = path.join(plugin, '.codex-plugin', 'plugin.json');

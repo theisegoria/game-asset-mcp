@@ -1,6 +1,6 @@
 {
   "name": "game-development-studio",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Local-first game asset production, vendoring, render diagnosis, and bounded performance workflows.",
   "author": {
     "name": "Benjamin Michael Haire",
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Game Development Studio",
     "shortDescription": "Build assets. Debug renders.",
-    "longDescription": "Route game asset production, canonical package vendoring, sealed render-capture diagnosis, and bounded performance work through a local-first evidence-aware workflow. Execution uses the separately installed game-dev CLI, while provider spend, project writes, GPU work, and performance measurement remain separately authorized for each invocation.",
+    "longDescription": "Route game asset production, canonical package vendoring, sealed render-capture diagnosis, and bounded performance work through a local-first evidence-aware workflow. Execution uses the separately installed game-dev 1.0.2-or-newer CLI. Optional provider requests use only a preconfigured local credential controlled by the user; the plugin never collects keys or proxies provider traffic. Provider spend, every local write, GPU work, and performance measurement remain separately authorized for each invocation.",
     "developerName": "Benjamin Michael Haire",
     "category": "Developer Tools",
     "capabilities": [
@@ -40,11 +40,6 @@
     ],
     "brandColor": "#10C9D5",
     "composerIcon": "./assets/icon.png",
-    "logo": "./assets/icon.png",
-    "screenshots": [
-      "./assets/screenshots/01-skill-suite.png",
-      "./assets/screenshots/02-cli-contract.png",
-      "./assets/screenshots/03-visual-debugging.png"
-    ]
+    "logo": "./assets/icon.png"
   }
 }

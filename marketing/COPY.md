@@ -18,31 +18,34 @@ debugging, and bounded performance tools for developers and coding agents.
 
 ## Short store description
 
-Produce assets and diagnose game renders.
+Build assets. Debug renders.
 
 ## Store listing
 
 Game Development Studio gives Codex a disciplined local workflow for the jobs
 around a game asset—not just the moment it is generated.
 
-Route a brief through Tripo or Leonardo with explicit spend limits. Inspect and
-normalize GLB files. Build content-addressed packages that retain hashes,
-licenses, provenance, and receipts. Plan project admission before writing.
+Prepare optional user-operated requests to the Tripo or Leonardo API with an
+account and preconfigured local credential controlled by the user, explicit
+per-call approval, and a finite spend limit. Inspect and normalize GLB files.
+Build content-addressed packages that retain hashes, licenses, provenance, and
+receipts. Plan project admission before writing.
 Capture windowless renders with semantic attachments and structured telemetry,
 then compare sealed runs with deterministic statistics, heatmaps, and bounded
 performance goals.
 
 The plugin is skills-only and sends no analytics to the publisher. Execution
 requires the separately installed `game-dev` CLI in a local Codex environment.
-ChatGPT can still route workflows and analyze
-user-supplied manifests, telemetry, metrics, and capture summaries. Paid
-provider calls, project writes, GPU work, and performance measurements remain
-separately authorized for each invocation.
+ChatGPT can still route workflows and analyze user-supplied manifests,
+telemetry, metrics, and capture summaries. The plugin never collects a provider
+credential or proxies provider traffic. Paid provider calls, every local
+write, GPU work, and performance measurements remain separately authorized for
+each invocation.
 
 ## Feature bullets
 
 - One router and four focused game-development skills
-- Tripo 3D and Leonardo image/audio job workflows
+- Optional user-operated Tripo 3D and Leonardo image/audio API workflows
 - Explicit per-call spend approval and finite estimated ceilings
 - GLB inspection, validation, Blender normalization, and USDZ previews
 - Content-addressed packages with provenance, licenses, receipts, and hashes
@@ -86,7 +89,8 @@ It combines a local `game-dev` CLI with five skills for:
 
 Codex invokes the same inspectable CLI a developer can run, and every sensitive
 capability—spend, writes, GPU work, and performance capture—has its own
-per-invocation gate.
+per-invocation gate. Provider keys stay outside the plugin conversation and
+publisher infrastructure.
 
 The first public release is open source under MIT.
 
@@ -108,8 +112,9 @@ production, asset vendoring, visual debugging, and performance optimization.
 
 ### 02 — A stable local command contract
 
-Caption: The `game-dev` CLI gives humans and coding agents the same JSON/JSONL
-interface, with planning and authority kept separate.
+Caption: A marketing composition based on actual v1.0.0 `game-dev` CLI output,
+shortened for display. It illustrates the local JSON/JSONL contract and its
+separate planning and authority boundaries; it is not a current-run claim.
 
 Alt: Terminal-style Game Development Studio command output showing capability
 checks, a dry-run skill installation, and a structured approval boundary.

@@ -98,6 +98,7 @@ describe('public release distribution', () => {
       'marketing/STORE_SUBMISSION.md',
       'scripts/build-skills-repository.mjs',
       'distribution/skills-repo/README.md',
+      'distribution/skills-repo/PLUGIN_README.md',
       'distribution/skills-repo/gitignore.template',
       'distribution/skills-repo/.agents/plugins/marketplace.json',
       'distribution/skills-repo/.github/workflows/validate.yml',
@@ -114,7 +115,7 @@ describe('public release distribution', () => {
     ]));
   }, 30_000);
 
-  it('exports a standalone repository and plugin README with locally resolvable images', async () => {
+  it('exports repository-root marketing images and a screenshot-free plugin archive', async () => {
     const root = await temporaryRoot();
     const destination = path.join(root, 'public-skills-repository');
     const result = await run(process.execPath, [builder, destination]);
@@ -127,15 +128,15 @@ describe('public release distribution', () => {
 
     const plugin = path.join(destination, 'plugins', 'game-development-studio');
     const pluginReadme = await readFile(path.join(plugin, 'README.md'), 'utf8');
-    expect(pluginReadme).not.toContain('plugins/game-development-studio/assets/');
+    expect(pluginReadme).not.toContain('assets/screenshots/');
+    await expect(access(path.join(plugin, 'assets', 'icon.png'))).resolves.toBeUndefined();
     for (const relative of [
-      'assets/icon.png',
       'assets/screenshots/01-skill-suite.png',
       'assets/screenshots/02-cli-contract.png',
       'assets/screenshots/03-visual-debugging.png',
     ]) {
-      expect(pluginReadme).toContain(relative);
-      await expect(access(path.join(plugin, relative))).resolves.toBeUndefined();
+      await expect(access(path.join(destination, relative))).resolves.toBeUndefined();
+      await expect(access(path.join(plugin, relative))).rejects.toThrow();
     }
     for (const relative of [
       'assets/macos/AppIcon.icns',
@@ -145,28 +146,63 @@ describe('public release distribution', () => {
       'marketing/02-cli-contract.html',
       'marketing/03-visual-debugging.html',
       'marketing/MACOS_APP_COPY.md',
+      'marketing/COPY.md',
+      'marketing/STORE_SUBMISSION.md',
       'assets/generated',
     ]) {
       await expect(access(path.join(plugin, relative))).rejects.toThrow();
     }
+    await expect(access(path.join(destination, 'marketing', 'COPY.md'))).resolves.toBeUndefined();
+    await expect(access(path.join(destination, 'marketing', 'STORE_SUBMISSION.md'))).resolves.toBeUndefined();
     await expect(access(path.join(destination, '.gitignore'))).resolves.toBeUndefined();
     await expect(access(path.join(destination, '.agents', 'plugins', 'marketplace.json'))).resolves.toBeUndefined();
     await expect(access(path.join(destination, '.github', 'workflows', 'validate.yml'))).resolves.toBeUndefined();
-    await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).resolves.toMatchObject({
-      stdout: expect.stringContaining('game_dev.public_plugin_verification.v1'),
+    const verification = await run(pythonExecutable, ['scripts/verify.py'], destination);
+    expect(JSON.parse(verification.stdout)).toMatchObject({
+      schema: 'game_dev.public_plugin_verification.v1',
+      version: '1.0.2',
+      screenshots: 0,
+      marketingScreenshots: 3,
     });
 
     const archive = path.join(root, 'plugin.zip');
     await expect(run(pythonExecutable, ['scripts/build_release.py', archive], destination)).resolves.toMatchObject({
-      stdout: expect.stringContaining('files 42'),
+      stdout: expect.stringContaining('files 36'),
     });
+    expect((await readFile(archive)).includes(Buffer.from('assets/screenshots/'))).toBe(false);
 
     const manifest = JSON.parse(await readFile(
       path.join(plugin, '.codex-plugin', 'plugin.json'),
       'utf8',
-    )) as Record<string, unknown>;
+    )) as { version?: string; interface?: Record<string, unknown> };
+    expect(manifest.version).toBe('1.0.2');
     expect(manifest).not.toHaveProperty('mcpServers');
     expect(manifest).not.toHaveProperty('apps');
+    expect(manifest.interface?.screenshots).toBeUndefined();
+  });
+
+  it('rejects screenshots from no-UI source and exported plugin manifests', async () => {
+    const sourceRootFixture = await temporaryRoot();
+    const sourceFixture = await sourceVerifierFixture(sourceRootFixture);
+    const sourceManifestPath = path.join(sourceFixture, '.codex-plugin', 'plugin.json');
+    const sourceManifest = JSON.parse(await readFile(sourceManifestPath, 'utf8')) as {
+      interface: Record<string, unknown>;
+    };
+    sourceManifest.interface.screenshots = ['./assets/screenshots/01-skill-suite.png'];
+    await writeFile(sourceManifestPath, `${JSON.stringify(sourceManifest, null, 2)}\n`);
+    await expect(run(process.execPath, [path.join(sourceFixture, 'scripts', 'verify-plugin.mjs')], sourceFixture))
+      .rejects.toThrow(/skills-only plugin must not declare screenshots/);
+
+    const exportRoot = await temporaryRoot();
+    const destination = await exportRepository(exportRoot);
+    const manifestPath = path.join(destination, 'plugins', 'game-development-studio', '.codex-plugin', 'plugin.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      interface: Record<string, unknown>;
+    };
+    manifest.interface.screenshots = ['./assets/screenshots/01-skill-suite.png'];
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination))
+      .rejects.toThrow(/skills-only plugin must not declare screenshots/);
   });
 
   it('rejects an exporter destination within its source root, including a symlink alias', async () => {
@@ -199,6 +235,51 @@ describe('public release distribution', () => {
       await expect(access(output)).rejects.toThrow();
     }
   });
+
+  it('accepts only repository-root Git administrative state in initialized and cloned exports', async () => {
+    const root = await temporaryRoot();
+    const destination = await exportRepository(root);
+
+    const gitdirFixtureRoot = await temporaryRoot();
+    const gitdirFixture = await exportRepository(gitdirFixtureRoot);
+    const gitdirPath = path.join(gitdirFixture, '.git');
+    await writeFile(gitdirPath, 'gitdir: /private/tmp/release-fixture-admin\n');
+    await expect(run(pythonExecutable, ['scripts/verify.py'], gitdirFixture)).resolves.toMatchObject({
+      stdout: expect.stringContaining('game_dev.public_plugin_verification.v1'),
+    });
+    await writeFile(gitdirPath, 'gitdir: /private/tmp/release-fixture-admin\nunexpected second line\n');
+    await expect(run(pythonExecutable, ['scripts/verify.py'], gitdirFixture))
+      .rejects.toThrow(/well-formed single-line gitdir file/);
+    await writeFile(gitdirPath, 'gitdir: \n');
+    await expect(run(pythonExecutable, ['scripts/verify.py'], gitdirFixture))
+      .rejects.toThrow(/well-formed single-line gitdir file/);
+
+    await run('git', ['init', '--quiet'], destination);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).resolves.toMatchObject({
+      stdout: expect.stringContaining('game_dev.public_plugin_verification.v1'),
+    });
+
+    await run('git', ['add', '.'], destination);
+    await run('git', [
+      '-c', 'user.name=Release Fixture',
+      '-c', 'user.email=release-fixture@example.invalid',
+      'commit', '--quiet', '-m', 'fixture export',
+    ], destination);
+    const cloned = path.join(root, 'cloned-public-skills-repository');
+    await run('git', ['clone', '--quiet', destination, cloned], root);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], cloned)).resolves.toMatchObject({
+      stdout: expect.stringContaining('game_dev.public_plugin_verification.v1'),
+    });
+
+    const archive = path.join(root, 'cloned-plugin.zip');
+    await expect(run(pythonExecutable, ['scripts/build_release.py', archive], cloned)).resolves.toMatchObject({
+      stdout: expect.stringContaining('files 36'),
+    });
+
+    const nestedGit = path.join(cloned, 'plugins', 'game-development-studio', '.git');
+    await mkdir(nestedGit);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], cloned)).rejects.toThrow(/unexpected file|closed release roster|empty directory/);
+  }, 30_000);
 
   it('rejects unexpected empty directories in the source and exported release trees', async () => {
     const root = await temporaryRoot();

@@ -1,11 +1,31 @@
 # Changelog
 
+## 1.0.2
+
+Public plugin and CLI corrective release:
+
+- aligns the CLI/npm package and five-skill bundle on version 1.0.2
+- explicitly sends `public: false` on Leonardo V1 image-generation requests so
+  community-feed visibility does not depend on an account-side default
+- adds no-network regression tests for the Leonardo image request, its
+  no-retry paid-call boundary, and validation-before-network behavior
+- removes no-UI screenshot metadata and assets from the uploaded skills plugin
+  while retaining accurately labelled marketing illustrations at public
+  repository scope
+- documents zero publisher retention, local and provider data controls, and the
+  user-operated provider-account boundary
+- prevents the skills from requesting or configuring provider credentials and
+  applies explicit conversation-level authorization to every local write,
+  including commands without a `--confirm` option
+- narrows the umbrella router to explicit Game Development Studio and
+  cross-workflow game-development requests
+
 ## 1.0.1
 
 Release-candidate hardening and public-product alignment:
 
-- assigns one immutable 1.0.1 identity to the CLI and five-skill bundle after
-  the already-published skills v1.0.0 archive
+- established the initial 1.0.1 identity shared by the CLI and five-skill
+  bundle after the already-published skills v1.0.0 archive
 - adds byte-verifiable macOS icon provenance and refreshed publication metadata
 - hardens native CLI identity checks, exact operation validation, credential
   routing, cancellation, process cleanup, and bounded output draining

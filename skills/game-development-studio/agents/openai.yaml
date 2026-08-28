@@ -4,4 +4,4 @@ interface:
   icon_small: "./assets/icon.png"
   icon_large: "./assets/icon.png"
   brand_color: "#10C9D5"
-  default_prompt: "Use $game-development-studio to choose and run the right local game asset or diagnostic workflow."
+  default_prompt: "Use $game-development-studio to coordinate this user-requested cross-workflow game asset or diagnostic task."

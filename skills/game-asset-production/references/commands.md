@@ -14,6 +14,13 @@ game-dev credentials status --json
 
 ## Provider jobs
 
+Provider execution requires `game-dev` 1.0.2 or newer. The account holder must
+configure any provider credential outside the plugin
+conversation in a local mechanism they control. Never request, accept, print,
+store, or paste a key. The commands below may be shown only after
+`game-dev credentials status --json` reports the selected provider configured;
+that status command never returns the value.
+
 ```text
 game-dev provider tripo generate --request request.json --approve-spend --spend-limit-cents N --jsonl
 game-dev provider tripo retexture --request request.json --approve-spend --spend-limit-cents N --jsonl
@@ -36,6 +43,13 @@ game-dev job cancel JOB_ID --confirm --json
 A retry requires fresh authorization. A local cancelled state does not prove remote cancellation.
 
 ## Inspect, normalize, and package
+
+Inspection, validation, and package verification are read-only. Normalization,
+USDZ preview generation, and package construction create files. Resolve and
+show their exact source, destination, output workspace, and overwrite/collision
+implications first, then leave the command unexecuted until the user explicitly
+authorizes that invocation. These commands do not expose a `--confirm` flag;
+the missing flag does not waive the conversation-level approval boundary.
 
 ```text
 game-dev asset inspect model.glb --json

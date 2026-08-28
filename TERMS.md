@@ -26,6 +26,39 @@ Tripo, Leonardo, Blender, Apple tools, game engines, and other integrations are
 independent products governed by their own terms. Their availability, pricing,
 outputs, and behavior can change. No affiliation or endorsement is implied.
 
+### User-operated provider boundary
+
+Optional Tripo and Leonardo routes are user-operated requests to independent
+third-party services. They are not a publisher-operated provider account,
+proxy, marketplace, reseller, service bureau, shared-credential service, or
+generation service for other users.
+
+Before enabling a provider route, you must hold and control the applicable
+provider account, API entitlement or credits, credential, and the rights and
+permissions required for every submitted prompt, file, model, audio clip,
+image, or other input. You independently approve each provider request and any
+associated provider charge.
+
+The publisher does not provide, pool, transfer, receive, share, or resell
+provider credentials or provider access. Do not use another person's
+credential, use your credential to submit another person's request, or use the
+software to offer provider generation to third parties. Provider credentials
+must be configured outside the plugin conversation in a local mechanism the
+account holder controls.
+
+Provider use remains governed by the provider's current account terms, API
+rules, pricing, content rules, privacy policy, and output-rights rules. Tripo's
+[API documentation](https://developers.tripo3d.ai/en/docs/quick-start) and
+[terms](https://www.tripo3d.ai/terms), and Leonardo's
+[API documentation](https://docs.leonardo.ai/v1.0/docs/getting-started) and
+[terms](https://leonardo.ai/terms-of-service), are the applicable starting
+points. Provider outputs are not promised to be exclusive, commercially
+cleared, privately visible, or fit for a particular purpose.
+
+Tripo and Leonardo are independent third-party services and trademarks. No
+affiliation, sponsorship, endorsement, certification, partnership, or official
+integration is claimed.
+
 ## No production guarantee
 
 Static inspection, test fixtures, generated heatmaps, and adapter telemetry are

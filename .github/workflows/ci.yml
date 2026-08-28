@@ -27,7 +27,12 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm test
+
+      # The closed direct Node runtime stages a Mach-O library closure and is
+      # deliberately macOS-only. Its dedicated test runs in macos-app below;
+      # the Ubuntu matrix continues to cover every cross-platform test.
+      - name: Run cross-platform TypeScript tests
+        run: npm test -- --exclude tests/cli-runtime-payload.test.ts
       - run: npm run verify
 
       - name: Audit the publish roster
@@ -84,6 +89,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node build dependencies
+        run: npm ci
+
+      # This is the admissible platform for the direct runtime's Mach-O
+      # closure. Do not turn it into a Linux skip without this macOS gate.
+      - name: Run macOS-only closed CLI runtime payload tests
+        run: npm run test:runtime
 
       - name: Report the native toolchain
         run: |

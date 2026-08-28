@@ -64,7 +64,12 @@ ships and which outputs are generated rather than source-controlled.
 
 ![Five-skill Game Development Studio suite](assets/screenshots/01-skill-suite.png)
 
+Product composition using the shipped skill names and metadata.
+
 ![Stable local CLI contract and approval boundaries](assets/screenshots/02-cli-contract.png)
+
+Marketing composition based on actual v1.0.0 CLI output, shortened for display.
+It illustrates the command contract; it is not a current-run claim.
 
 ![Synthetic sealed-capture visual-debugging example](assets/screenshots/03-visual-debugging.png)
 
@@ -158,7 +163,10 @@ game-dev asset inspect ./model.glb --output-dir ./asset-workspace --json
 game-dev asset validate ./model.glb --output-dir ./asset-workspace --json
 ```
 
-Build and verify a canonical package:
+Build and verify a canonical package. `package build` writes a new package even
+though it has no `--confirm` flag, so review the resolved source, output
+workspace, name, version, license, and collision behavior before authorizing
+that exact invocation:
 
 ```sh
 game-dev package build ./model.glb \
@@ -184,12 +192,17 @@ plan does not become standing permission.
 
 ## Paid provider jobs
 
-Credentials are read lazily from the environment and never accepted as command
-arguments:
+Provider routes require `game-dev` 1.0.2 or newer. The account holder must
+configure the provider credential outside ChatGPT, Codex, and the plugin
+conversation, using a local credential mechanism they control. The CLI reads a
+preconfigured environment value lazily and never accepts a key as a command
+argument; the native macOS app can use Keychain. Never paste a key into a
+conversation, request file, source file, log, screenshot, or support report.
+
+Check presence without revealing the value:
 
 ```sh
-export TRIPO_API_KEY="..."
-export LEONARDO_API_KEY="..."
+game-dev credentials status --output-dir ./asset-workspace --json
 ```
 
 Every paid invocation needs both approval and a finite estimated spend ceiling:
@@ -203,7 +216,10 @@ game-dev provider tripo generate \
   --jsonl
 ```
 
-Supported provider routes are:
+These are optional user-operated requests made directly from the local CLI to
+the selected provider using the user's own account and API access. The
+publisher runs no proxy, shared account, credential service, resale layer, or
+provider job queue. Supported routes are:
 
 - Tripo: `generate`, `retexture`, `rig`, `retarget`, and
   `retopologize`

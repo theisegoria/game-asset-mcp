@@ -7,7 +7,6 @@ import { z } from 'zod';
 import { canonicalJson } from '../packages/format.js';
 import { sha256 } from '../storage/filesystem.js';
 import { invalidInput, invalidState } from '../util/errors.js';
-import { GAME_DEV_VERSION } from '../version.js';
 
 export const GAME_DEV_SKILL_BUNDLE_SCHEMA = 'game_dev.skill_bundle.v1';
 export const GAME_DEV_SKILL_INSTALL_SCHEMA = 'game_dev.skill_install.v1';
@@ -141,12 +140,9 @@ export async function listSkillBundle(): Promise<SkillBundle> {
   }
   const parsed = skillBundleSchema.safeParse(value);
   if (!parsed.success) throw invalidState('skill bundle manifest violates game_dev.skill_bundle.v1');
-  if (parsed.data.version !== GAME_DEV_VERSION) {
-    throw invalidState('skill bundle version does not match the CLI version', {
-      expected: GAME_DEV_VERSION,
-      actual: parsed.data.version,
-    });
-  }
+  // The independently published skills bundle has its own release lifecycle.
+  // Its manifest remains the authoritative bundle version rather than being
+  // coupled to the local CLI/package version.
   const ids = new Set<string>();
   const skills: PackagedSkill[] = [];
   for (const entry of parsed.data.skills) {

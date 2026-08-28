@@ -1,6 +1,6 @@
 {
   "schema": "game_dev.skill_bundle.v1",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "skills": [
     {
       "id": "game-development-studio",

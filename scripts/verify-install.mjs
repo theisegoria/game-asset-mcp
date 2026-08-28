@@ -179,6 +179,7 @@ async function main() {
       'marketing/STORE_SUBMISSION.md',
       'distribution/skills-repo/README.md',
       'distribution/skills-repo/CHANGELOG.md',
+      'distribution/skills-repo/PLUGIN_README.md',
       'distribution/skills-repo/gitignore.template',
       'distribution/skills-repo/.agents/plugins/marketplace.json',
       'distribution/skills-repo/.github/workflows/validate.yml',
@@ -246,6 +247,7 @@ async function main() {
     const skillEnvelope = JSON.parse(skillRun.stdout);
     invariant(skillEnvelope.ok === true, 'installed skill listing failed');
     invariant(skillEnvelope.data?.schema === 'game_dev.skill_bundle.v1', 'installed skill schema changed');
+    invariant(skillEnvelope.data?.version === '1.0.2', 'installed skill bundle version changed');
     invariant(skillEnvelope.data?.skills?.length === EXPECTED_SKILLS.length, 'installed skill count changed');
     invariant(
       skillEnvelope.data.skills.every((skill) => typeof skill.source !== 'string'),
@@ -290,18 +292,24 @@ async function main() {
       exportedManifest.mcpServers === undefined && exportedManifest.apps === undefined,
       'installed builder exported an MCP server or app',
     );
+    invariant(exportedManifest.version === '1.0.2', 'installed builder exported the wrong plugin version');
+    invariant(
+      exportedManifest.interface?.screenshots === undefined,
+      'installed builder exported screenshots in a no-UI plugin',
+    );
     const exportedReadme = await readFile(path.join(exportedPlugin, 'README.md'), 'utf8');
     invariant(
-      !exportedReadme.includes('plugins/game-development-studio/assets/'),
-      'exported plugin README contains repository-root image paths',
+      !exportedReadme.includes('assets/screenshots/'),
+      'exported plugin README references marketing screenshots',
     );
+    invariant(await exists(path.join(exportedPlugin, 'assets', 'icon.png')), 'exported plugin icon is missing');
     for (const relative of [
-      'assets/icon.png',
       'assets/screenshots/01-skill-suite.png',
       'assets/screenshots/02-cli-contract.png',
       'assets/screenshots/03-visual-debugging.png',
     ]) {
-      invariant(await exists(path.join(exportedPlugin, relative)), `exported plugin README asset is missing: ${relative}`);
+      invariant(await exists(path.join(exportedRepository, relative)), `exported repository marketing asset is missing: ${relative}`);
+      invariant(!await exists(path.join(exportedPlugin, relative)), `exported plugin leaked marketing screenshot: ${relative}`);
     }
 
     console.log(`packed ${packRecord.name}@${packRecord.version}: ${packRecord.entryCount} files`);

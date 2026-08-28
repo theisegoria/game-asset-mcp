@@ -11,13 +11,22 @@ render-capture diagnosis, and bounded performance work through the inspectable
 The plugin gives ChatGPT and Codex the workflow language, approval model, and
 evidence discipline. Local execution uses the separately installed
 `game-dev` CLI; the plugin does not embed a daemon, hosted backend, provider
-credential, or standing permission.
+credential, shared provider account, or standing permission.
 
-![Five-skill Game Development Studio suite](plugins/game-development-studio/assets/screenshots/01-skill-suite.png)
+This public repository carries skills bundle **1.0.2**. Provider execution
+requires the separately installed `game-dev` CLI **1.0.2** or newer; the plugin
+archive itself contains no executable provider client or credential.
 
-![Stable local CLI contract and approval boundaries](plugins/game-development-studio/assets/screenshots/02-cli-contract.png)
+![Five-skill Game Development Studio suite](assets/screenshots/01-skill-suite.png)
 
-![Synthetic sealed-capture visual-debugging example](plugins/game-development-studio/assets/screenshots/03-visual-debugging.png)
+Product composition using the shipped skill names and metadata.
+
+![Stable local CLI contract and approval boundaries](assets/screenshots/02-cli-contract.png)
+
+Marketing composition based on actual v1.0.0 CLI output, shortened for display.
+It illustrates the command contract; it is not a current-run claim.
+
+![Synthetic sealed-capture visual-debugging example](assets/screenshots/03-visual-debugging.png)
 
 The third image is a labelled synthetic validation fixture. It demonstrates
 the diagnostic workflow; it is not a target-game GPU, pixel, performance, or
@@ -38,7 +47,7 @@ human-review claim.
 Add this tagged marketplace:
 
 ```sh
-codex plugin marketplace add theisegoria/game-development-studio-skills --ref v1.0.1
+codex plugin marketplace add theisegoria/game-development-studio-skills --ref v1.0.2
 codex plugin marketplace list
 ```
 
@@ -73,20 +82,24 @@ contract. Sensitive capabilities remain separate per invocation:
 - `--allow-gpu` for a declared GPU scenario
 - `--allow-performance` for hardware-performance capture
 
-Plans never become standing permission.
+Plans never become standing permission. Normalization, preview generation, and
+package construction write files even though those CLI commands have no
+`--confirm` option; the skills must leave their resolved command unexecuted
+until the user authorizes that exact source, destination, and invocation.
 
 ## Public plugin archive
 
 GitHub Releases includes
-`game-development-studio-plugin-1.0.1.zip`. It contains the plugin root
-(`.codex-plugin/`, `skills/`, assets, and policy files) and is the same
-skills-only shape prepared for OpenAI review.
+`game-development-studio-plugin-1.0.2.zip`. It contains the screenshot-free
+plugin root (`.codex-plugin/`, `skills/`, the suite icon, and policy files) and
+is the same skills-only shape prepared for OpenAI review. The repository-root
+marketing illustrations above are intentionally excluded from that upload.
 
 Build and verify it locally:
 
 ```sh
 python3 scripts/verify.py
-python3 scripts/build_release.py /tmp/game-development-studio-plugin-1.0.1.zip
+python3 scripts/build_release.py /tmp/game-development-studio-plugin-1.0.2.zip
 ```
 
 `build_release.py` requires an explicit output path outside the exported
@@ -107,9 +120,12 @@ The skills are intentionally strict about claims:
 ## Privacy and support
 
 The plugin contains static instructions and assets. It runs no publisher
-backend or resident Game Development Studio service and sends no publisher analytics.
-Explicit local provider calls connect directly from the user's machine and are
-subject to the provider's terms.
+backend or resident Game Development Studio service and sends no publisher
+analytics. It never asks for a provider credential. Optional provider calls
+use an account and preconfigured local credential controlled by the user and
+connect directly from the user's machine under the provider's terms; the
+publisher operates no proxy, shared account, resale layer, or provider job
+queue.
 
 See [Privacy](PRIVACY.md), [Terms](TERMS.md), [Support](SUPPORT.md), and
 [Security](SECURITY.md).

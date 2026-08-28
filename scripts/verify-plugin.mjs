@@ -54,7 +54,15 @@ function forbiddenArtifact(relative) {
 
 function checkedRoster(roster) {
   invariant(roster?.schema === 'game_dev.skills_release_roster.v1', 'unexpected skills release roster schema');
-  for (const field of ['repositoryFiles', 'pluginFiles', 'templateFiles', 'templateOnlyFiles', 'sourceOnlyFiles', 'sourceOnlyDirectoryPrefixes']) {
+  for (const field of [
+    'repositoryFiles',
+    'pluginFiles',
+    'templateFiles',
+    'templateOnlyFiles',
+    'repositorySourceFiles',
+    'sourceOnlyFiles',
+    'sourceOnlyDirectoryPrefixes',
+  ]) {
     invariant(Array.isArray(roster[field]), `release roster ${field} must be an array`);
     const normalized = roster[field].map((entry) => {
       invariant(typeof entry === 'string' && entry.length > 0, `release roster ${field} contains an invalid path`);
@@ -99,7 +107,11 @@ async function inspectScopedEntry(root, relative, expected, label, actual, ignor
 }
 
 async function validateSourceReleaseScope(roster) {
-  const expected = new Set([...roster.pluginFiles, ...roster.sourceOnlyFiles]);
+  const expected = new Set([
+    ...roster.pluginFiles,
+    ...roster.repositorySourceFiles,
+    ...roster.sourceOnlyFiles,
+  ]);
   const sourceOnlyDirectoryPrefixes = roster.sourceOnlyDirectoryPrefixes.map(posixPath);
   const scopeRoots = new Set([...expected, ...sourceOnlyDirectoryPrefixes].map((entry) => entry.split('/')[0]));
   const actual = new Set();
@@ -118,11 +130,19 @@ async function main() {
   invariant((rosterStats.mode & 0o111) === 0, 'release roster must not be executable');
   const roster = checkedRoster(JSON.parse(await readFile(rosterPath, 'utf8')));
   await validateSourceReleaseScope(roster);
+  for (const relative of roster.repositorySourceFiles) {
+    invariant(roster.repositoryFiles.includes(relative), `repository source entry is not exported: ${relative}`);
+  }
+  invariant(
+    !roster.pluginFiles.some((relative) => relative.startsWith('assets/screenshots/')),
+    'skills-only plugin roster must not ship screenshots',
+  );
   const manifest = await json('.codex-plugin/plugin.json');
   invariant(manifest.name === 'game-development-studio', 'unexpected plugin name');
-  invariant(manifest.version === '1.0.1', 'unexpected plugin version');
+  invariant(manifest.version === '1.0.2', 'unexpected plugin version');
   invariant(manifest.skills === './skills/', 'plugin must publish the canonical skills directory');
   invariant(manifest.mcpServers === undefined && manifest.apps === undefined, 'skills-only plugin must not declare MCP or apps');
+  invariant(manifest.interface?.screenshots === undefined, 'skills-only plugin must not declare screenshots');
   await Promise.all(['.mcp.json', '.app.json'].map(async (relative) => {
     try {
       await access(path.join(root, relative));
@@ -143,12 +163,60 @@ async function main() {
   const allowedInterfaceFields = new Set([
     'displayName', 'shortDescription', 'longDescription', 'developerName', 'category',
     'capabilities', 'websiteURL', 'privacyPolicyURL', 'termsOfServiceURL', 'defaultPrompt',
-    'brandColor', 'composerIcon', 'logo', 'logoDark', 'screenshots',
+    'brandColor', 'composerIcon', 'logo', 'logoDark',
   ]);
   for (const field of Object.keys(manifest.interface ?? {})) {
     invariant(allowedInterfaceFields.has(field), `unsupported plugin interface field: ${field}`);
   }
   invariant(manifest.interface?.shortDescription.length <= 30, 'short description exceeds the 30-character limit');
+  const marketingCopy = await readFile(path.join(root, 'marketing', 'COPY.md'), 'utf8');
+  invariant(
+    marketingCopy.includes(`## Short store description\n\n${manifest.interface.shortDescription}`),
+    'marketing short description must match the plugin manifest',
+  );
+  invariant(
+    Array.isArray(manifest.interface?.defaultPrompt) && manifest.interface.defaultPrompt.length === 3,
+    'plugin must declare exactly three starter prompts',
+  );
+
+  const privacyPolicy = await readFile(path.join(root, 'PRIVACY.md'), 'utf8');
+  const terms = await readFile(path.join(root, 'TERMS.md'), 'utf8');
+  const readme = await readFile(path.join(root, 'README.md'), 'utf8');
+  const storeBrief = await readFile(path.join(root, 'marketing', 'STORE_SUBMISSION.md'), 'utf8');
+  const routerSkill = await readFile(path.join(root, 'skills', 'game-development-studio', 'SKILL.md'), 'utf8');
+  const productionSkill = await readFile(path.join(root, 'skills', 'game-asset-production', 'SKILL.md'), 'utf8');
+  const productionCommands = await readFile(
+    path.join(root, 'skills', 'game-asset-production', 'references', 'commands.md'),
+    'utf8',
+  );
+  for (const phrase of [
+    '**Publisher retention is zero:**',
+    'remain in the user-selected workspace until the user deletes',
+    'Data sent in an authorized provider request is retained and controlled by that',
+    'The plugin does not collect, solicit, accept, store, or transmit provider',
+  ]) {
+    invariant(privacyPolicy.includes(phrase), `privacy policy is missing required disclosure: ${phrase}`);
+  }
+  for (const phrase of [
+    'not a publisher-operated provider account',
+    'Do not use another person\'s',
+    'affiliation, sponsorship, endorsement, certification, partnership, or official',
+  ]) {
+    invariant(terms.includes(phrase), `terms are missing required provider boundary: ${phrase}`);
+  }
+  invariant(!/^\s*export\s+(?:TRIPO|LEONARDO)_API_KEY=/m.test(readme), 'README must not solicit provider keys in shell commands');
+  invariant(routerSkill.includes('do not activate for unrelated development or general creative work'), 'router activation boundary is too broad');
+  invariant(routerSkill.includes('A command without a `--confirm` flag still requires'), 'router is missing the no-flag write boundary');
+  invariant(productionSkill.includes('never request, accept, reveal, or configure that credential'), 'production skill can solicit provider credentials');
+  invariant(productionCommands.includes('leave the command unexecuted until the user explicitly'), 'production commands are missing exact write authorization');
+  for (const prompt of manifest.interface.defaultPrompt) {
+    invariant(storeBrief.includes(prompt), `submission brief is missing starter prompt: ${prompt}`);
+  }
+  const positiveBlock = storeBrief.match(/## Positive test cases\n([\s\S]*?)\n## Negative test cases\n/)?.[1] ?? '';
+  const negativeBlock = storeBrief.match(/## Negative test cases\n([\s\S]*?)\n## Release notes\n/)?.[1] ?? '';
+  invariant((positiveBlock.match(/^### \d+\./gm) ?? []).length === 5, 'submission brief must contain exactly five positive tests');
+  invariant((negativeBlock.match(/^### \d+\./gm) ?? []).length === 3, 'submission brief must contain exactly three negative tests');
+  invariant(negativeBlock.includes('refuses to echo, save, configure, or use it'), 'negative tests must cover pasted credential refusal');
 
   const iconPath = localPath(manifest.interface.composerIcon, 'composerIcon');
   invariant(iconPath === localPath(manifest.interface.logo, 'logo'), 'composer icon and logo must share the suite mark');
@@ -156,21 +224,18 @@ async function main() {
   invariant(await sha256(iconPath) === iconProvenance.sha256, 'top-level icon provenance hash mismatch');
   await png(iconPath, 1254, 1254);
 
-  const screenshotProvenance = await json('assets/screenshots/provenance.json');
-  const screenshots = [
-    './assets/screenshots/01-skill-suite.png',
-    './assets/screenshots/02-cli-contract.png',
-    './assets/screenshots/03-visual-debugging.png',
+  const marketingScreenshotProvenance = await json('assets/screenshots/provenance.json');
+  const marketingScreenshots = [
+    'assets/screenshots/01-skill-suite.png',
+    'assets/screenshots/02-cli-contract.png',
+    'assets/screenshots/03-visual-debugging.png',
   ];
-  invariant(
-    JSON.stringify(manifest.interface?.screenshots) === JSON.stringify(screenshots),
-    'plugin manifest must declare the exact three release screenshots',
-  );
-  for (const screenshot of screenshots) {
-    const screenshotPath = localPath(screenshot, 'screenshot');
-    const entry = screenshotProvenance.screenshots.find((item) => item.path === path.basename(screenshotPath));
-    invariant(entry, `missing screenshot provenance for ${screenshot}`);
-    invariant(await sha256(screenshotPath) === entry.sha256, `screenshot provenance hash mismatch for ${screenshot}`);
+  for (const screenshot of marketingScreenshots) {
+    invariant(roster.repositorySourceFiles.includes(screenshot), `marketing screenshot is not exported at repository root: ${screenshot}`);
+    const screenshotPath = path.join(root, screenshot);
+    const entry = marketingScreenshotProvenance.screenshots.find((item) => item.path === path.basename(screenshotPath));
+    invariant(entry, `missing marketing screenshot provenance for ${screenshot}`);
+    invariant(await sha256(screenshotPath) === entry.sha256, `marketing screenshot provenance hash mismatch for ${screenshot}`);
     await png(screenshotPath, 1440, 900);
   }
 
@@ -214,7 +279,8 @@ async function main() {
     version: manifest.version,
     distribution: 'skills-only',
     skills: skillManifest.skills.length,
-    screenshots: screenshots.length,
+    screenshots: 0,
+    marketingScreenshots: marketingScreenshots.length,
     mcp: false,
   }));
 }

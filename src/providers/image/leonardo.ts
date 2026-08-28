@@ -185,6 +185,9 @@ export class LeonardoProvider implements ImageProvider {
     }
 
     const body: Record<string, unknown> = {
+      // Generation privacy must never inherit the provider account default.
+      // The image may contain a user's unreleased asset reference.
+      public: false,
       prompt,
       modelId: options.modelId ?? this.defaultModelId,
       width: snapDimension(options.width, 'width'),
