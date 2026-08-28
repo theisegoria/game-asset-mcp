@@ -9,8 +9,9 @@ workspaces without adding an MCP server or hosted application backend.
 
 ## Download
 
-Download `GameDevelopmentStudio-1.0.0-macOS-arm64.zip` and `CHECKSUMS.txt` from
-the [latest GitHub release](https://github.com/theisegoria/game-development-studio-macos/releases/latest).
+Download `GameDevelopmentStudio-1.0.0-macOS-arm64.zip` from the
+[latest GitHub release](https://github.com/theisegoria/game-development-studio-macos/releases/latest)
+and use the matching [CHECKSUMS.txt](CHECKSUMS.txt) from this repository.
 
 This first release has a deliberately narrow platform contract:
 
@@ -47,8 +48,8 @@ Developer ID identity or Apple notarization.
 ## Install and open
 
 After verification, move `GameDevelopmentStudio.app` to `/Applications` or a
-folder you control. This release is ad-hoc signed and is **not** Developer ID
-signed or notarized. macOS may therefore refuse a normal first launch after the
+folder you control. This release is ad-hoc signed and not Developer ID signed or
+notarized. macOS may therefore refuse a normal first launch after the
 app is downloaded. If you trust the release and its verified checksum, use
 Finder's Control-click **Open** flow or the specific **Open Anyway** control in
 System Settings > Privacy & Security. Do not disable Gatekeeper globally.
@@ -75,6 +76,23 @@ GPU capture, and hardware-performance collection use one-shot approval sheets.
 Approval is for the displayed invocation; it is not saved as standing
 permission.
 
+## Product tour
+
+![The five local skills and their workflow boundaries](screenshots/01-skill-suite.png)
+
+The skill-suite image is a product map built from the released skill names and
+metadata. It is not a native-app runtime capture.
+
+![The structured local CLI result contract](screenshots/02-cli-contract.png)
+
+The CLI image shortens version 1.0.0 output for display. It documents the
+structured boundary; it is not evidence of a provider or project run.
+
+![Synthetic visual-debugging fixture with semantic evidence](screenshots/03-visual-debugging.png)
+
+The visual-debugging image is explicitly synthetic. It does not claim a target
+game, GPU execution, pixel approval, causality, or measured performance.
+
 ## Local-first boundaries
 
 The app does not include the CLI, Blender, a game engine, or provider services.
@@ -96,9 +114,9 @@ does not prove hardware comparability, causality, or statistical significance.
 GPU and performance claims require a real admitted run on the stated target
 hardware.
 
-The native screenshot above proves one inspected state on one Mac. The other
-images in `screenshots/` are labelled product illustrations; they are not
-runtime, provider, target-game, GPU, pixel-approval, or performance evidence.
+The native screenshot above records one provenance-reviewed state on one Mac.
+The other images in `screenshots/` are labelled product illustrations; they are
+not runtime, provider, target-game, GPU, pixel-approval, or performance evidence.
 
 ## Distribution trust state
 
@@ -122,4 +140,3 @@ Use [GitHub Issues](https://github.com/theisegoria/game-development-studio-macos
 for reproducible defects and documentation problems. Use GitHub private
 vulnerability reporting for security-sensitive findings. Never attach provider
 keys, private game assets, signed URLs, or private project paths to a report.
-

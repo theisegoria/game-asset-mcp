@@ -106,6 +106,7 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+/usr/bin/xattr -cr "$APP_BUNDLE"
 /usr/bin/codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE" >/dev/null
 
 open_app() {
