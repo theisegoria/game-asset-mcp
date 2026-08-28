@@ -32,7 +32,7 @@ jobs:
       # deliberately macOS-only. Its dedicated test runs in macos-app below;
       # the Ubuntu matrix continues to cover every cross-platform test.
       - name: Run cross-platform TypeScript tests
-        run: npm test -- --exclude tests/cli-runtime-payload.test.ts
+        run: npm test -- --exclude tests/cli-runtime-payload.test.ts --no-file-parallelism
       - run: npm run verify
 
       - name: Audit the publish roster
@@ -92,7 +92,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '25.2.1'
           cache: npm
 
       - name: Install Node build dependencies
