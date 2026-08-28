@@ -156,7 +156,14 @@ export async function runBlenderScript(
     // the work. Signalling only the direct child left descendants running.
     const child = spawn(
       executable,
-      ['--background', '--factory-startup', '--python', scriptPath, '--', JSON.stringify(options)],
+      [
+        '--background',
+        '--factory-startup',
+        '--python',
+        scriptPath,
+        '--',
+        JSON.stringify(options),
+      ],
       { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: safeBlenderEnvironment(isolatedHome) },
     );
 

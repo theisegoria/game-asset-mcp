@@ -46,7 +46,7 @@ struct GameDevCLIClientTests {
     func credentialInjectionAndRedaction() async throws {
         let executable = try makeHandshakeExecutable(body: #"""
             printf 'diagnostic=%s' "$TRIPO_API_KEY" >&2
-            printf '{"schema":"game_dev.result.v1","operation":"test.redaction","ok":true,"data":{"message":"%s"}}\n' "$TRIPO_API_KEY"
+            printf '{"schema":"game_dev.result.v1","operation":"provider.tripo.generate","ok":true,"data":{"message":"%s"}}\n' "$TRIPO_API_KEY"
             """#)
         defer { try? FileManager.default.removeItem(at: executable) }
         let secret = "tripo-super-secret-123"
@@ -69,7 +69,7 @@ struct GameDevCLIClientTests {
         let executable = try makeHandshakeExecutable(body: #"""
             tripo=${TRIPO_API_KEY:-null}
             if [ -n "${LEONARDO_API_KEY:-}" ]; then leonardo=true; else leonardo=false; fi
-            printf '{"schema":"game_dev.result.v1","operation":"test.environment","ok":true,"data":{"tripo":"%s","leonardoPresent":%s}}\n' "$tripo" "$leonardo"
+            printf '{"schema":"game_dev.result.v1","operation":"provider.tripo.generate","ok":true,"data":{"tripo":"%s","leonardoPresent":%s}}\n' "$tripo" "$leonardo"
             """#)
         defer { try? FileManager.default.removeItem(at: executable) }
         let client = GameDevCLIClient(
@@ -190,6 +190,28 @@ struct GameDevCLIClientTests {
         }
     }
 
+    @Test("A structured response for a different operation fails closed")
+    func unexpectedOperation() async throws {
+        let executable = try makeHandshakeExecutable(body: #"""
+            printf '%s\n' '{"schema":"game_dev.result.v1","operation":"catalog.list","ok":true,"data":{}}'
+            """#)
+        defer { try? FileManager.default.removeItem(at: executable) }
+        let client = GameDevCLIClient(executableURL: executable, baseEnvironment: [:])
+
+        do {
+            _ = try await client.execute(
+                CLIInvocation(arguments: ["doctor"]),
+                credentials: [:],
+                timeout: .seconds(5)
+            )
+            Issue.record("Expected unexpectedOperation")
+        } catch let error as GameDevCLIClientError {
+            #expect(error == .unexpectedOperation(expected: "doctor", actual: "catalog.list"))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test("Invalid JSON diagnostics redact JSON-escaped credential forms")
     func invalidJSONDiagnosticRedaction() async {
         let secret = "quoted\"secret\nline"
@@ -234,7 +256,7 @@ struct GameDevCLIClientTests {
             if [ -n "${DYLD_INSERT_LIBRARIES+x}" ] || [ -n "${LD_PRELOAD+x}" ]; then loader=true; else loader=false; fi
             if [ -n "${UNRELATED_TOKEN+x}" ] || [ -n "${UNRELATED_API_TOKEN+x}" ]; then unrelatedSecret=true; else unrelatedSecret=false; fi
             if [ -n "${PATH+x}" ]; then path=true; else path=false; fi
-            printf '{"schema":"game_dev.result.v1","operation":"test.environment.minimal","ok":true,"data":{"tripoBase":%s,"leonardoBase":%s,"dataRoot":%s,"assetOutput":%s,"loader":%s,"unrelatedSecret":%s,"path":%s}}\n' "$tripoBase" "$leonardoBase" "$dataRoot" "$assetOutput" "$loader" "$unrelatedSecret" "$path"
+            printf '{"schema":"game_dev.result.v1","operation":"provider.tripo.generate","ok":true,"data":{"tripoBase":%s,"leonardoBase":%s,"dataRoot":%s,"assetOutput":%s,"loader":%s,"unrelatedSecret":%s,"path":%s}}\n' "$tripoBase" "$leonardoBase" "$dataRoot" "$assetOutput" "$loader" "$unrelatedSecret" "$path"
             """#)
         defer { try? FileManager.default.removeItem(at: executable) }
 

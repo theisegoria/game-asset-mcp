@@ -31,6 +31,7 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
     case invalidUTF8(ProcessOutputStream)
     case invalidJSON(exitCode: Int32, diagnostic: String)
     case unexpectedSchema(String)
+    case unexpectedOperation(expected: String, actual: String)
     case inconsistentResult(exitCode: Int32, ok: Bool)
 
     public var errorDescription: String? {
@@ -65,6 +66,8 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
             "game-dev returned invalid JSON (exit \(exitCode)): \(diagnostic)"
         case let .unexpectedSchema(schema):
             "game-dev returned unsupported schema \(schema)."
+        case let .unexpectedOperation(expected, actual):
+            "game-dev returned operation \(actual) for a request that expected \(expected)."
         case let .inconsistentResult(exitCode, ok):
             "game-dev returned contradictory status (exit \(exitCode), ok \(ok))."
         }
@@ -193,7 +196,9 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
         } catch {
             throw GameDevCLIClientError.handshakeFailed("capabilities did not return the structured result schema")
         }
-        guard envelope.schema == Self.resultSchema, envelope.ok,
+        guard envelope.schema == Self.resultSchema,
+              envelope.operation == "capabilities",
+              envelope.ok,
               envelope.data["schema"]?.stringValue == Self.capabilitiesSchema,
               envelope.data["name"]?.stringValue == "game-development-studio",
               envelope.data["version"]?.stringValue == version,
@@ -339,6 +344,13 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
 
         guard envelope.schema == Self.resultSchema else {
             throw GameDevCLIClientError.unexpectedSchema(envelope.schema)
+        }
+        if let expectedOperation = invocation.expectedOperation,
+           envelope.operation != expectedOperation {
+            throw GameDevCLIClientError.unexpectedOperation(
+                expected: expectedOperation,
+                actual: envelope.operation
+            )
         }
         guard (raw.exitCode == 0) == envelope.ok else {
             throw GameDevCLIClientError.inconsistentResult(
@@ -573,8 +585,6 @@ private final class ManagedProcess: @unchecked Sendable {
     func start() throws {
         let outputHandle = standardOutputPipe.fileHandleForReading
         let errorHandle = standardErrorPipe.fileHandleForReading
-        makeNonBlocking(outputHandle)
-        makeNonBlocking(errorHandle)
         startedAt = Date()
         do {
             try process.run()
@@ -590,21 +600,37 @@ private final class ManagedProcess: @unchecked Sendable {
             fileDescriptor: outputHandle.fileDescriptor,
             queue: stateQueue
         )
+        standardOutputReadSource = outputSource
         outputSource.setEventHandler { [weak self] in
-            self?.drainAvailableData(from: outputHandle, stream: .standardOutput)
+            guard let self,
+                  let source = self.standardOutputReadSource,
+                  source.data > 0
+            else { return }
+            self.drainAvailableData(
+                from: outputHandle,
+                stream: .standardOutput,
+                availableBytes: source.data
+            )
         }
         outputSource.resume()
-        standardOutputReadSource = outputSource
 
         let errorSource = DispatchSource.makeReadSource(
             fileDescriptor: errorHandle.fileDescriptor,
             queue: stateQueue
         )
+        standardErrorReadSource = errorSource
         errorSource.setEventHandler { [weak self] in
-            self?.drainAvailableData(from: errorHandle, stream: .standardError)
+            guard let self,
+                  let source = self.standardErrorReadSource,
+                  source.data > 0
+            else { return }
+            self.drainAvailableData(
+                from: errorHandle,
+                stream: .standardError,
+                availableBytes: source.data
+            )
         }
         errorSource.resume()
-        standardErrorReadSource = errorSource
 
         // Wait for the direct PID on a detached queue. Process' termination
         // callback can be delayed by inherited pipe holders on some macOS
@@ -657,28 +683,24 @@ private final class ManagedProcess: @unchecked Sendable {
         }
     }
 
-    private func drainAvailableData(from handle: FileHandle, stream: ProcessOutputStream) {
-        guard completion == nil else { return }
-        var buffer = [UInt8](repeating: 0, count: min(maximumOutputBytesPerStream, 64 * 1024))
-        while completion == nil {
-            let bytesRead = buffer.withUnsafeMutableBytes { rawBuffer -> Int in
-                guard let baseAddress = rawBuffer.baseAddress else { return 0 }
-                return Darwin.read(handle.fileDescriptor, baseAddress, rawBuffer.count)
-            }
-            if bytesRead > 0 {
-                append(Data(bytes: buffer, count: bytesRead), to: stream)
-                continue
-            }
-            if bytesRead == 0 || errno == EAGAIN || errno == EWOULDBLOCK { return }
-            return
-        }
-    }
+    private func drainAvailableData(
+        from handle: FileHandle,
+        stream: ProcessOutputStream,
+        availableBytes: UInt
+    ) {
+        guard completion == nil, pendingFailure == nil, availableBytes > 0 else { return }
 
-    private func makeNonBlocking(_ handle: FileHandle) {
-        let descriptor = handle.fileDescriptor
-        let flags = fcntl(descriptor, F_GETFL)
-        guard flags >= 0 else { return }
-        _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)
+        let maximumRead = min(
+            UInt(maximumOutputBytesPerStream + 1),
+            max(1, availableBytes)
+        )
+        var buffer = [UInt8](repeating: 0, count: Int(min(maximumRead, 64 * 1024)))
+        let bytesRead = buffer.withUnsafeMutableBytes { rawBuffer -> Int in
+            guard let baseAddress = rawBuffer.baseAddress else { return 0 }
+            return Darwin.read(handle.fileDescriptor, baseAddress, rawBuffer.count)
+        }
+        guard bytesRead > 0 else { return }
+        append(Data(bytes: buffer, count: bytesRead), to: stream)
     }
 
     private func append(_ data: Data, to stream: ProcessOutputStream) {
@@ -738,8 +760,6 @@ private final class ManagedProcess: @unchecked Sendable {
         standardErrorReadSource?.cancel()
         standardOutputReadSource = nil
         standardErrorReadSource = nil
-        drainAvailableData(from: outputHandle, stream: .standardOutput)
-        drainAvailableData(from: errorHandle, stream: .standardError)
         try? outputHandle.close()
         try? errorHandle.close()
 

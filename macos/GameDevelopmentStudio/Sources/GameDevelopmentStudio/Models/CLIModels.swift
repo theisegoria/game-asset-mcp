@@ -163,23 +163,26 @@ public struct CLIInvocation: Equatable, Sendable, CustomStringConvertible, Custo
     public var standardInput: Data?
     public var workingDirectory: URL?
     public var environment: [String: String]
+    public var expectedOperation: String?
 
     public init(
         arguments: [String],
         standardInput: Data? = nil,
         workingDirectory: URL? = nil,
-        environment: [String: String] = [:]
+        environment: [String: String] = [:],
+        expectedOperation: String? = nil
     ) {
         self.arguments = arguments
         self.standardInput = standardInput
         self.workingDirectory = workingDirectory
         self.environment = environment
+        self.expectedOperation = expectedOperation ?? Self.inferredGameDevOperation(from: arguments)
     }
 
     public var description: String {
         let environmentKeys = environment.keys.sorted().joined(separator: ", ")
         let workingDirectoryPath = workingDirectory?.path ?? "default"
-        return "CLIInvocation(arguments: \(redactedArguments), standardInputBytes: \(standardInput?.count ?? 0), workingDirectory: \(workingDirectoryPath), environmentKeys: [\(environmentKeys)])"
+        return "CLIInvocation(arguments: \(redactedArguments), expectedOperation: \(expectedOperation ?? "unspecified"), standardInputBytes: \(standardInput?.count ?? 0), workingDirectory: \(workingDirectoryPath), environmentKeys: [\(environmentKeys)])"
     }
 
     public var debugDescription: String { description }
@@ -208,6 +211,32 @@ public struct CLIInvocation: Equatable, Sendable, CustomStringConvertible, Custo
             }
         }
         return result
+    }
+
+    private static let gameDevFamilies: Set<String> = [
+        "adapter", "asset", "capabilities", "capture", "catalog",
+        "credentials", "doctor", "job", "launch", "migrate", "package",
+        "performance", "provider", "scenario", "skill", "tool", "vendor",
+        "visual",
+    ]
+
+    private static func inferredGameDevOperation(from arguments: [String]) -> String? {
+        guard let family = arguments.first?.lowercased(), gameDevFamilies.contains(family) else {
+            return nil
+        }
+        let segmentCount = family == "provider" || family == "tool" ? 3 : 2
+        let segments = arguments.prefix(segmentCount).compactMap { segment -> String? in
+            let normalized = segment
+                .lowercased()
+                .replacingOccurrences(
+                    of: "[^a-z0-9_-]+",
+                    with: "-",
+                    options: .regularExpression
+                )
+                .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            return normalized.isEmpty ? nil : normalized
+        }
+        return segments.isEmpty ? nil : segments.joined(separator: ".")
     }
 }
 
