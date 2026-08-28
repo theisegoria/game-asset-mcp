@@ -129,19 +129,20 @@ identity the artifact does not have.
 
 ### Screenshot 04 — native app overview
 
-**Reserved path:** `assets/screenshots/04-native-macos-app.png`
+**Path:** `assets/screenshots/04-native-macos-app.png`
 
-**Status:** Placeholder only. A real runtime capture has not yet been created or
-visually inspected. Do not publish an image claim or use the following caption
-until the actual file has been reviewed.
+**Status:** Captured and visually reviewed from the native macOS 26 app in its
+default Dark appearance after a successful local `doctor` check. The dedicated
+provenance record binds the exact PNG hash. This is one runtime state, not a
+target-game GPU or performance result.
 
-**Proposed caption after review:** Game Development Studio on macOS 26, with
-the four workflow workspaces in the native sidebar and a structured receipt in
-the result inspector.
+**Caption:** Game Development Studio on macOS 26: Visual Debugging brings sealed
+capture analysis, semantic-buffer comparison, and structured results into one
+native workspace.
 
-**Proposed alt text after review:** Native Game Development Studio window on
-macOS, showing the workspace sidebar, selected workflow controls, and the result
-inspector.
+**Alt text:** Native Game Development Studio window in dark mode, with Visual
+Debugging selected in a four-workspace sidebar, sealed-capture controls in the
+main area, and a successful doctor result in the inspector.
 
 Recommended evidence set after real capture:
 

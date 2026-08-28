@@ -59,7 +59,7 @@ struct LibraryVendoringWorkspaceView: View {
                     .disabled(!canVendor || model.executionState.isRunning)
 
                     Button("Admit Package…") {
-                        prepareAdmissionApproval()
+                        Task { await prepareAdmissionApproval() }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!hasCurrentPlan || model.executionState.isRunning)
@@ -126,11 +126,13 @@ struct LibraryVendoringWorkspaceView: View {
         }
     }
 
-    private func prepareAdmissionApproval() {
+    private func prepareAdmissionApproval() async {
         guard hasCurrentPlan else { return }
         let reference = packageReference
         let project = projectPath
         let selectedDestination = destination
+        let submittedOutputDirectory = model.outputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let identity = await model.executableIdentityForApproval() else { return }
 
         approvalRequest = ApprovalRequest(
             title: "Approve project admission",
@@ -138,7 +140,9 @@ struct LibraryVendoringWorkspaceView: View {
             details: [
                 "Package: \(reference)",
                 "Project: \(project)",
-                "Destination: \(selectedDestination)"
+                "Destination: \(selectedDestination)",
+            ] + identity.approvalDetails + [
+                "Output workspace: \(submittedOutputDirectory)",
             ],
             authorities: [.processExecution],
             confirmationTitle: "Admit Package"
@@ -147,7 +151,9 @@ struct LibraryVendoringWorkspaceView: View {
                 reference: reference,
                 project: project,
                 destination: selectedDestination,
-                confirmed: true
+                confirmed: true,
+                expectedExecutableIdentity: identity,
+                expectedOutputDirectory: submittedOutputDirectory
             )
         }
     }

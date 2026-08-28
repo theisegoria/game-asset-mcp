@@ -213,12 +213,8 @@ struct ProductionWorkspaceView: View {
                 "Estimated ceiling: \(submittedLimit) cents",
                 "Prompt: \(submittedPrompt)",
                 "Official provider host: https://\(provider.officialHostname)",
-                "Executable: \(identity.canonicalPath)",
-                "Executable SHA-256: \(identity.sha256)",
-                "CLI version: \(identity.version)",
-                "Result schema: \(identity.resultSchema)",
-                "Capabilities schema: \(identity.capabilitiesSchema)",
-                "Output workspace: \(submittedOutputDirectory)"
+            ] + identity.approvalDetails + [
+                "Output workspace: \(submittedOutputDirectory)",
             ],
             authorities: [.providerSpend],
             confirmationTitle: "Approve and Submit"
@@ -251,12 +247,8 @@ struct ProductionWorkspaceView: View {
                 "Source: \(submittedPath)",
                 "Package: \(submittedName) \(submittedVersion)",
                 "License: \(submittedLicense)",
-                "Executable: \(identity.canonicalPath)",
-                "Executable SHA-256: \(identity.sha256)",
-                "CLI version: \(identity.version)",
-                "Result schema: \(identity.resultSchema)",
-                "Capabilities schema: \(identity.capabilitiesSchema)",
-                "Output workspace: \(submittedOutputDirectory)"
+            ] + identity.approvalDetails + [
+                "Output workspace: \(submittedOutputDirectory)",
             ],
             authorities: [.processExecution],
             confirmationTitle: "Build Package"

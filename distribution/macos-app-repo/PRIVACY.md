@@ -2,8 +2,8 @@
 
 Effective: 28 August 2026
 
-Game Development Studio for macOS is a local-first companion for a separately
-installed `game-dev` CLI. The app does not create a publisher account, include
+Game Development Studio for macOS is a local-first app with a bundled, closed
+`game-dev` runtime. The app does not create a publisher account, include
 publisher-hosted analytics, or route requests through a Game Development
 Studio backend.
 
@@ -12,7 +12,7 @@ Studio backend.
 The selected local workspace can contain jobs, canonical asset packages,
 provider receipts, capture bundles, logs, telemetry, metric samples,
 comparisons, and project-vendoring receipts. The app stores ordinary
-preferences such as the CLI path and workspace path in its local preferences.
+preferences such as the runtime path and workspace path in its local preferences.
 Those files remain on the Mac and in paths the user controls unless the user or
 another installed tool separately moves, synchronizes, or publishes them.
 
@@ -46,9 +46,10 @@ These services process data under their own privacy policies and terms. The
 publisher does not proxy or receive the request. Provider calls may incur
 charges and require a separate finite estimated-spend ceiling.
 
-The app can also invoke local tools selected by the user, including the
-`game-dev` CLI, Blender-backed operations, and project-owned adapter commands.
-Those tools have their own data and security boundaries.
+The bundled CLI can also invoke local tools selected by the user, including
+Blender-backed operations and project-owned adapter commands. Those external
+tools are not covered by the bundled runtime digest and have their own data and
+security boundaries.
 
 ## Diagnostics
 
@@ -62,4 +63,3 @@ private paths, private game content, or signed URLs to a public issue.
 Open a non-sensitive privacy question at
 https://github.com/theisegoria/game-development-studio-macos/issues. Use the
 private process in [SECURITY.md](SECURITY.md) for a security-sensitive report.
-

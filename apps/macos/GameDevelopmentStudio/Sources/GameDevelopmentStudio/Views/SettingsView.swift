@@ -41,14 +41,19 @@ private struct GeneralSettingsPane: View {
                 .accessibilityHint("Choose Dark, System, or Light appearance for the studio and settings windows")
             }
 
-            Section("Command-line tool") {
-                TextField("CLI executable", text: $model.cliExecutable)
+            Section("Studio runtime") {
+                TextField("Runtime directory or diagnostic CLI", text: $model.cliExecutable)
                     .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Game development CLI executable")
+                    .accessibilityLabel("Game Development Studio runtime directory or diagnostic CLI")
 
-                Text("Use an absolute path or an executable name available in the app's launch environment.")
+                Text("The bundled closed runtime is used by default. Provider, write, capture, and performance operations require its exact rostered runtime tree and private launch snapshot. A PATH name or arbitrary executable is accepted only for credential-free diagnostics.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+
+                Button("Restore Bundled Runtime") {
+                    model.restoreBundledRuntime()
+                }
+                .disabled(model.executionState.isRunning)
             }
 
             Section("Output workspace") {

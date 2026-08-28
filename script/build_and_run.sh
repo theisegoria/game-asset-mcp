@@ -13,6 +13,10 @@ DIST_DIR="$PACKAGE_DIR/dist"
 FINAL_APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_MODULE_CACHE="$PACKAGE_DIR/.build/ModuleCache"
 ICON_SOURCE="$ROOT_DIR/assets/macos/AppIcon.png"
+ICON_COMPILED="$ROOT_DIR/assets/macos/AppIcon.icns"
+RUNTIME_NAME="GameDevelopmentStudioRuntime"
+RUNTIME_BUILDER="$ROOT_DIR/scripts/build-cli-runtime.mjs"
+RUNTIME_VERIFIER="$ROOT_DIR/scripts/verify-cli-runtime.mjs"
 
 case "$MODE" in
   run|--test|test|--build-only|build-only|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify) ;;
@@ -31,8 +35,12 @@ if [[ "$MODE" == "--test" || "$MODE" == "test" ]]; then
   exit 0
 fi
 
-if [[ ! -f "$ICON_SOURCE" ]]; then
-  echo "missing app icon master: $ICON_SOURCE" >&2
+if [[ ! -f "$ICON_SOURCE" || ! -f "$ICON_COMPILED" ]]; then
+  echo "missing app icon master or compiled ICNS asset" >&2
+  exit 1
+fi
+if [[ ! -f "$RUNTIME_BUILDER" || ! -f "$RUNTIME_VERIFIER" ]]; then
+  echo "missing closed CLI runtime builder or verifier" >&2
   exit 1
 fi
 
@@ -54,10 +62,11 @@ case "$FINAL_APP_BUNDLE" in
     ;;
 esac
 
+npm run build
 swift build --disable-sandbox --package-path "$PACKAGE_DIR"
 BUILD_BINARY="$(swift build --disable-sandbox --package-path "$PACKAGE_DIR" --show-bin-path)/$APP_NAME"
 
-STAGE_ROOT="$(mktemp -d "$DIST_REAL/.gds-stage.XXXXXX")"
+STAGE_ROOT="$(mktemp -d /private/tmp/game-development-studio-app-stage.XXXXXX)"
 trap 'rm -rf "$STAGE_ROOT"' EXIT
 APP_BUNDLE="$STAGE_ROOT/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
@@ -65,30 +74,27 @@ APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
-ICONSET_DIR="$APP_RESOURCES/AppIcon.iconset"
+NODE_EXECUTABLE="$(node -p 'process.execPath')"
 
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 
-mkdir -p "$ICONSET_DIR"
-make_icon() {
-  local size="$1"
-  local output="$2"
-  /usr/bin/sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET_DIR/$output" >/dev/null
-}
-make_icon 16 icon_16x16.png
-make_icon 32 icon_16x16@2x.png
-make_icon 32 icon_32x32.png
-make_icon 64 icon_32x32@2x.png
-make_icon 128 icon_128x128.png
-make_icon 256 icon_128x128@2x.png
-make_icon 256 icon_256x256.png
-make_icon 512 icon_256x256@2x.png
-make_icon 512 icon_512x512.png
-make_icon 1024 icon_512x512@2x.png
-/usr/bin/iconutil -c icns "$ICONSET_DIR" -o "$APP_RESOURCES/AppIcon.icns"
-rm -rf "$ICONSET_DIR"
+cp "$ICON_COMPILED" "$APP_RESOURCES/AppIcon.icns"
+/usr/bin/sips -g format -g pixelWidth -g pixelHeight "$APP_RESOURCES/AppIcon.icns" \
+  | /usr/bin/grep -q 'format: icns' \
+  || { echo "compiled app icon is not a valid ICNS asset" >&2; exit 1; }
+
+if [[ "$NODE_EXECUTABLE" != /* || ! -f "$NODE_EXECUTABLE" || -L "$NODE_EXECUTABLE" ]]; then
+  echo "Node did not report an absolute regular executable path" >&2
+  exit 1
+fi
+node "$RUNTIME_BUILDER" \
+  --source "$ROOT_DIR" \
+  --node "$NODE_EXECUTABLE" \
+  --output "$APP_RESOURCES/$RUNTIME_NAME" >/dev/null
+node "$RUNTIME_VERIFIER" \
+  --runtime "$APP_RESOURCES/$RUNTIME_NAME" >/dev/null
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -134,8 +140,13 @@ mv "$APP_BUNDLE" "$FINAL_APP_BUNDLE"
 rmdir "$STAGE_ROOT"
 trap - EXIT
 APP_BUNDLE="$FINAL_APP_BUNDLE"
+APP_CONTENTS="$APP_BUNDLE/Contents"
+APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 /usr/bin/xattr -cr "$APP_BUNDLE"
+node "$RUNTIME_VERIFIER" --runtime "$APP_RESOURCES/$RUNTIME_NAME" >/dev/null
+/usr/bin/xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
+/usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"

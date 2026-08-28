@@ -19,6 +19,15 @@
   },
   "hasAlpha": true,
   "sha256": "d217a66f4a8eae014583d409a83757736dbeb7de6c5860922b21030359b02f4e",
+  "derivedAssets": [
+    {
+      "asset": "AppIcon.icns",
+      "purpose": "Compiled native app icon copied into the signed bundle",
+      "encoder": "Pillow 12.0.0 ICNS encoder",
+      "pixels": 1024,
+      "sha256": "3c141676ea236dc70a2c55ef1ca4be64e9ac7a3ba7982972cc1e2e9cc2f5219e"
+    }
+  ],
   "postProcessing": {
     "reason": "ImageGen returned flattened checkerboard pixels despite the transparent-alpha prompt.",
     "tool": "FFmpeg geq alpha mask",

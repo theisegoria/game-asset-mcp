@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { access, readFile, readdir } from 'node:fs/promises';
+import { access, lstat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
@@ -32,7 +32,92 @@ async function png(file, width, height) {
   invariant(decoded.width === width && decoded.height === height, `${file} must be ${width}x${height}`);
 }
 
+function posixPath(relative) {
+  return relative.split(path.sep).join('/');
+}
+
+function isWithinDirectoryPrefix(relative, prefixes) {
+  return prefixes.some((prefix) => relative === prefix || relative.startsWith(`${prefix}/`));
+}
+
+function forbiddenArtifact(relative) {
+  const basename = path.posix.basename(relative).toLowerCase();
+  if (/^\.env(?:\.|$)/.test(basename)) return '.env files are not releasable';
+  if (/\.(?:key|pem|crt|cer|csr|p12|pfx|der|jks|keystore)$/.test(basename)) {
+    return 'credential and certificate files are not releasable';
+  }
+  if (/\.(?:swift|m|mm|h|hpp|c|cc|cpp|rs|go|java|kt|ts|tsx|js|jsx|mjs|cjs|rb|php|sh|bash|zsh|fish)$/.test(basename)) {
+    return 'source files are not releasable';
+  }
+  return undefined;
+}
+
+function checkedRoster(roster) {
+  invariant(roster?.schema === 'game_dev.skills_release_roster.v1', 'unexpected skills release roster schema');
+  for (const field of ['repositoryFiles', 'pluginFiles', 'templateFiles', 'templateOnlyFiles', 'sourceOnlyFiles', 'sourceOnlyDirectoryPrefixes']) {
+    invariant(Array.isArray(roster[field]), `release roster ${field} must be an array`);
+    const normalized = roster[field].map((entry) => {
+      invariant(typeof entry === 'string' && entry.length > 0, `release roster ${field} contains an invalid path`);
+      invariant(!path.posix.isAbsolute(entry) && !entry.split('/').includes('..'), `release roster ${field} escapes its root`);
+      invariant(!entry.includes('\\'), `release roster ${field} must use POSIX paths`);
+      return entry;
+    });
+    invariant(new Set(normalized).size === normalized.length, `release roster ${field} contains duplicate paths`);
+  }
+  return roster;
+}
+
+async function inspectScopedEntry(root, relative, expected, label, actual, ignoredDirectoryPrefixes = []) {
+  const normalized = posixPath(relative);
+  const target = path.join(root, relative);
+  let stats;
+  try {
+    stats = await lstat(target);
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new Error(`missing ${label} entry: ${normalized}`);
+    throw error;
+  }
+  invariant(!stats.isSymbolicLink(), `symlink is not allowed in ${label}: ${normalized}`);
+  if (isWithinDirectoryPrefix(normalized, ignoredDirectoryPrefixes)) {
+    invariant(stats.isDirectory(), `source-only directory must be a directory in ${label}: ${normalized}`);
+    return;
+  }
+  if (stats.isDirectory()) {
+    const entries = await readdir(target, { withFileTypes: true });
+    invariant(entries.length > 0, `empty directory is not allowed in ${label}: ${normalized || '.'}`);
+    for (const entry of entries) {
+      await inspectScopedEntry(root, path.join(relative, entry.name), expected, label, actual, ignoredDirectoryPrefixes);
+    }
+    return;
+  }
+  invariant(stats.isFile(), `non-regular file is not allowed in ${label}: ${normalized}`);
+  invariant((stats.mode & 0o111) === 0, `executable file is not allowed in ${label}: ${normalized}`);
+  const forbidden = forbiddenArtifact(normalized);
+  if (forbidden) throw new Error(`forbidden artifact in ${label}: ${normalized} (${forbidden})`);
+  invariant(expected.has(normalized), `unexpected file in ${label}: ${normalized}`);
+  actual.add(normalized);
+}
+
+async function validateSourceReleaseScope(roster) {
+  const expected = new Set([...roster.pluginFiles, ...roster.sourceOnlyFiles]);
+  const sourceOnlyDirectoryPrefixes = roster.sourceOnlyDirectoryPrefixes.map(posixPath);
+  const scopeRoots = new Set([...expected, ...sourceOnlyDirectoryPrefixes].map((entry) => entry.split('/')[0]));
+  const actual = new Set();
+  for (const scopeRoot of scopeRoots) {
+    await inspectScopedEntry(root, scopeRoot, expected, 'source release scope', actual, sourceOnlyDirectoryPrefixes);
+  }
+  for (const entry of roster.pluginFiles) {
+    invariant(actual.has(entry), `missing source release entry: ${entry}`);
+  }
+}
+
 async function main() {
+  const rosterPath = path.join(root, 'distribution', 'skills-repo', 'release-roster.json');
+  const rosterStats = await lstat(rosterPath);
+  invariant(rosterStats.isFile(), 'release roster must be a regular file');
+  invariant((rosterStats.mode & 0o111) === 0, 'release roster must not be executable');
+  const roster = checkedRoster(JSON.parse(await readFile(rosterPath, 'utf8')));
+  await validateSourceReleaseScope(roster);
   const manifest = await json('.codex-plugin/plugin.json');
   invariant(manifest.name === 'game-development-studio', 'unexpected plugin name');
   invariant(manifest.version === '1.0.1', 'unexpected plugin version');
@@ -47,16 +132,22 @@ async function main() {
     }
   }));
 
-  const expectedPolicyUrls = [
-    'https://github.com/theisegoria/game-development-studio-skills/blob/main/PRIVACY.md',
-    'https://github.com/theisegoria/game-development-studio-skills/blob/main/TERMS.md',
-  ];
-  invariant(expectedPolicyUrls.includes(manifest.interface?.privacyPolicyURL), 'unexpected privacy URL');
-  invariant(expectedPolicyUrls.includes(manifest.interface?.termsOfServiceURL), 'unexpected terms URL');
   invariant(
-    manifest.interface?.supportURL === 'https://github.com/theisegoria/game-development-studio-skills/issues',
-    'unexpected support URL',
+    manifest.interface?.privacyPolicyURL === 'https://github.com/theisegoria/game-development-studio-skills/blob/main/PRIVACY.md',
+    'unexpected privacy URL',
   );
+  invariant(
+    manifest.interface?.termsOfServiceURL === 'https://github.com/theisegoria/game-development-studio-skills/blob/main/TERMS.md',
+    'unexpected terms URL',
+  );
+  const allowedInterfaceFields = new Set([
+    'displayName', 'shortDescription', 'longDescription', 'developerName', 'category',
+    'capabilities', 'websiteURL', 'privacyPolicyURL', 'termsOfServiceURL', 'defaultPrompt',
+    'brandColor', 'composerIcon', 'logo', 'logoDark', 'screenshots',
+  ]);
+  for (const field of Object.keys(manifest.interface ?? {})) {
+    invariant(allowedInterfaceFields.has(field), `unsupported plugin interface field: ${field}`);
+  }
   invariant(manifest.interface?.shortDescription.length <= 30, 'short description exceeds the 30-character limit');
   invariant(manifest.interface?.screenshots === undefined, 'skills-only plugins must not declare manifest screenshots');
 

@@ -62,7 +62,18 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-export async function readRequest(parsed: ParsedArguments): Promise<Record<string, unknown>> {
+const requestReads = new WeakMap<ParsedArguments, Promise<Record<string, unknown>>>();
+
+export function readRequest(parsed: ParsedArguments): Promise<Record<string, unknown>> {
+  let request = requestReads.get(parsed);
+  if (request === undefined) {
+    request = readRequestUncached(parsed);
+    requestReads.set(parsed, request);
+  }
+  return request;
+}
+
+async function readRequestUncached(parsed: ParsedArguments): Promise<Record<string, unknown>> {
   const requestPath = stringFlag(parsed, 'request');
   const inline = stringFlag(parsed, 'input');
   if (requestPath !== undefined && inline !== undefined) {

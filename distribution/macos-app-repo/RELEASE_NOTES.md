@@ -27,10 +27,17 @@ The first native Game Development Studio companion brings the local
 - Apple silicon (`arm64`) only
 - native app version 1.0.0, bundle identifier
   `com.theisegoria.GameDevelopmentStudio`
-- separately installed `game-dev` CLI 1.0.0 or later; Node.js 22.5 or later is
-  required by that CLI and is not embedded in the app
+- bundled `game-dev` CLI 1.0.1, production dependency closure, helper resources,
+  and direct pinned Node runtime, all bound by an exact runtime roster
 - compiled `.app` ZIP attached to the GitHub release; no Swift or TypeScript
-  source is committed to this distribution repository
+  project source is committed to this distribution repository
+
+Sensitive invocations measure the rostered source runtime, run a no-secret
+handshake from a private snapshot, recheck the approved identity before
+credential access, and launch a separately verified private snapshot directly
+through the bundled Node executable. This closes ordinary package-update races;
+it is not publisher authentication or a claim against a malicious process with
+the same macOS user identity.
 
 ### Distribution boundary
 
@@ -38,9 +45,10 @@ The 1.0.0 bundle is ad-hoc signed. It is not Developer ID signed, notarized,
 stapled, claimed to use Hardened Runtime, or reviewed by the Mac App Store. A
 verified checksum and an intact ad-hoc signature establish download and bundle
 integrity within those limits; they do not authenticate an Apple Developer ID.
+The public metadata's observed CodeDirectory hash is an archive-consistency
+record, not publisher authentication.
 
 Provider fixtures, automated tests, source review, a local build, or one app
 screenshot do not prove live-provider compatibility, engine import, target-GPU
 execution, pixel correctness, hardware performance, accessibility, or human
 artistic acceptance. Each stronger claim requires its own admitted evidence.
-

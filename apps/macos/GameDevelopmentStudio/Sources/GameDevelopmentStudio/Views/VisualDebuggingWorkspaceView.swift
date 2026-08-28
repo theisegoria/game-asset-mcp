@@ -50,7 +50,7 @@ struct VisualDebuggingWorkspaceView: View {
                     .disabled(!canPlanScenario || model.executionState.isRunning)
 
                     Button("Run Scenario…") {
-                        prepareScenarioApproval()
+                        Task { await prepareScenarioApproval() }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!hasCurrentPlan || model.executionState.isRunning)
@@ -165,12 +165,14 @@ struct VisualDebuggingWorkspaceView: View {
         }
     }
 
-    private func prepareScenarioApproval() {
+    private func prepareScenarioApproval() async {
         guard hasCurrentPlan else { return }
         let project = projectPath
         let scenario = scenarioID
         let gpu = allowGPU
         let performance = allowPerformance
+        let submittedOutputDirectory = model.outputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let identity = await model.executableIdentityForApproval() else { return }
 
         var authorities: [ApprovalAuthority] = [.processExecution]
         if gpu { authorities.append(.gpuCapture) }
@@ -183,7 +185,9 @@ struct VisualDebuggingWorkspaceView: View {
                 "Project: \(project)",
                 "Scenario: \(scenario)",
                 "GPU lane: \(gpu ? "authorized" : "not authorized")",
-                "Performance capture: \(performance ? "authorized" : "not authorized")"
+                "Performance capture: \(performance ? "authorized" : "not authorized")",
+            ] + identity.approvalDetails + [
+                "Output workspace: \(submittedOutputDirectory)",
             ],
             authorities: authorities,
             confirmationTitle: "Run Once"
@@ -193,7 +197,9 @@ struct VisualDebuggingWorkspaceView: View {
                 project: project,
                 allowGPU: gpu,
                 allowPerformance: performance,
-                confirmed: true
+                confirmed: true,
+                expectedExecutableIdentity: identity,
+                expectedOutputDirectory: submittedOutputDirectory
             )
         }
     }

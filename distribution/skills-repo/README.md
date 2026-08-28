@@ -89,6 +89,10 @@ python3 scripts/verify.py
 python3 scripts/build_release.py /tmp/game-development-studio-plugin-1.0.1.zip
 ```
 
+`build_release.py` requires an explicit output path outside the exported
+repository (for example, under `/tmp`), so archive generation cannot alter the
+closed release tree it verifies.
+
 ## Evidence boundary
 
 The skills are intentionally strict about claims:

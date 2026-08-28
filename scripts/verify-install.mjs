@@ -14,6 +14,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sourceRoot = path.resolve(here, '..');
 const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const NPM_INSTALL_FETCH_TIMEOUT_MS = 20_000;
+const NPM_INSTALL_TIMEOUT_MS = 60_000;
 
 const EXPECTED_TOOLS = [
   'preview_asset_prompt',
@@ -66,6 +68,7 @@ async function exists(target) {
 }
 
 function run(command, args, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 0;
   return new Promise((resolve, reject) => {
     execFile(
       command,
@@ -74,11 +77,20 @@ function run(command, args, options = {}) {
         cwd: options.cwd ?? sourceRoot,
         env: { ...process.env, ...options.env },
         maxBuffer: options.maxBuffer ?? 32 * 1024 * 1024,
+        timeout: timeoutMs,
       },
       (error, stdout, stderr) => {
         if (error) {
+          const failureContext = options.failureContext ? `${options.failureContext}: ` : '';
+          if (error.killed && timeoutMs > 0) {
+            reject(new Error(
+              `${failureContext}${command} ${args.join(' ')} timed out after ${timeoutMs}ms. ${options.timeoutHint ?? 'The child process exceeded its explicit verifier bound.'}`,
+              { cause: error },
+            ));
+            return;
+          }
           reject(new Error(
-            `${command} ${args.join(' ')} exited ${String(error.code)}:\n${stderr || stdout}`,
+            `${failureContext}${command} ${args.join(' ')} exited ${String(error.code)}:\n${stderr || stdout}`,
             { cause: error },
           ));
         } else {
@@ -120,14 +132,25 @@ async function main() {
     const tarballPath = path.join(packRoot, packRecord.filename);
     invariant(await exists(tarballPath), 'npm pack did not create the reported tarball');
 
+    console.log(
+      `verifying fresh npm install (fetch timeout ${NPM_INSTALL_FETCH_TIMEOUT_MS}ms, process timeout ${NPM_INSTALL_TIMEOUT_MS}ms, retries disabled)`,
+    );
     await run(npmExecutable, [
       'install',
       '--ignore-scripts',
       '--no-audit',
       '--no-fund',
       '--package-lock=false',
+      '--fetch-retries=0',
+      `--fetch-timeout=${NPM_INSTALL_FETCH_TIMEOUT_MS}`,
       tarballPath,
-    ], { cwd: consumerRoot, env: npmEnvironment });
+    ], {
+      cwd: consumerRoot,
+      env: npmEnvironment,
+      timeoutMs: NPM_INSTALL_TIMEOUT_MS,
+      failureContext: 'fresh package install',
+      timeoutHint: 'The verifier uses an empty npm cache and requires registry access for runtime dependencies; npm retries are disabled.',
+    });
 
     const packageRoot = path.join(
       consumerRoot,

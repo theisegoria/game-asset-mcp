@@ -91,6 +91,9 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Audit binary-only release packager fixtures
+        run: ./script/package_macos_release.sh self-test
+
       - name: Build the macOS 26 app
         run: swift build --package-path apps/macos/GameDevelopmentStudio
 

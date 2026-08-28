@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import Darwin
 
 public protocol GameDevCLIClientProtocol: Sendable {
@@ -19,7 +18,8 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
     case invalidInvocation(String)
     case trustedExecutableRequired
     case executableNotRegular
-    case executableIdentityChanged
+    case runtimeInvalid(String)
+    case runtimeIdentityChanged
     case handshakeFailed(String)
     case credentialInArguments(CredentialProvider)
     case standardInputTooLarge(limit: Int)
@@ -39,11 +39,13 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
         case let .invalidInvocation(reason):
             "Invalid game-dev invocation: \(reason)"
         case .trustedExecutableRequired:
-            "Credential-bearing and write or capture operations require a configured absolute executable path."
+            "Credential-bearing and write or capture operations require a configured closed Studio runtime directory."
         case .executableNotRegular:
             "The configured game-dev executable must be an absolute executable regular file."
-        case .executableIdentityChanged:
-            "The configured game-dev executable changed after approval; review the operation again."
+        case let .runtimeInvalid(reason):
+            "The configured Studio runtime is not trusted: \(reason)"
+        case .runtimeIdentityChanged:
+            "The configured Studio runtime changed after approval; review the operation again."
         case let .handshakeFailed(reason):
             "The configured game-dev executable failed its no-secret identity handshake: \(reason)"
         case let .credentialInArguments(provider):
@@ -75,28 +77,63 @@ public enum GameDevCLIClientError: Error, Equatable, Sendable, LocalizedError {
 }
 
 public struct GameDevCLIExecutableIdentity: Codable, Equatable, Sendable, CustomStringConvertible {
-    public let canonicalPath: String
-    public let sha256: String
-    public let version: String
+    public let identitySchema: String
+    public let runtimeRootCanonicalPath: String
+    public let runtimeTreeSHA256: String
+    public let entrypointRelativePath: String
+    public let entrypointSHA256: String
+    public let nodeCanonicalPath: String
+    public let nodeSHA256: String
+    public let nodeVersion: String
+    public let cliVersion: String
     public let resultSchema: String
     public let capabilitiesSchema: String
 
     public init(
-        canonicalPath: String,
-        sha256: String,
-        version: String,
+        identitySchema: String,
+        runtimeRootCanonicalPath: String,
+        runtimeTreeSHA256: String,
+        entrypointRelativePath: String,
+        entrypointSHA256: String,
+        nodeCanonicalPath: String,
+        nodeSHA256: String,
+        nodeVersion: String,
+        cliVersion: String,
         resultSchema: String,
         capabilitiesSchema: String
     ) {
-        self.canonicalPath = canonicalPath
-        self.sha256 = sha256
-        self.version = version
+        self.identitySchema = identitySchema
+        self.runtimeRootCanonicalPath = runtimeRootCanonicalPath
+        self.runtimeTreeSHA256 = runtimeTreeSHA256
+        self.entrypointRelativePath = entrypointRelativePath
+        self.entrypointSHA256 = entrypointSHA256
+        self.nodeCanonicalPath = nodeCanonicalPath
+        self.nodeSHA256 = nodeSHA256
+        self.nodeVersion = nodeVersion
+        self.cliVersion = cliVersion
         self.resultSchema = resultSchema
         self.capabilitiesSchema = capabilitiesSchema
     }
 
     public var description: String {
-        "path=\(canonicalPath), sha256=\(sha256), version=\(version), resultSchema=\(resultSchema), capabilitiesSchema=\(capabilitiesSchema)"
+        "schema=\(identitySchema), runtimeRoot=\(runtimeRootCanonicalPath), runtimeTreeSHA256=\(runtimeTreeSHA256), node=\(nodeCanonicalPath), nodeSHA256=\(nodeSHA256), nodeVersion=\(nodeVersion), cliVersion=\(cliVersion), resultSchema=\(resultSchema), capabilitiesSchema=\(capabilitiesSchema)"
+    }
+
+    public var approvalDetails: [String] {
+        [
+            "Runtime root: \(runtimeRootCanonicalPath)",
+            "Runtime tree SHA-256: \(runtimeTreeSHA256)",
+            "CLI entrypoint: \(entrypointRelativePath)",
+            "CLI entrypoint SHA-256: \(entrypointSHA256)",
+            "Node runtime: \(nodeCanonicalPath)",
+            "Node SHA-256: \(nodeSHA256)",
+            "Node version: \(nodeVersion)",
+            "CLI version: \(cliVersion)",
+            "Result schema: \(resultSchema)",
+            "Capabilities schema: \(capabilitiesSchema)",
+            "Binding: checked in a private snapshot after the no-secret handshake and again before launch.",
+            "Evidence boundary: binds this one approval to the staged local Studio runtime; it does not authenticate a global install or attest external tools, provider behavior, spend, GPU work, pixels, performance, signing, or human review.",
+        ]
     }
 }
 
@@ -167,23 +204,61 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
     }
 
     public func noSecretHandshake(timeout: Duration = .seconds(5)) async throws -> GameDevCLIExecutableIdentity {
-        let canonicalURL = try Self.canonicalExecutableURL(executableURL)
+        guard let executableURL else { throw GameDevCLIClientError.trustedExecutableRequired }
+        let sourceBefore = try GameDevCLIRuntime.measure(configuredURL: executableURL)
+        let snapshot = try GameDevCLIRuntime.snapshot(
+            source: sourceBefore,
+            expectedTreeSHA256: sourceBefore.treeSHA256
+        )
+        defer { snapshot.remove() }
 
-        let versionOutcome = try await runHandshakeProcess(
-            executableURL: canonicalURL,
+        let nodeVersionOutcome = try await runHandshakeProcess(
+            executableURL: snapshot.measurement.nodeURL,
             arguments: ["--version"],
             timeout: timeout
         )
-        guard versionOutcome.exitCode == 0,
-              let version = Self.firstOutputLine(versionOutcome.standardOutput),
-              !version.isEmpty
+        guard nodeVersionOutcome.exitCode == 0,
+              let nodeVersion = Self.firstOutputLine(nodeVersionOutcome.standardOutput),
+              !nodeVersion.isEmpty
         else {
-            throw GameDevCLIClientError.handshakeFailed("--version did not return a version")
+            throw GameDevCLIClientError.handshakeFailed("the pinned Node runtime did not return a version")
         }
 
+        let versionOutcome = try await runHandshakeProcess(
+            executableURL: snapshot.measurement.nodeURL,
+            arguments: [snapshot.measurement.entrypointURL.path, "--version"],
+            timeout: timeout
+        )
+        guard versionOutcome.exitCode == 0,
+              let cliVersion = Self.firstOutputLine(versionOutcome.standardOutput),
+              !cliVersion.isEmpty
+        else {
+            throw GameDevCLIClientError.handshakeFailed("the staged CLI did not return a version")
+        }
+
+        // The CLI initializes local stores before reporting capabilities. Use a
+        // private, disposable workspace and never inject a provider credential
+        // into any handshake process.
+        let handshakeWorkspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("game-development-studio-handshake-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: handshakeWorkspace,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: NSNumber(value: 0o700)]
+            )
+        } catch {
+            throw GameDevCLIClientError.handshakeFailed("could not create the temporary capabilities workspace")
+        }
+        defer { try? FileManager.default.removeItem(at: handshakeWorkspace) }
+
         let capabilitiesOutcome = try await runHandshakeProcess(
-            executableURL: canonicalURL,
-            arguments: ["capabilities", "--json"],
+            executableURL: snapshot.measurement.nodeURL,
+            arguments: [
+                snapshot.measurement.entrypointURL.path,
+                "capabilities", "--json",
+                "--output-dir", handshakeWorkspace.path,
+            ],
             timeout: timeout
         )
         guard capabilitiesOutcome.exitCode == 0 else {
@@ -201,21 +276,40 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
               envelope.ok,
               envelope.data["schema"]?.stringValue == Self.capabilitiesSchema,
               envelope.data["name"]?.stringValue == "game-development-studio",
-              envelope.data["version"]?.stringValue == version,
+              envelope.data["version"]?.stringValue == cliVersion,
               envelope.data["protocols"]?["result"]?.stringValue == Self.resultSchema
         else {
             throw GameDevCLIClientError.handshakeFailed("capabilities identity or schema did not match the supported contract")
         }
 
-        // Hash after the no-secret probes as well as before launching them. This
-        // narrows the approval-to-use race and makes the returned identity the
-        // one that is actually about to be used.
-        let fileIdentity = try Self.fileIdentity(for: canonicalURL)
+        let snapshotAfter: GameDevCLIRuntimeMeasurement
+        let sourceAfter: GameDevCLIRuntimeMeasurement
+        do {
+            snapshotAfter = try GameDevCLIRuntime.measure(configuredURL: snapshot.measurement.rootURL)
+            sourceAfter = try GameDevCLIRuntime.measure(configuredURL: sourceBefore.rootURL)
+        } catch {
+            throw GameDevCLIClientError.runtimeIdentityChanged
+        }
+        guard snapshotAfter.treeSHA256 == sourceBefore.treeSHA256,
+              sourceAfter.treeSHA256 == sourceBefore.treeSHA256,
+              snapshotAfter.nodeSHA256 == sourceBefore.nodeSHA256,
+              snapshotAfter.entrypointSHA256 == sourceBefore.entrypointSHA256,
+              sourceAfter.nodeSHA256 == sourceBefore.nodeSHA256,
+              sourceAfter.entrypointSHA256 == sourceBefore.entrypointSHA256
+        else {
+            throw GameDevCLIClientError.runtimeIdentityChanged
+        }
 
         return GameDevCLIExecutableIdentity(
-            canonicalPath: fileIdentity.canonicalPath,
-            sha256: fileIdentity.sha256,
-            version: version,
+            identitySchema: GameDevCLIRuntime.identitySchema,
+            runtimeRootCanonicalPath: sourceBefore.rootURL.path,
+            runtimeTreeSHA256: sourceBefore.treeSHA256,
+            entrypointRelativePath: GameDevCLIRuntime.entrypointRelativePath,
+            entrypointSHA256: sourceBefore.entrypointSHA256,
+            nodeCanonicalPath: sourceBefore.nodeURL.path,
+            nodeSHA256: sourceBefore.nodeSHA256,
+            nodeVersion: nodeVersion,
+            cliVersion: cliVersion,
             resultSchema: Self.resultSchema,
             capabilitiesSchema: Self.capabilitiesSchema
         )
@@ -238,27 +332,31 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
             requiresTrustedExecutable: requiresTrustedExecutable
         )
 
-        let trustedExecutableURL: URL?
+        var runtimeSnapshot: GameDevCLIRuntimeSnapshot?
+        defer { runtimeSnapshot?.remove() }
         if requiresTrustedExecutable {
-            trustedExecutableURL = try Self.canonicalExecutableURL(executableURL)
-            let currentIdentity = try Self.fileIdentity(for: trustedExecutableURL!)
-            if let pinnedIdentity,
-               pinnedIdentity.canonicalPath != currentIdentity.canonicalPath
-                || pinnedIdentity.sha256 != currentIdentity.sha256 {
-                throw GameDevCLIClientError.executableIdentityChanged
+            guard let executableURL else { throw GameDevCLIClientError.trustedExecutableRequired }
+            var sourceMeasurement: GameDevCLIRuntimeMeasurement
+            do {
+                sourceMeasurement = try GameDevCLIRuntime.measure(configuredURL: executableURL)
+            } catch {
+                if pinnedIdentity != nil { throw GameDevCLIClientError.runtimeIdentityChanged }
+                throw error
             }
-            if pinnedIdentity == nil {
-                let handshakeIdentity = try await noSecretHandshake(timeout: .seconds(5))
-                // Keep the no-secret handshake and the launch bound to the
-                // same canonical path and bytes. A caller that supplied a pin
-                // has already performed the handshake during approval.
-                if handshakeIdentity.canonicalPath != currentIdentity.canonicalPath
-                    || handshakeIdentity.sha256 != currentIdentity.sha256 {
-                    throw GameDevCLIClientError.executableIdentityChanged
-                }
+            let approvedIdentity: GameDevCLIExecutableIdentity
+            if let pinnedIdentity {
+                approvedIdentity = pinnedIdentity
+            } else {
+                approvedIdentity = try await noSecretHandshake(timeout: .seconds(5))
+                sourceMeasurement = try GameDevCLIRuntime.measure(configuredURL: executableURL)
             }
-        } else {
-            trustedExecutableURL = nil
+            guard GameDevCLIRuntime.identityMatches(sourceMeasurement, approvedIdentity) else {
+                throw GameDevCLIClientError.runtimeIdentityChanged
+            }
+            runtimeSnapshot = try GameDevCLIRuntime.snapshot(
+                source: sourceMeasurement,
+                expectedTreeSHA256: approvedIdentity.runtimeTreeSHA256
+            )
         }
 
         var arguments = invocation.arguments
@@ -272,8 +370,29 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
 
         let launchURL: URL
         let launchArguments: [String]
-        if let executableURL {
-            launchURL = trustedExecutableURL ?? executableURL
+        if let runtimeSnapshot {
+            let finalMeasurement: GameDevCLIRuntimeMeasurement
+            do {
+                finalMeasurement = try GameDevCLIRuntime.measure(
+                    configuredURL: runtimeSnapshot.measurement.rootURL
+                )
+            } catch {
+                throw GameDevCLIClientError.runtimeIdentityChanged
+            }
+            guard finalMeasurement.treeSHA256 == runtimeSnapshot.measurement.treeSHA256,
+                  finalMeasurement.nodeSHA256 == runtimeSnapshot.measurement.nodeSHA256,
+                  finalMeasurement.entrypointSHA256 == runtimeSnapshot.measurement.entrypointSHA256
+            else {
+                throw GameDevCLIClientError.runtimeIdentityChanged
+            }
+            launchURL = finalMeasurement.nodeURL
+            launchArguments = [finalMeasurement.entrypointURL.path] + arguments
+        } else if let executableURL, Self.looksLikeRuntime(configuredURL: executableURL) {
+            let runtime = try GameDevCLIRuntime.measure(configuredURL: executableURL)
+            launchURL = runtime.nodeURL
+            launchArguments = [runtime.entrypointURL.path] + arguments
+        } else if let executableURL {
+            launchURL = executableURL
             launchArguments = arguments
         } else {
             launchURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -453,41 +572,13 @@ public struct GameDevCLIClient: GameDevCLIClientProtocol, Sendable {
         }
     }
 
-    private static func canonicalExecutableURL(_ url: URL?) throws -> URL {
-        guard let url,
-              url.isFileURL,
-              url.path.hasPrefix("/")
-        else { throw GameDevCLIClientError.trustedExecutableRequired }
-
-        let canonicalURL = url.standardizedFileURL.resolvingSymlinksInPath().standardizedFileURL
-        guard canonicalURL.path.hasPrefix("/") else {
-            throw GameDevCLIClientError.executableNotRegular
+    private static func looksLikeRuntime(configuredURL: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: configuredURL.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            return true
         }
-        do {
-            let attributes = try FileManager.default.attributesOfItem(atPath: canonicalURL.path)
-            guard attributes[.type] as? FileAttributeType == .typeRegular,
-                  let permissions = attributes[.posixPermissions] as? NSNumber,
-                  permissions.intValue & 0o111 != 0
-            else { throw GameDevCLIClientError.executableNotRegular }
-        } catch let error as GameDevCLIClientError {
-            throw error
-        } catch {
-            throw GameDevCLIClientError.executableNotRegular
-        }
-        return canonicalURL
-    }
-
-    private static func fileIdentity(for url: URL) throws -> (canonicalPath: String, sha256: String) {
-        let data: Data
-        do {
-            data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        } catch {
-            throw GameDevCLIClientError.executableNotRegular
-        }
-        let digest = SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
-        return (url.path, digest)
+        return configuredURL.standardizedFileURL.path.hasSuffix("/payload/app/dist/cli.js")
     }
 
     private static func firstOutputLine(_ data: Data) -> String? {
@@ -553,6 +644,7 @@ private final class ManagedProcess: @unchecked Sendable {
 
     private var standardOutputReadSource: DispatchSourceRead?
     private var standardErrorReadSource: DispatchSourceRead?
+    private var processExitSource: DispatchSourceProcess?
     private var standardOutput = Data()
     private var standardError = Data()
     private var completion: Result<RawProcessOutcome, any Error>?
@@ -586,6 +678,11 @@ private final class ManagedProcess: @unchecked Sendable {
         let outputHandle = standardOutputPipe.fileHandleForReading
         let errorHandle = standardErrorPipe.fileHandleForReading
         startedAt = Date()
+        process.terminationHandler = { [weak self] terminatedProcess in
+            self?.stateQueue.async { [weak self] in
+                self?.finish(process: terminatedProcess)
+            }
+        }
         do {
             try process.run()
         } catch {
@@ -595,6 +692,23 @@ private final class ManagedProcess: @unchecked Sendable {
             try? errorHandle.close()
             throw error
         }
+
+        // Foundation's termination callback is the primary completion path.
+        // Keep a kernel process-exit source as an independent wake-up: GUI
+        // launches have exhibited a delayed Foundation callback for a
+        // shebang-launched Node process even after the direct PID disappeared.
+        // Both paths converge on finish(), whose idempotent guard preserves a
+        // single result.
+        let exitSource = DispatchSource.makeProcessSource(
+            identifier: process.processIdentifier,
+            eventMask: .exit,
+            queue: stateQueue
+        )
+        processExitSource = exitSource
+        exitSource.setEventHandler { [weak self, process] in
+            self?.finish(process: process)
+        }
+        exitSource.resume()
 
         let outputSource = DispatchSource.makeReadSource(
             fileDescriptor: outputHandle.fileDescriptor,
@@ -639,21 +753,6 @@ private final class ManagedProcess: @unchecked Sendable {
             )
         }
         errorSource.resume()
-
-        // Observe the direct PID on a detached queue. Process.waitUntilExit()
-        // can remain in Foundation's run-loop wait when several short-lived
-        // NSTask instances are used in one suite. Polling isRunning gives us
-        // the direct process boundary without waiting for inherited pipe
-        // holders, while the readability handlers continue draining capped
-        // output.
-        DispatchQueue.global(qos: .utility).async { [weak self, process] in
-            while process.isRunning {
-                Thread.sleep(forTimeInterval: 0.005)
-            }
-            self?.stateQueue.async { [weak self] in
-                self?.finish(process: process)
-            }
-        }
 
         inputQueue.async { [weak self] in
             self?.writeStandardInputAndClose()
@@ -793,6 +892,9 @@ private final class ManagedProcess: @unchecked Sendable {
         standardErrorReadSource?.cancel()
         standardOutputReadSource = nil
         standardErrorReadSource = nil
+        processExitSource?.cancel()
+        processExitSource = nil
+        process.terminationHandler = nil
         try? outputHandle.close()
         try? errorHandle.close()
 

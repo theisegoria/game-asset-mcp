@@ -44,7 +44,11 @@ public final class AppModel {
         self.defaults = defaults
         self.outputDirectory = defaults.string(forKey: PreferenceKey.outputDirectory)
             ?? Self.defaultOutputDirectory
-        self.cliExecutable = defaults.string(forKey: PreferenceKey.cliExecutable) ?? ""
+        if defaults.object(forKey: PreferenceKey.cliExecutable) != nil {
+            self.cliExecutable = defaults.string(forKey: PreferenceKey.cliExecutable) ?? ""
+        } else {
+            self.cliExecutable = Self.bundledRuntimePath ?? ""
+        }
 
         for provider in CredentialProvider.allCases {
             credentialStates[provider] = CredentialState(provider: provider, isConfigured: false)
@@ -71,6 +75,20 @@ public final class AppModel {
                     errorMessage: error.localizedDescription
                 )
             }
+        }
+    }
+
+    public func restoreBundledRuntime() {
+        guard let bundledRuntimePath = Self.bundledRuntimePath else {
+            failLocally(
+                summary: "Bundled runtime unavailable",
+                message: "This build does not contain the closed Studio runtime. Reinstall the complete app bundle."
+            )
+            return
+        }
+        cliExecutable = bundledRuntimePath
+        if currentOperationToken == nil {
+            executionState = .succeeded("Bundled Studio runtime restored")
         }
     }
 
@@ -510,7 +528,7 @@ public final class AppModel {
             if requiresTrustedExecutable, let nativeClient = client as? GameDevCLIClient {
                 let identity = try await nativeClient.noSecretHandshake()
                 if let expectedExecutableIdentity, identity != expectedExecutableIdentity {
-                    throw GameDevCLIClientError.executableIdentityChanged
+                    throw GameDevCLIClientError.runtimeIdentityChanged
                 }
                 executingClient = nativeClient.pinned(to: identity)
             }
@@ -629,6 +647,17 @@ public final class AppModel {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Game Development Studio", isDirectory: true)
             .path
+    }
+
+    private static var bundledRuntimePath: String? {
+        guard let resourceURL = Bundle.main.resourceURL else { return nil }
+        let runtimeURL = resourceURL
+            .appendingPathComponent("GameDevelopmentStudioRuntime", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: runtimeURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else { return nil }
+        return runtimeURL.path
     }
 }
 

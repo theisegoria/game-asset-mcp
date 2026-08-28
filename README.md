@@ -79,14 +79,17 @@ workspaces: Production, Library & Vendoring, Visual Debugging, and Performance.
 It presents the existing local `game-dev` protocol through a
 `NavigationSplitView`, system search and toolbar controls, a result inspector,
 keyboard commands, a dedicated Settings scene, and explicit empty, loading, and
-error states. It calls the same local CLI and has no publisher-hosted backend.
+error states. Its complete bundle carries a closed, exact-rostered build of the
+same CLI plus a direct Node runtime; it has no publisher-hosted backend.
 
 Provider credentials are entered in masked fields, stored in the macOS
 Keychain, and shown only as configured or not configured. Paid provider calls,
 package construction, project vendoring, scenario execution, GPU capture, and
 hardware-performance collection use one-shot approval sheets. Vendoring and
 scenario execution are dry-run-first, and changing their planned inputs
-invalidates the current approval path.
+invalidates the current approval path. Sensitive operations bind that approval
+to the full local runtime-tree digest and execute a separately verified private
+snapshot, rather than trusting an arbitrary global CLI or PATH-selected Node.
 
 From the repository root:
 
@@ -104,11 +107,14 @@ Mac App Store build. The `--verify` mode finding a live process after two
 seconds does not prove window readiness, pixel correctness, workflow behavior,
 accessibility, or human acceptance.
 
-> **Runtime screenshot pending:** the publication path is reserved as
-> `assets/screenshots/04-native-macos-app.png`. No image is embedded here yet;
-> it has not been captured or visually inspected.
+![Native Visual Debugging workspace in default dark mode](assets/screenshots/04-native-macos-app.png)
 
-<!-- Runtime screenshot placeholder: assets/screenshots/04-native-macos-app.png -->
+This is a full-resolution capture of one reviewed native macOS 26 runtime state:
+the Visual Debugging workspace in the default Dark appearance after a successful
+local `doctor` check. Its byte-level provenance is recorded separately. It does
+not prove a target-game GPU capture, pixel correctness across the app, light-mode
+behavior, accessibility, performance, signing identity, notarization, or human
+acceptance.
 
 See [Native macOS app](docs/macos-app.md) for the architecture, approval and
 Keychain boundaries, commands, local-bundle status, and exact evidence limits.

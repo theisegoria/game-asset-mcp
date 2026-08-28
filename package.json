@@ -65,7 +65,11 @@
     "lint": "eslint src tests scripts",
     "verify": "npm run build && node scripts/verify-install.mjs && node scripts/verify-plugin.mjs",
     "verify:plugin": "node scripts/verify-plugin.mjs",
+    "runtime:stage": "npm run build && node scripts/build-cli-runtime.mjs --output build/GameDevelopmentStudioRuntime",
+    "runtime:verify": "node scripts/verify-cli-runtime.mjs --runtime build/GameDevelopmentStudioRuntime",
+    "runtime:check": "npm run runtime:stage && npm run runtime:verify",
     "test": "npm run build && vitest run",
+    "test:runtime": "npm run build && vitest run tests/cli-runtime-payload.test.ts",
     "test:watch": "vitest",
     "start": "node dist/cli.js",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run verify"

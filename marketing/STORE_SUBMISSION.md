@@ -30,10 +30,11 @@ and has no publisher backend. In that environment it routes work and analyzes
 manifests, structured results, telemetry, metrics, and summaries supplied by
 the user. The listing discloses this boundary.
 
-OpenAI's submission guidance says to contact an OpenAI partner before
-submitting when the core value requires local execution, arbitrary local file
-access, hardware/application access, or offline operation. Do not hide or
-remove this disclosure to make a scan pass.
+OpenAI's current submission guidance explicitly accepts skills-only bundles.
+Reviewers still need an honest, reproducible contract: ChatGPT web can review
+the routing, planning, structured-analysis, and safe-fallback behavior, while
+local execution requires Codex plus the separately installed `game-dev` CLI.
+Do not hide or weaken that boundary to make an automated scan pass.
 
 ## Starter prompts
 
@@ -172,5 +173,6 @@ requirement.
   manifest
 - five positive and three negative tests entered
 - availability selected only where support and terms are ready
-- product-specific local execution disclosure reviewed with OpenAI partner
+- product-specific local execution disclosure included in the listing and
+  reviewer notes
 - policy attestations checked only after every field is verified

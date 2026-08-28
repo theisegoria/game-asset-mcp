@@ -110,4 +110,25 @@ struct ModelTests {
         #expect(!invocation.description.contains(secret))
         #expect(!invocation.description.contains("private prompt"))
     }
+
+    @Test("Operation inference ignores global flags for single-command families")
+    func operationInferenceWithGlobalFlags() {
+        let capabilities = CLIInvocation(
+            arguments: ["capabilities", "--output-dir", "/tmp/workspace", "--json"]
+        )
+        let doctor = CLIInvocation(
+            arguments: ["doctor", "--output-dir", "/tmp/workspace", "--json"]
+        )
+        let provider = CLIInvocation(
+            arguments: [
+                "provider", "tripo", "generate",
+                "--output-dir", "/tmp/workspace",
+                "--json",
+            ]
+        )
+
+        #expect(capabilities.expectedOperation == "capabilities")
+        #expect(doctor.expectedOperation == "doctor")
+        #expect(provider.expectedOperation == "provider.tripo.generate")
+    }
 }

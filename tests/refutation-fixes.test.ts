@@ -370,6 +370,18 @@ describe('metadata cannot drift', () => {
       expect(script).toContain(name);
     }
   });
+
+  it('bounds the fresh npm install without converting it to an offline-only check', async () => {
+    const script = await fs.readFile(new URL('../scripts/verify-install.mjs', import.meta.url), 'utf8');
+    expect(script).toContain('const NPM_INSTALL_FETCH_TIMEOUT_MS = 20_000;');
+    expect(script).toContain('const NPM_INSTALL_TIMEOUT_MS = 60_000;');
+    expect(script).toContain("'--fetch-retries=0'");
+    expect(script).toContain('`--fetch-timeout=${NPM_INSTALL_FETCH_TIMEOUT_MS}`');
+    expect(script).toContain('timeoutMs: NPM_INSTALL_TIMEOUT_MS');
+    expect(script).toContain("failureContext: 'fresh package install'");
+    expect(script).toContain('const failureContext = options.failureContext');
+    expect(script).not.toContain('npm_config_offline');
+  });
 });
 
 describe('the Tripo client cannot put an API key on the wire in cleartext', () => {

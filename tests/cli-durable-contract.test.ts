@@ -14,9 +14,13 @@ interface Invocation {
   stderr: string;
 }
 
-async function run(args: string[], env: NodeJS.ProcessEnv = {}): Promise<Invocation> {
+async function run(
+  args: string[],
+  env: NodeJS.ProcessEnv = {},
+  standardInput?: string,
+): Promise<Invocation> {
   return new Promise((resolve) => {
-    execFile(process.execPath, [cli, ...args], {
+    const child = execFile(process.execPath, [cli, ...args], {
       env: {
         ...process.env,
         TRIPO_API_KEY: '',
@@ -28,6 +32,7 @@ async function run(args: string[], env: NodeJS.ProcessEnv = {}): Promise<Invocat
     }, (error, stdout, stderr) => {
       resolve({ code: typeof error?.code === 'number' ? error.code : 0, stdout, stderr });
     });
+    if (standardInput !== undefined) child.stdin?.end(standardInput);
   });
 }
 
@@ -77,6 +82,34 @@ describe('game-dev durable CLI contract', () => {
     expect(job?.status).toBe('approval_required');
     expect(job?.request).toMatchObject({ input: JSON.parse(request) });
     expect(result.stderr).not.toContain('TRIPO_API_KEY');
+  });
+
+  it('reuses a stdin request across durable capture and dispatch', async () => {
+    const root = await workspace();
+    const request = JSON.stringify({
+      textPrompt: 'a simple brass cube',
+      spec: { name: 'brass_cube', description: 'A simple brass cube.' },
+    });
+    const result = await run([
+      'provider', 'tripo', 'generate',
+      '--request', '-',
+      '--approve-spend',
+      '--spend-limit-cents', '30',
+      '--output-dir', root,
+      '--json',
+    ], {}, request);
+
+    expect(result.code).toBe(1);
+    const envelope = JSON.parse(result.stdout) as Record<string, any>;
+    expect(envelope.operation).toBe('provider.tripo.generate');
+    expect(envelope.error.error).toBe('CONFIG_MISSING');
+    expect(envelope.error.message).not.toContain('provide exactly one of');
+    const [job] = await durableJobs(root);
+    expect(job?.status).toBe('failed');
+    expect(job?.request).toMatchObject({ input: JSON.parse(request) });
+    await expect(readFile(path.join(root, '.game-dev', 'spend-ledger.json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 
   it('requires a fresh confirmation and spend ceiling when retrying a paid job', async () => {

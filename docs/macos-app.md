@@ -117,9 +117,12 @@ significant, or that a measured change has the proposed cause.
 
 ## CLI and Keychain boundary
 
-General settings store the configured CLI executable and output directory in
-local application preferences. The output directory remains the home for CLI
-jobs, packages, captures, comparisons, and receipts.
+General settings store the configured Studio runtime path and output directory
+in local application preferences. A complete app bundle selects its bundled
+closed runtime by default and provides an explicit restore action. PATH commands
+and arbitrary executables remain available only for credential-free diagnostics.
+The output directory remains the home for CLI jobs, packages, captures,
+comparisons, and receipts.
 
 Tripo and Leonardo credentials use the macOS Keychain through
 `KeychainCredentialStore`:
@@ -134,13 +137,19 @@ Tripo and Leonardo credentials use the macOS Keychain through
   configurations; a paid production request receives only its selected
   provider. Asset, vendoring, capture-analysis, and performance-analysis
   invocations receive none.
-- The CLI child receives an applicable credential through its process
-  environment. Result parsing and diagnostic presentation redact the configured
-  secret values.
+- Before a sensitive operation, the app measures the complete rostered CLI,
+  Node, production dependency, helper, adapter, and skill payload; performs a
+  no-secret handshake from a private copy; compares that identity with the
+  approval; and stages a new private snapshot before child launch.
+- The snapshot's pinned Node executable receives an applicable credential
+  through its process environment. Result parsing and diagnostic presentation
+  redact the configured secret values.
 
-This boundary reduces accidental disclosure; it is not a general claim about
-the security of the host, third-party provider, target game, or every external
-tool that an approved scenario may run.
+This binds a one-shot approval to the staged local runtime and closes ordinary
+package-manager/update races. It does not authenticate a global install or
+publisher, defend against a malicious process with the same macOS user identity,
+or attest the host, third-party provider, target game, Blender, project-owned
+executable, GPU, pixels, performance, signing, or human review.
 
 ## Approval model
 
@@ -232,10 +241,12 @@ The strongest supported statement depends on the check that actually ran:
 | A real runtime screenshot | One captured visual state on one machine | All workspaces, themes, displays, dynamic states, keyboard use, accessibility, or human acceptance |
 | A sealed capture or performance result | The bundle's declared controls, files, hashes, attachments, and telemetry | Causality or undeclared hardware behavior; GPU/performance claims require a real admitted target-hardware run |
 
-At the time this document was prepared, the native screenshot reserved for
-`assets/screenshots/04-native-macos-app.png` had not yet been captured or
-visually inspected. It must not be treated as evidence until the file is
-created from a real runtime and reviewed.
+The reviewed native runtime capture is
+`assets/screenshots/04-native-macos-app.png`. Its dedicated provenance record
+binds the PNG hash, native version, platform floor, and a narrow claim: it shows
+one Visual Debugging state in the default Dark appearance after a successful
+local `doctor` check. It does not enlarge any of the evidence boundaries in the
+table above.
 
 Live Tripo or Leonardo acceptance, Blender-backed workflows, target-game
 scenario execution, GPU capture, hardware-performance measurement, long-running

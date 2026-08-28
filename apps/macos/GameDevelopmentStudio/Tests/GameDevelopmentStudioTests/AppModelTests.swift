@@ -23,6 +23,39 @@ struct AppModelTests {
         #expect(model.executionState.summary == "Spend approval required")
     }
 
+    @Test("Approved paid generation rejects an invalid runtime before reading credentials")
+    func invalidRuntimeFailsBeforeCredentialRead() async throws {
+        let store = SuspendingCredentialStore()
+        await store.releaseCredentialLookups()
+        let suite = "GameDevelopmentStudioTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let invalidRuntime = FileManager.default.temporaryDirectory
+            .appendingPathComponent("invalid-closed-runtime-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: invalidRuntime, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: invalidRuntime) }
+
+        let model = AppModel(credentialStore: store, defaults: defaults)
+        model.outputDirectory = "/tmp/game-development-studio-tests"
+        model.cliExecutable = invalidRuntime.path
+
+        await model.generateAsset(
+            provider: .tripo,
+            operation: "generate",
+            prompt: "A lighthouse",
+            name: "lighthouse",
+            spendLimitCents: 25,
+            approved: true
+        )
+
+        #expect(await store.credentialRequestCount() == 0)
+        #expect(model.executionState.summary == "Tripo generate failed")
+        #expect(model.executionState.errorMessage?.contains("runtime root must contain exactly") == true)
+        #expect(model.history.isEmpty)
+    }
+
     @Test("Provider request uses stdin, global flags, and only the required credential")
     func providerRequestContract() async throws {
         let client = RecordingCLIClient()
@@ -61,6 +94,9 @@ struct AppModelTests {
         let input = try #require(record.invocation.standardInput)
         let object = try #require(JSONSerialization.jsonObject(with: input) as? [String: Any])
         #expect(object["textPrompt"] as? String == prompt)
+        let spec = try #require(object["spec"] as? [String: Any])
+        #expect(spec["name"] as? String == "harbor-beacon")
+        #expect(spec["description"] as? String == prompt)
     }
 
     @Test("Vendoring is dry-run by default and confirmed only explicitly")

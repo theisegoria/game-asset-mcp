@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
 const builder = path.join(sourceRoot, 'scripts', 'build-skills-repository.mjs');
+const pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
 const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const roots: string[] = [];
 
@@ -32,6 +34,29 @@ async function temporaryRoot(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'game-dev-release-'));
   roots.push(root);
   return root;
+}
+
+async function exportRepository(root: string, exporter = builder): Promise<string> {
+  const destination = path.join(root, 'public-skills-repository');
+  await run(process.execPath, [exporter, destination]);
+  return destination;
+}
+
+async function sourceVerifierFixture(root: string): Promise<string> {
+  const fixture = path.join(root, 'source-fixture');
+  await mkdir(fixture);
+  for (const relative of ['.codex-plugin', 'assets', 'distribution', 'marketing', 'skills']) {
+    await cp(path.join(sourceRoot, relative), path.join(fixture, relative), { recursive: true });
+  }
+  for (const relative of ['CHANGELOG.md', 'LICENSE', 'PRIVACY.md', 'README.md', 'SECURITY.md', 'SUPPORT.md', 'TERMS.md']) {
+    await cp(path.join(sourceRoot, relative), path.join(fixture, relative));
+  }
+  await mkdir(path.join(fixture, 'scripts'));
+  for (const relative of ['build-skills-repository.mjs', 'verify-plugin.mjs']) {
+    await cp(path.join(sourceRoot, 'scripts', relative), path.join(fixture, 'scripts', relative));
+  }
+  await symlink(path.join(sourceRoot, 'node_modules'), path.join(fixture, 'node_modules'));
+  return fixture;
 }
 
 afterEach(async () => {
@@ -78,6 +103,7 @@ describe('public release distribution', () => {
       'distribution/skills-repo/.github/workflows/validate.yml',
       'distribution/skills-repo/scripts/build_release.py',
       'distribution/skills-repo/scripts/verify.py',
+      'distribution/skills-repo/release-roster.json',
     ]));
     expect(files).not.toEqual(expect.arrayContaining([
       'dist/server.js',
@@ -111,9 +137,29 @@ describe('public release distribution', () => {
       expect(pluginReadme).toContain(relative);
       await expect(access(path.join(plugin, relative))).resolves.toBeUndefined();
     }
+    for (const relative of [
+      'assets/macos/AppIcon.icns',
+      'assets/macos/AppIcon.png',
+      'assets/macos/AppIcon.provenance.json',
+      'marketing/01-skill-suite.html',
+      'marketing/02-cli-contract.html',
+      'marketing/03-visual-debugging.html',
+      'marketing/MACOS_APP_COPY.md',
+      'assets/generated',
+    ]) {
+      await expect(access(path.join(plugin, relative))).rejects.toThrow();
+    }
     await expect(access(path.join(destination, '.gitignore'))).resolves.toBeUndefined();
     await expect(access(path.join(destination, '.agents', 'plugins', 'marketplace.json'))).resolves.toBeUndefined();
     await expect(access(path.join(destination, '.github', 'workflows', 'validate.yml'))).resolves.toBeUndefined();
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).resolves.toMatchObject({
+      stdout: expect.stringContaining('game_dev.public_plugin_verification.v1'),
+    });
+
+    const archive = path.join(root, 'plugin.zip');
+    await expect(run(pythonExecutable, ['scripts/build_release.py', archive], destination)).resolves.toMatchObject({
+      stdout: expect.stringContaining('files 42'),
+    });
 
     const manifest = JSON.parse(await readFile(
       path.join(plugin, '.codex-plugin', 'plugin.json'),
@@ -121,5 +167,204 @@ describe('public release distribution', () => {
     )) as Record<string, unknown>;
     expect(manifest).not.toHaveProperty('mcpServers');
     expect(manifest).not.toHaveProperty('apps');
+  });
+
+  it('rejects an exporter destination within its source root, including a symlink alias', async () => {
+    const root = await temporaryRoot();
+    const literalChild = path.join(sourceRoot, `.release-export-${path.basename(root)}`);
+    await expect(run(process.execPath, [builder, sourceRoot])).rejects.toThrow(/outside the source root/);
+    await expect(run(process.execPath, [builder, literalChild])).rejects.toThrow(/outside the source root/);
+    await expect(access(literalChild)).rejects.toThrow();
+
+    const sourceAlias = path.join(root, 'source-alias');
+    await symlink(sourceRoot, sourceAlias);
+    const aliasChild = path.join(sourceAlias, path.basename(literalChild));
+    await expect(run(process.execPath, [builder, aliasChild])).rejects.toThrow(/outside the source root/);
+    await expect(access(aliasChild)).rejects.toThrow();
+  });
+
+  it('requires an explicit archive output outside the exported repository and plugin', async () => {
+    const root = await temporaryRoot();
+    const destination = await exportRepository(root);
+    const plugin = path.join(destination, 'plugins', 'game-development-studio');
+    const outputCandidates = [
+      path.join(destination, 'game-development-studio-plugin.zip'),
+      path.join(plugin, 'game-development-studio-plugin.zip'),
+    ];
+
+    await expect(run(pythonExecutable, ['scripts/build_release.py'], destination)).rejects.toThrow(/usage: .*OUTPUT_PATH/);
+    for (const output of outputCandidates) {
+      await expect(run(pythonExecutable, ['scripts/build_release.py', output], destination))
+        .rejects.toThrow(/outside the exported repository and plugin/);
+      await expect(access(output)).rejects.toThrow();
+    }
+  });
+
+  it('rejects unexpected empty directories in the source and exported release trees', async () => {
+    const root = await temporaryRoot();
+    const sourceFixture = await sourceVerifierFixture(root);
+    const emptySourceDirectory = path.join(sourceFixture, 'assets', 'unexpected-empty-directory');
+    await mkdir(emptySourceDirectory);
+    const blockedDestination = path.join(root, 'blocked-export');
+    await expect(run(
+      process.execPath,
+      [path.join(sourceFixture, 'scripts', 'build-skills-repository.mjs'), blockedDestination],
+    )).rejects.toThrow(/empty directory is not allowed in source release scope/);
+    await expect(access(blockedDestination)).rejects.toThrow();
+
+    const exportRoot = await temporaryRoot();
+    const destination = await exportRepository(exportRoot);
+    const plugin = path.join(destination, 'plugins', 'game-development-studio');
+    await mkdir(path.join(plugin, 'unexpected-empty-directory'));
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination))
+      .rejects.toThrow(/empty directory is not allowed/);
+    const archive = path.join(exportRoot, 'plugin.zip');
+    await expect(run(pythonExecutable, ['scripts/build_release.py', archive], destination))
+      .rejects.toThrow(/empty directory is not allowed/);
+    await expect(access(archive)).rejects.toThrow();
+  }, 30_000);
+
+  it('enforces field-exact policy URLs and confined matching icons in both verifiers', async () => {
+    const sourceRootFixture = await temporaryRoot();
+    const sourceFixture = await sourceVerifierFixture(sourceRootFixture);
+    const sourceManifestPath = path.join(sourceFixture, '.codex-plugin', 'plugin.json');
+    const sourceManifest = JSON.parse(await readFile(sourceManifestPath, 'utf8')) as {
+      interface: Record<string, string>;
+    };
+    const sourcePrivacyURL = sourceManifest.interface.privacyPolicyURL;
+    const sourceTermsURL = sourceManifest.interface.termsOfServiceURL;
+    if (sourcePrivacyURL === undefined || sourceTermsURL === undefined) {
+      throw new Error('source fixture has incomplete policy URLs');
+    }
+    sourceManifest.interface.privacyPolicyURL = sourceTermsURL;
+    await writeFile(sourceManifestPath, `${JSON.stringify(sourceManifest, null, 2)}\n`);
+    await expect(run(process.execPath, [path.join(sourceFixture, 'scripts', 'verify-plugin.mjs')], sourceFixture))
+      .rejects.toThrow(/unexpected privacy URL/);
+    sourceManifest.interface.privacyPolicyURL = sourcePrivacyURL;
+    sourceManifest.interface.termsOfServiceURL = sourcePrivacyURL;
+    await writeFile(sourceManifestPath, `${JSON.stringify(sourceManifest, null, 2)}\n`);
+    await expect(run(process.execPath, [path.join(sourceFixture, 'scripts', 'verify-plugin.mjs')], sourceFixture))
+      .rejects.toThrow(/unexpected terms URL/);
+    sourceManifest.interface.termsOfServiceURL = sourceTermsURL;
+    sourceManifest.interface.supportURL = 'https://example.invalid/support';
+    await writeFile(sourceManifestPath, `${JSON.stringify(sourceManifest, null, 2)}\n`);
+    await expect(run(process.execPath, [path.join(sourceFixture, 'scripts', 'verify-plugin.mjs')], sourceFixture))
+      .rejects.toThrow(/unsupported plugin interface field: supportURL/);
+
+    const exportRoot = await temporaryRoot();
+    const destination = await exportRepository(exportRoot);
+    const manifestPath = path.join(destination, 'plugins', 'game-development-studio', '.codex-plugin', 'plugin.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      interface: Record<string, string>;
+    };
+    const privacyURL = manifest.interface.privacyPolicyURL;
+    const termsURL = manifest.interface.termsOfServiceURL;
+    if (privacyURL === undefined || termsURL === undefined) throw new Error('exported fixture has incomplete policy URLs');
+    manifest.interface.privacyPolicyURL = termsURL;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).rejects.toThrow(/unexpected privacy URL/);
+    manifest.interface.privacyPolicyURL = privacyURL;
+    manifest.interface.termsOfServiceURL = privacyURL;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).rejects.toThrow(/unexpected terms URL/);
+
+    manifest.interface.termsOfServiceURL = termsURL;
+    manifest.interface.supportURL = 'https://example.invalid/support';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination))
+      .rejects.toThrow(/unsupported plugin interface fields: \['supportURL'\]/);
+    delete manifest.interface.supportURL;
+    manifest.interface.logo = './README.md';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination))
+      .rejects.toThrow(/composer icon and logo must share the suite mark/);
+
+    manifest.interface.logo = './assets/icon.png';
+    manifest.interface.composerIcon = './../../README.md';
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).rejects.toThrow(/composerIcon escapes the plugin root/);
+  }, 30_000);
+
+  it('requires top-level and skill icon provenance hashes and 1254px dimensions', async () => {
+    const root = await temporaryRoot();
+    const destination = await exportRepository(root);
+    const plugin = path.join(destination, 'plugins', 'game-development-studio');
+    const iconPath = path.join(plugin, 'assets', 'icon.png');
+    const provenancePath = path.join(plugin, 'assets', 'icon-provenance.json');
+    const originalIcon = await readFile(iconPath);
+    const originalProvenance = await readFile(provenancePath, 'utf8');
+
+    await writeFile(iconPath, 'tampered image');
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).rejects.toThrow(/suite icon hash mismatch/);
+
+    const onePixelPng = Buffer.alloc(24);
+    onePixelPng.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+    onePixelPng.writeUInt32BE(13, 8);
+    onePixelPng.write('IHDR', 12, 'ascii');
+    onePixelPng.writeUInt32BE(1, 16);
+    onePixelPng.writeUInt32BE(1, 20);
+    const onePixelHash = createHash('sha256').update(onePixelPng).digest('hex');
+    const suiteProvenance = JSON.parse(originalProvenance) as Record<string, unknown>;
+    suiteProvenance.sha256 = onePixelHash;
+    await writeFile(iconPath, onePixelPng);
+    await writeFile(provenancePath, `${JSON.stringify(suiteProvenance, null, 2)}\n`);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).rejects.toThrow(/suite icon dimensions changed/);
+
+    await writeFile(iconPath, originalIcon);
+    await writeFile(provenancePath, originalProvenance);
+    const skillRoot = path.join(plugin, 'skills', 'game-asset-production', 'assets');
+    const skillIconPath = path.join(skillRoot, 'icon.png');
+    const skillProvenancePath = path.join(skillRoot, 'icon-provenance.json');
+    const skillProvenance = JSON.parse(await readFile(skillProvenancePath, 'utf8')) as Record<string, unknown>;
+    skillProvenance.sha256 = onePixelHash;
+    await writeFile(skillIconPath, onePixelPng);
+    await writeFile(skillProvenancePath, `${JSON.stringify(skillProvenance, null, 2)}\n`);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], destination))
+      .rejects.toThrow(/game-asset-production icon dimensions changed/);
+  }, 30_000);
+
+  it('exports only the closed roster and refuses unsafe or unexpected archive inputs', async () => {
+    const fixtures = [
+      { name: 'environment files', relative: 'assets/.env', contents: 'TOKEN=must-not-ship', message: /\.env|unexpected/ },
+      { name: 'credential files', relative: 'assets/provider.key', contents: 'private', message: /credential|unexpected/ },
+      { name: 'source files', relative: 'skills/game-development-studio/source.swift', contents: 'import Foundation', message: /source|unexpected/ },
+    ];
+
+    for (const fixture of fixtures) {
+      const root = await temporaryRoot();
+      const destination = path.join(root, 'public-skills-repository');
+      await run(process.execPath, [builder, destination]);
+      const plugin = path.join(destination, 'plugins', 'game-development-studio');
+      await writeFile(path.join(plugin, fixture.relative), fixture.contents, { flag: 'wx' });
+
+      await expect(run(pythonExecutable, ['scripts/verify.py'], destination)).rejects.toThrow(fixture.message);
+      const archive = path.join(root, 'plugin.zip');
+      await expect(run(pythonExecutable, ['scripts/build_release.py', archive], destination)).rejects.toThrow(fixture.message);
+      await expect(access(archive)).rejects.toThrow();
+    }
+
+    const symlinkRoot = await temporaryRoot();
+    const symlinkDestination = path.join(symlinkRoot, 'public-skills-repository');
+    await run(process.execPath, [builder, symlinkDestination]);
+    const symlinkPlugin = path.join(symlinkDestination, 'plugins', 'game-development-studio');
+    await symlink('README.md', path.join(symlinkPlugin, 'assets', 'README-link'));
+    await expect(run(pythonExecutable, ['scripts/verify.py'], symlinkDestination)).rejects.toThrow(/symlink/);
+    await expect(run(pythonExecutable, ['scripts/build_release.py', path.join(symlinkRoot, 'plugin.zip')], symlinkDestination))
+      .rejects.toThrow(/symlink/);
+
+    const executableRoot = await temporaryRoot();
+    const executableDestination = path.join(executableRoot, 'public-skills-repository');
+    await run(process.execPath, [builder, executableDestination]);
+    const executableManifest = path.join(
+      executableDestination,
+      'plugins',
+      'game-development-studio',
+      '.codex-plugin',
+      'plugin.json',
+    );
+    await chmod(executableManifest, 0o755);
+    await expect(run(pythonExecutable, ['scripts/verify.py'], executableDestination)).rejects.toThrow(/executable/);
+    await expect(run(pythonExecutable, ['scripts/build_release.py', path.join(executableRoot, 'plugin.zip')], executableDestination))
+      .rejects.toThrow(/executable/);
   });
 });

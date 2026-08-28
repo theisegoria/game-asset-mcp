@@ -224,7 +224,15 @@ public struct CLIInvocation: Equatable, Sendable, CustomStringConvertible, Custo
         guard let family = arguments.first?.lowercased(), gameDevFamilies.contains(family) else {
             return nil
         }
-        let segmentCount = family == "provider" || family == "tool" ? 3 : 2
+        let segmentCount: Int
+        switch family {
+        case "capabilities", "doctor":
+            segmentCount = 1
+        case "provider", "tool":
+            segmentCount = 3
+        default:
+            segmentCount = 2
+        }
         let segments = arguments.prefix(segmentCount).compactMap { segment -> String? in
             let normalized = segment
                 .lowercased()
