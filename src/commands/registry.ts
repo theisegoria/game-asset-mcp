@@ -28,6 +28,12 @@ export interface CommandCapability {
 
 type CommandHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
 
+/**
+ * Shared so every registrar rejects the same names. Duplicating the literal is
+ * how a transport quietly starts accepting a name the others refuse.
+ */
+export const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]{1,63}$/;
+
 interface RegisteredCommand {
   definition: CommandDefinition;
   handler: CommandHandler;
@@ -48,7 +54,7 @@ export class LocalCommandRegistry {
     definition: CommandDefinition<Shape>,
     handler: (args: z.infer<z.ZodObject<Shape>>) => Promise<ToolResult>,
   ): void {
-    if (!/^[a-z][a-z0-9_]{1,63}$/.test(name)) {
+    if (!TOOL_NAME_PATTERN.test(name)) {
       throw new Error(`invalid command name: ${name}`);
     }
     if (this.commands.has(name)) {

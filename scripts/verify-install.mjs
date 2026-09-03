@@ -5,7 +5,8 @@
  * only that installed copy. It spends nothing and contacts no provider.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { clearTimeout, setTimeout } from 'node:timers';
 import { access, mkdtemp, mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -101,6 +102,92 @@ function run(command, args, options = {}) {
   });
 }
 
+/**
+ * Speak MCP to the installed server over stdio, framed the way the protocol
+ * actually frames it: newline-delimited JSON, one message per line.
+ *
+ * Hand-rolled rather than driven through the SDK client on purpose. This check
+ * exists to prove the PUBLISHED artefact answers a real client, so borrowing
+ * the SDK's own framing would let a packaging mistake hide behind the same
+ * library the server uses.
+ *
+ * Returns the tool list and every line stdout produced, so the caller can
+ * assert nothing but JSON-RPC was written -- a single stray console.log
+ * desynchronises the channel and is invisible until a client hangs.
+ */
+function probeMcpOverStdio(entry, env, timeoutMs = 60_000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [entry], {
+      cwd: '/',
+      env: { ...process.env, ...env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const lines = [];
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      if (error) reject(error);
+      else resolve(value);
+    };
+
+    const timer = setTimeout(
+      () => finish(new Error(`the installed MCP server did not answer within ${timeoutMs}ms: ${stderr}`)),
+      timeoutMs,
+    );
+
+    const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8');
+      let index = stdout.indexOf('\n');
+      while (index >= 0) {
+        const line = stdout.slice(0, index).trim();
+        stdout = stdout.slice(index + 1);
+        if (line.length > 0) {
+          let parsed;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            finish(new Error(`the installed MCP server wrote non-JSON to stdout: ${line.slice(0, 200)}`));
+            return;
+          }
+          lines.push(parsed);
+          if (parsed.id === 1) {
+            send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+            send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+          }
+          if (parsed.id === 2) finish(undefined, { result: parsed.result, lines, stderr });
+        }
+        index = stdout.indexOf('\n');
+      }
+    });
+
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+    child.on('error', (error) => finish(error));
+    child.on('exit', (code) => finish(new Error(
+      `the installed MCP server exited early with code ${code}. stderr: ${stderr.slice(0, 500)}`,
+    )));
+
+    send({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'verify-install', version: '0' },
+      },
+    });
+  });
+}
+
 async function readJson(target) {
   return JSON.parse(await readFile(target, 'utf8'));
 }
@@ -162,6 +249,7 @@ async function main() {
     invariant(installedPackage.version === packRecord.version, 'installed version differs from the packed version');
 
     const requiredPublishedFiles = [
+      'dist/mcp/server.js',
       'README.md',
       'LICENSE',
       'PRIVACY.md',
@@ -196,7 +284,14 @@ async function main() {
       `published package is missing required files: ${missingPublishedFiles.join(', ')}`,
     );
 
-    const retiredPublishedFiles = [
+    // The v0.4.0 entry point stays retired: its module layout, tool surface and
+    // bin name are all different, and a stale copy alongside dist/mcp/server.js
+    // would give clients two servers claiming the same package. A client MCP
+    // config in the package root stays banned too -- config is generated per
+    // client, never shipped. This is NOT a ban on serving MCP; see the positive
+    // contract below, which is what actually keeps this honest now that a
+    // server ships again.
+    const retiredV04EntryPoints = [
       'dist/server.js',
       'dist/server.js.map',
       'dist/server.d.ts',
@@ -204,12 +299,19 @@ async function main() {
       '.app.json',
     ];
     const leakedPublishedFiles = [];
-    for (const relative of retiredPublishedFiles) {
+    for (const relative of retiredV04EntryPoints) {
       if (await exists(path.join(packageRoot, relative))) leakedPublishedFiles.push(relative);
     }
     invariant(
       leakedPublishedFiles.length === 0,
-      `retired MCP/app outputs leaked into the published package: ${leakedPublishedFiles.join(', ')}`,
+      `retired v0.4 MCP/app outputs leaked into the published package: ${leakedPublishedFiles.join(', ')}`,
+    );
+
+    const mcpEntry = path.join(packageRoot, 'dist', 'mcp', 'server.js');
+    const mcpSource = await readFile(mcpEntry, 'utf8');
+    invariant(
+      mcpSource.startsWith('#!/usr/bin/env node'),
+      'the published MCP entry point lost its shebang, so the bin cannot be executed directly',
     );
 
     const cliEntry = path.join(packageRoot, 'dist', 'cli.js');
@@ -231,6 +333,28 @@ async function main() {
     invariant(
       missingTools.length === 0 && missingFamilies.length === 0,
       `installed command contract is incomplete: operations=[${missingTools.join(', ')}] families=[${missingFamilies.join(', ')}]`,
+    );
+
+    // A negative guard that merely bans a filename stops guarding the moment
+    // someone picks a different one. Assert instead that the shipped server
+    // actually answers a client.
+    const mcpProbe = await probeMcpOverStdio(
+      path.join(packageRoot, 'dist', 'mcp', 'server.js'),
+      { ASSET_OUTPUT_DIR: outputRoot, ASSET_LOG_LEVEL: 'error' },
+    );
+    const mcpTools = (mcpProbe.result?.tools ?? []).map((tool) => tool.name).sort();
+    const missingMcpTools = EXPECTED_TOOLS.filter((name) => !mcpTools.includes(name));
+    invariant(
+      missingMcpTools.length === 0,
+      `the installed MCP server did not advertise: ${missingMcpTools.join(', ')}`,
+    );
+    invariant(
+      mcpTools.length === foundTools.length,
+      `MCP advertises ${mcpTools.length} tools but the CLI reports ${foundTools.length}: the two transports have drifted`,
+    );
+    invariant(
+      mcpProbe.lines.every((line) => line.jsonrpc === '2.0'),
+      'the installed MCP server wrote a non-JSON-RPC message to stdout',
     );
 
     const promptRequest = JSON.stringify({
@@ -315,7 +439,8 @@ async function main() {
     console.log(`packed ${packRecord.name}@${packRecord.version}: ${packRecord.entryCount} files`);
     console.log(`installed CLI: ${foundTools.length} local operations across ${families.length} command families`);
     console.log(`installed skills: ${EXPECTED_SKILLS.length}; exported skills-only repository: verified`);
-    console.log('OK: the disposable installed tarball completed free local checks without MCP or profile writes.');
+    console.log(`installed MCP server: ${mcpTools.length} tools over stdio, stdout clean`);
+    console.log('OK: the disposable installed tarball completed free local checks without profile writes.');
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }

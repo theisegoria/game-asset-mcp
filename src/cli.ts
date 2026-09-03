@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { realpathSync } from 'node:fs';
 import { parseArguments, assertKnownFlags, booleanFlag, readRequest, stringFlag, type ParsedArguments } from './cli/arguments.js';
+import { isDirectInvocation } from './util/entrypoint.js';
 import { runDoctor } from './cli/doctor.js';
 import { EventStream } from './cli/events.js';
 import { createGameDevRuntime, type GameDevRuntime } from './runtime.js';
@@ -94,6 +93,11 @@ Global options:
   --jsonl             Emit game_dev.event.v1 JSON Lines.
   --version           Print the helper version.
   --help              Show this help.
+
+  game-dev mcp serve  Serve the same local operations over MCP on stdio, for
+                      clients that cannot run a shell. Also installed as the
+                      game-dev-mcp binary. stdout becomes the JSON-RPC channel,
+                      so this command prints no result envelope.
 
 Provider credentials are read lazily from the app-provided environment or the
 documented development variables TRIPO_API_KEY and LEONARDO_API_KEY. Secrets
@@ -255,6 +259,7 @@ function capabilities(runtime: GameDevRuntime): Record<string, unknown> {
     },
     commandFamilies: [
       'capabilities',
+      'mcp',
       'doctor',
       'credentials',
       'adapter',
@@ -1204,6 +1209,15 @@ export async function main(
     return 0;
   }
 
+  // stdout is the result protocol for every other command, but an MCP server
+  // must own it outright for JSON-RPC. Handled here, beside --help and
+  // --version, because those are the only other paths that bypass the envelope.
+  if (parsed.positionals[0] === 'mcp' && parsed.positionals[1] === 'serve') {
+    const { main: serveMcp } = await import('./mcp/server.js');
+    await serveMcp();
+    return 0;
+  }
+
   const jsonLines = booleanFlag(parsed, 'jsonl');
   if (jsonLines && booleanFlag(parsed, 'json')) {
     process.stderr.write('game-dev: --json and --jsonl are mutually exclusive\n');
@@ -1270,16 +1284,7 @@ export async function main(
   }
 }
 
-function canonical(target: string): string {
-  try {
-    return realpathSync(path.resolve(target));
-  } catch {
-    return path.resolve(target);
-  }
-}
-
-const invokedPath = process.argv[1] ? canonical(process.argv[1]) : undefined;
-if (invokedPath && canonical(fileURLToPath(import.meta.url)) === invokedPath) {
+if (isDirectInvocation(import.meta.url)) {
   const controller = new AbortController();
   const signalHandlers = installProcessSignalHandlers(controller);
   main(process.argv.slice(2), controller.signal).then((code) => {
