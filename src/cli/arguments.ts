@@ -70,7 +70,7 @@ export function booleanFlag(parsed: ParsedArguments, name: string): boolean {
  */
 export const KNOWN_FLAGS: ReadonlySet<string> = new Set([
   'allow-gpu', 'allow-invalid', 'allow-performance', 'allow-unknown-license',
-  'approve-spend', 'category', 'confirm', 'description', 'destination', 'detail',
+  'approve-spend', 'category', 'client', 'confirm', 'description', 'destination', 'detail',
   'from', 'help', 'input', 'invalid', 'json', 'jsonl', 'license', 'limit',
   'manifest', 'max-seconds', 'name', 'output', 'output-dir', 'package-version',
   'preview', 'project', 'query', 'request', 'spend-limit-cents', 'stat',

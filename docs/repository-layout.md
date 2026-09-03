@@ -37,9 +37,21 @@ documentation, skills, app source, release templates, and retained history. The
 npm `files` allowlist is intentionally narrower: it omits `apps/`, native build
 outputs, tests, and repository-only release machinery.
 
-The v0.4.0 MCP implementation remains available only through its historical tag
-and commits. Current releases ship the `game-dev` CLI and must continue to reject
-stale `dist/server.js`, `.mcp.json`, and `.app.json` payloads.
+Current releases ship two transports over one registry: the `game-dev` CLI and
+an MCP server at `dist/mcp/server.js`, installed as the `game-dev-mcp` bin and
+reachable as `game-dev mcp serve`. See `docs/mcp.md`.
+
+The v0.4.0 MCP implementation stays retired and available only through its
+historical tag: its module layout, tool surface and bin name all differ, and
+shipping it beside the current server would give clients two servers claiming
+one package. Releases must therefore continue to reject stale `dist/server.js`,
+`.mcp.json`, and `.app.json` payloads. `.mcp.json` in particular is never
+shipped -- client configuration is generated per client by
+`game-dev mcp config`, because the one setting everybody gets wrong is a
+relative `ASSET_OUTPUT_DIR` and only the generator can resolve it.
+
+The Codex plugin and the macOS app repository remain skills-only and
+binary-only respectively; neither declares an MCP server.
 
 ### Skills repository and archive
 

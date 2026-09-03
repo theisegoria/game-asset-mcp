@@ -110,5 +110,7 @@ disabled, installs that exact tarball and its runtime dependencies into an
 empty temporary consumer, and exercises only the installed copy. It validates
 the library export and npm bin, representative free CLI routes, all five skill
 copies, the README asset and policy roster, the skills-repository exporter,
-and the absence of retired MCP/app entry points. It makes no provider call and
-does not install into a real user profile.
+and the absence of retired v0.4 MCP/app entry points. It also spawns the
+installed MCP server from `/`, completes a handshake, and asserts it advertises
+the same tool set as the CLI and writes nothing but JSON-RPC to stdout. It makes
+no provider call and does not install into a real user profile.

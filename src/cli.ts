@@ -3,6 +3,7 @@
 import path from 'node:path';
 import { parseArguments, assertKnownFlags, booleanFlag, readRequest, stringFlag, type ParsedArguments } from './cli/arguments.js';
 import { isDirectInvocation } from './util/entrypoint.js';
+import { buildMcpConfig, isMcpClient, MCP_CLIENTS } from './mcp/config-templates.js';
 import { runDoctor } from './cli/doctor.js';
 import { EventStream } from './cli/events.js';
 import { createGameDevRuntime, type GameDevRuntime } from './runtime.js';
@@ -93,6 +94,12 @@ Global options:
   --jsonl             Emit game_dev.event.v1 JSON Lines.
   --version           Print the helper version.
   --help              Show this help.
+
+  game-dev mcp config --client claude-code|claude-desktop|codex|gemini|generic
+                      [--spend-limit-cents N] [--json]
+                      Print ready-to-paste MCP client configuration with the
+                      absolute output directory already resolved. Paid tools
+                      stay disabled unless a spend ceiling is supplied.
 
   game-dev mcp serve  Serve the same local operations over MCP on stdio, for
                       clients that cannot run a shell. Also installed as the
@@ -369,6 +376,29 @@ async function dispatch(
 
   if (family === 'capabilities') {
     return { operation: 'capabilities', data: capabilities(runtime) };
+  }
+
+  if (family === 'mcp' && action === 'config') {
+    const client = stringFlag(parsed, 'client') ?? 'generic';
+    if (!isMcpClient(client)) {
+      throw invalidInput(`--client must be one of: ${MCP_CLIENTS.join(', ')}`);
+    }
+    // Generated rather than shipped as a static file, because the value that
+    // has to be right is the ABSOLUTE output directory, and only this process
+    // knows what it resolved to.
+    const template = buildMcpConfig({
+      client,
+      outputDir: runtime.config.outputDir,
+      spendLimitCents: optionalPositiveIntegerFlag(parsed, 'spend-limit-cents'),
+    });
+    return {
+      operation: 'mcp.config',
+      data: {
+        schema: 'game_dev.mcp_config.v1',
+        ...template,
+        outputDir: runtime.config.outputDir,
+      },
+    };
   }
   if (family === 'doctor') {
     return { operation: 'doctor', data: await runDoctor(runtime) };
