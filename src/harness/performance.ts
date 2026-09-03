@@ -48,6 +48,18 @@ export interface PerformanceComparison {
     candidate: number;
     delta: number;
     percentDelta: number | null;
+    /**
+     * Sample counts and dispersion, carried through from each summary.
+     *
+     * Without these a caller cannot tell a delta drawn from six samples from
+     * one drawn from six thousand, which makes "is this regression real?"
+     * unanswerable from the comparison alone -- and answering it wrongly is
+     * how an optimization loop chases noise.
+     */
+    baselineSamples: number;
+    candidateSamples: number;
+    baselineStandardDeviation: number;
+    candidateStandardDeviation: number;
   }>;
   hardwarePerformanceComparisonAdmitted: boolean;
   evidenceCeiling: string;
@@ -307,6 +319,10 @@ export async function compareRunPerformance(
       candidate: candidateValue,
       delta,
       percentDelta: baselineValue === 0 ? null : (delta / Math.abs(baselineValue)) * 100,
+      baselineSamples: baselineMetric.samples,
+      candidateSamples: candidateMetric.samples,
+      baselineStandardDeviation: baselineMetric.standardDeviation,
+      candidateStandardDeviation: candidateMetric.standardDeviation,
     });
   }
   return {
@@ -318,6 +334,11 @@ export async function compareRunPerformance(
     hardwarePerformanceComparisonAdmitted:
       baseline.hardwarePerformanceEvidenceAdmitted && candidate.hardwarePerformanceEvidenceAdmitted,
     evidenceCeiling:
-      'The comparison reports arithmetic deltas only. Direction, target, regression status, causal explanation, and optimization success require an explicit bounded goal; hardware claims require both runs to admit hardware-performance evidence.',
+      'The comparison reports arithmetic deltas only. Sample counts and standard deviations are ' +
+      'carried through so a caller can judge whether a delta is separable from run-to-run noise; ' +
+      'the harness performs no significance test and asserts no such separation itself. ' +
+      'Direction, target, regression status, causal explanation, and optimization success require ' +
+      'an explicit bounded goal; hardware claims require both runs to admit hardware-performance ' +
+      'evidence.',
   };
 }

@@ -120,12 +120,30 @@ describe('local game adapter and sealed run contract', () => {
     await expect(access(String(color?.heatmapPath))).resolves.toBeUndefined();
 
     const performance = await compareRunPerformance(baseline.runPath, candidate.runPath, 'median');
-    expect(performance.metrics.find((metric) => metric.metric === 'render.frame_time')).toMatchObject({
+    const frameTime = performance.metrics.find((metric) => metric.metric === 'render.frame_time');
+    expect(frameTime).toMatchObject({
       baseline: 12,
       candidate: 8,
       delta: -4,
     });
     expect(performance.hardwarePerformanceComparisonAdmitted).toBe(false);
+
+    // The summaries always knew how many samples each side had and how they
+    // were spread; the comparison dropped both. A caller reading only a delta
+    // cannot tell six samples from six thousand, so "is this regression real?"
+    // was unanswerable from the comparison alone.
+    expect(frameTime?.baselineSamples).toBeGreaterThan(0);
+    expect(frameTime?.candidateSamples).toBeGreaterThan(0);
+    expect(typeof frameTime?.baselineStandardDeviation).toBe('number');
+    expect(typeof frameTime?.candidateStandardDeviation).toBe('number');
+
+    const baselineSummary = await summarizeRunPerformance(baseline.runPath);
+    const baselineFrameTime = baselineSummary.metrics.find((m) => m.metric === 'render.frame_time');
+    expect(frameTime?.baselineSamples).toBe(baselineFrameTime?.samples);
+    expect(frameTime?.baselineStandardDeviation).toBe(baselineFrameTime?.standardDeviation);
+
+    // And the ceiling must not let a caller mistake carried numbers for a test.
+    expect(performance.evidenceCeiling).toContain('no significance test');
 
     const created = await createOptimizationGoal({
       projectRoot: project.projectRoot,
