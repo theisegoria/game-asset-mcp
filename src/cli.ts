@@ -8,7 +8,7 @@ import { runDoctor } from './cli/doctor.js';
 import { EventStream } from './cli/events.js';
 import { createGameDevRuntime, type GameDevRuntime } from './runtime.js';
 import { refreshAssetJob } from './tools/jobs.js';
-import type { ToolResult } from './tools/context.js';
+import { resultText, type ToolResult } from './tools/context.js';
 import { describeError, invalidInput } from './util/errors.js';
 import { isTerminal } from './domain/status.js';
 import {
@@ -194,7 +194,7 @@ function approvalRequired(tool: string, parsed: ParsedArguments): DispatchResult
 }
 
 function payloadFromResult(result: ToolResult): Record<string, unknown> {
-  const text = result.content[0]?.text ?? '{}';
+  const text = resultText(result);
   try {
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {

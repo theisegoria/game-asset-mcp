@@ -9,6 +9,7 @@ import {
 } from '../commands/registry.js';
 import type { ToolResult } from '../tools/context.js';
 import type { SpendGate } from './spend-gate.js';
+import { deliverVisuals, type VisualBudget } from './visuals.js';
 
 /**
  * Which tools a server instance exposes, chosen at launch.
@@ -41,6 +42,7 @@ export class McpToolRegistrar implements ToolRegistrar {
     private readonly server: McpServer,
     private readonly gate: SpendGate,
     private readonly profile: ToolProfile = 'all',
+    private readonly budget?: VisualBudget,
   ) {}
 
   registerTool<Shape extends ZodRawShape>(
@@ -70,7 +72,13 @@ export class McpToolRegistrar implements ToolRegistrar {
       // TypeScript defers it and cannot verify assignability structurally. The
       // cast asserts exactly the alias the SDK declares for this position.
       (async (args: unknown): Promise<CallToolResult> => {
-        const result = await gated(args as z.infer<z.ZodObject<Shape>>);
+        // The handler declares which pictures exist; this transport is where
+        // they become bytes a model can see. The CLI, reading the same result,
+        // still just prints their paths.
+        const result = await deliverVisuals(
+          await gated(args as z.infer<z.ZodObject<Shape>>),
+          this.budget,
+        );
         return {
           content: result.content,
           ...(result.isError ? { isError: true } : {}),
