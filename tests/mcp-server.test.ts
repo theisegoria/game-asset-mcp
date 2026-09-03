@@ -22,7 +22,7 @@ import { createMcpServer, type McpServerOptions } from '../src/mcp/server.js';
 import { createGameDevRuntime } from '../src/runtime.js';
 import { LocalCommandRegistry } from '../src/commands/registry.js';
 import { registerAssetCommands } from '../src/commands/register.js';
-import { spendingToolNames } from '../src/domain/spend.js';
+import { FREE_TOOLS, isSpendingTool, spendingToolNames } from '../src/domain/spend.js';
 
 let work: string;
 const open: Array<() => Promise<void>> = [];
@@ -255,18 +255,32 @@ describe('the money gate fails closed', () => {
 });
 
 describe('the spend classification covers every registered tool', () => {
-  it('leaves no tool unclassified as free or spending', async () => {
+  it('names every tool in exactly one of the free or spending lists', async () => {
     const runtime = await createGameDevRuntime({ outputDir: work });
     const registry = new LocalCommandRegistry();
     registerAssetCommands(registry, runtime.context);
 
-    // `isSpendingTool` defaults an unknown name to SPENDING at a pessimistic
-    // 50c, which is the safe direction but silent. This makes the coverage
-    // observable: a new tool must be named in one list or the other.
+    // `isSpendingTool` answers from TOOL_COSTS alone, so a tool nobody
+    // classified reads as FREE by omission -- silent, and the wrong direction
+    // for anything that could ever contact a paid provider. This makes the
+    // coverage observable: adding a tool without classifying it fails here.
     const spending = new Set(spendingToolNames());
-    const unclassified = registry.names().filter((name) => !spending.has(name));
+    const unclassified = registry.names()
+      .filter((name) => !spending.has(name) && !FREE_TOOLS.has(name));
 
-    expect(unclassified.length + spending.size).toBeGreaterThan(0);
-    expect(registry.names().every((name) => typeof name === 'string')).toBe(true);
+    expect(unclassified).toEqual([]);
+  });
+
+  it('classifies the harness analysis tools as free, so the gate lets them run', async () => {
+    const { client } = await connect({ spendMode: 'off' });
+    const { tools } = await client.listTools();
+
+    // These are local arithmetic over sealed evidence. If they were ever
+    // treated as paid, the default-off gate would make visual debugging
+    // unusable over MCP, which is the entire point of exposing them.
+    for (const name of ['analyze_capture_run', 'compare_capture_visuals', 'verify_capture_run']) {
+      expect(tools.map((tool) => tool.name)).toContain(name);
+      expect(isSpendingTool(name), `${name} must not be a spending tool`).toBe(false);
+    }
   });
 });

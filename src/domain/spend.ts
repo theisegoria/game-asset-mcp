@@ -90,6 +90,14 @@ export const FREE_TOOLS: ReadonlySet<string> = new Set([
   'validate_game_asset',
   'get_spend_report',
   'batch_prepare_meshes',
+  // Harness analysis: local arithmetic over sealed evidence. Free in the sense
+  // this set means -- no provider is contacted -- even though
+  // compare_capture_visuals writes heatmaps.
+  'verify_capture_run',
+  'analyze_capture_run',
+  'compare_capture_visuals',
+  'summarize_run_performance',
+  'compare_run_performance',
 ]);
 
 export function isSpendingTool(tool: string): boolean {

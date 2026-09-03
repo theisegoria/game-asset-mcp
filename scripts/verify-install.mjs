@@ -19,6 +19,11 @@ const NPM_INSTALL_FETCH_TIMEOUT_MS = 20_000;
 const NPM_INSTALL_TIMEOUT_MS = 60_000;
 
 const EXPECTED_TOOLS = [
+  'analyze_capture_run',
+  'compare_capture_visuals',
+  'compare_run_performance',
+  'summarize_run_performance',
+  'verify_capture_run',
   'preview_asset_prompt',
   'create_game_prop',
   'generate_asset_reference',
