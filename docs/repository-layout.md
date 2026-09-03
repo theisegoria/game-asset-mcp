@@ -24,8 +24,9 @@ distribution a closed, reviewable roster.
 
 The supported automation boundary is `game-dev` with `game_dev.result.v1` and
 `game_dev.event.v1`. The macOS app launches a configured local CLI and validates
-its identity and protocol; it does not embed Node.js, Blender, provider services,
-or the target game.
+its identity and protocol. Its complete bundle embeds a direct Node runtime and
+a closed, exact-rostered build of that CLI; it does not embed Blender, provider
+services, or the target game.
 
 ## Public distributions
 

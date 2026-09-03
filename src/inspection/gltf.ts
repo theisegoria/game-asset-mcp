@@ -202,8 +202,27 @@ export async function inspectGltf(filePath: string): Promise<AssetInspection> {
   }
 
   if (geometry.primitiveCount === 0) {
-    warnings.push('no mesh primitives: the file contains no drawable geometry');
+    // The undrawn counts were computed and returned but never described, so a
+    // file whose meshes all sit outside the default scene reported only "no
+    // drawable geometry" — true, and useless, because it names the symptom
+    // rather than the one-line cause.
+    if (geometry.undrawnTriangleCount > 0) {
+      warnings.push(
+        `no drawable geometry in the default scene, though ${geometry.undrawnTriangleCount} ` +
+          `triangles across ${geometry.undrawnMeshCount} meshes exist elsewhere in the file: ` +
+          're-export with the mesh in the active scene, or run `game-dev asset normalize`',
+      );
+    } else {
+      warnings.push('no mesh primitives: the file contains no drawable geometry');
+    }
   } else {
+    if (geometry.undrawnTriangleCount > 0) {
+      warnings.push(
+        `${geometry.undrawnTriangleCount} triangles across ${geometry.undrawnPrimitiveCount} ` +
+          'primitives are not reachable from the default scene: they ship in the file and cost ' +
+          'download size and memory without ever appearing',
+      );
+    }
     if (geometry.missingUv > 0) {
       warnings.push(
         `${geometry.missingUv} of ${geometry.primitiveCount} primitives have no TEXCOORD_0: ` +

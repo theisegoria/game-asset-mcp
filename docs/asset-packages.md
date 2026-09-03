@@ -67,6 +67,7 @@ Always verify immediately before project admission.
 ```sh
 game-dev catalog list --query beacon --json
 game-dev catalog show PACKAGE_ID --json
+game-dev catalog admit /path/to/package --json
 game-dev catalog rebuild --json
 game-dev catalog rebuild --confirm --jsonl
 ```
@@ -75,6 +76,13 @@ The SQLite catalog accelerates search by name, category, license, provider,
 source job, and validation state. It is derived from package manifests.
 Rebuild plans first; a confirmed rebuild preserves the previous database as a
 backup before replacement.
+
+`catalog admit` indexes one already-built package directory into the catalog.
+`package build` admits what it builds, so this is for a package that exists on
+disk but is not yet indexed — a package produced on another machine, or one
+restored from a backup. It writes to the catalog immediately rather than
+planning first, because it only re-derives an index row from a manifest the
+package already contains; the package itself is never modified.
 
 ## Project admission
 

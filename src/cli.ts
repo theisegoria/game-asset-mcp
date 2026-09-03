@@ -3,7 +3,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
-import { parseArguments, booleanFlag, readRequest, stringFlag, type ParsedArguments } from './cli/arguments.js';
+import { parseArguments, assertKnownFlags, booleanFlag, readRequest, stringFlag, type ParsedArguments } from './cli/arguments.js';
 import { runDoctor } from './cli/doctor.js';
 import { EventStream } from './cli/events.js';
 import { createGameDevRuntime, type GameDevRuntime } from './runtime.js';
@@ -62,6 +62,7 @@ Usage:
   game-dev package verify <package-id|path> [--json]
   game-dev catalog list [--query TEXT] [--category CATEGORY] [--valid|--invalid] [--json]
   game-dev catalog show <package-id> [--json]
+  game-dev catalog admit <package-path> [--jsonl]
   game-dev catalog rebuild --confirm [--jsonl]
   game-dev vendor admit <package-id|path> --project PATH [--destination RELATIVE] [--confirm]
   game-dev launch <package-id|path> --with finder|quicklook|blender [--confirm]
@@ -1216,6 +1217,7 @@ export async function main(
 
   try {
     signal?.throwIfAborted();
+    assertKnownFlags(parsed);
     const spendLimitCents = optionalPositiveIntegerFlag(parsed, 'spend-limit-cents');
     runtime = await createGameDevRuntime({
       outputDir: stringFlag(parsed, 'output-dir'),

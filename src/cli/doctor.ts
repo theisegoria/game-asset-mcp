@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GameDevRuntime } from '../runtime.js';
 import { findBlender, packagedScript } from '../util/blender.js';
+import { defaultCodexSkillsRoot, listSkillBundle } from '../skills/bundle.js';
 import { GAME_DEV_VERSION } from '../version.js';
 
 interface DoctorCheck {
@@ -99,24 +100,30 @@ export async function runDoctor(runtime: GameDevRuntime): Promise<Record<string,
     });
   }
 
-  const skillRoot = path.join(process.env.CODEX_HOME?.trim() || path.join(process.env.HOME ?? '', '.codex'), 'skills');
-  const expectedSkills = [
-    'game-development-studio',
-    'game-asset-authoring',
-    'game-asset-vendoring',
-    'game-visual-debug',
-    'game-performance-optimize',
-  ];
-  const skillStates = await Promise.all(expectedSkills.map(async (name) => ({
-    name,
-    installed: await exists(path.join(skillRoot, name, 'SKILL.md')),
-  })));
-  checks.push({
-    id: 'codex-skills',
-    status: skillStates.every((skill) => skill.installed) ? 'pass' : 'warning',
-    detail: skillRoot,
-    evidence: { skills: skillStates },
-  });
+  // Both the install root and the expected ids come from the same bundle the
+  // installer writes, because a hardcoded list here drifted: three of five ids
+  // no longer shipped, so this check reported a warning that `skill install all`
+  // could never clear. Deriving them closes the drift rather than the symptom.
+  try {
+    const bundle = await listSkillBundle();
+    const skillRoot = defaultCodexSkillsRoot();
+    const skillStates = await Promise.all(bundle.skills.map(async (skill) => ({
+      name: skill.id,
+      installed: await exists(path.join(skillRoot, skill.id, 'SKILL.md')),
+    })));
+    checks.push({
+      id: 'codex-skills',
+      status: skillStates.every((skill) => skill.installed) ? 'pass' : 'warning',
+      detail: skillRoot,
+      evidence: { skills: skillStates },
+    });
+  } catch (error) {
+    checks.push({
+      id: 'codex-skills',
+      status: 'fail',
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   const invoked = process.argv[1] ? path.resolve(process.argv[1]) : fileURLToPath(import.meta.url);
   checks.push({
