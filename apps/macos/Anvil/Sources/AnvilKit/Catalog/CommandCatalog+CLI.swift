@@ -411,6 +411,20 @@ extension CommandCatalog {
             createsDurableJob: true
         ),
         CommandSpec(
+            id: "probe.install",
+            path: ["probe", "install"],
+            title: "Install the probe SDK",
+            summary: "Vendor the probe SDK sources into a project. The harness never compiles them; the game's build does.",
+            arguments: [
+                .flag("project", "Project", kind: .directory, required: true),
+                .flag("destination", "Destination (relative)")
+            ],
+            authorities: [.confirm],
+            lane: .project("project"),
+            route: .setup,
+            createsDurableJob: true
+        ),
+        CommandSpec(
             id: "adapter.inspect",
             path: ["adapter", "inspect"],
             title: "Inspect an adapter",

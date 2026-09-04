@@ -53,6 +53,25 @@ enum PreviewScenes {
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
             },
+            PreviewRenderer.Scene("06-capture-inspector", height: 1_400) {
+                Shell(selection: .visual) {
+                    VStack(alignment: .leading, spacing: Anvil.Space.roomy) {
+                        WorkspaceHeading(
+                            title: WorkspaceRoute.visual.title,
+                            subtitle: WorkspaceRoute.visual.subtitle,
+                            symbolName: WorkspaceRoute.visual.symbolName
+                        )
+                        CaptureInspector(
+                            analysis: PreviewFixtures.analysis(),
+                            ceiling: EvidenceCeiling(PreviewFixtures.analysis().evidence),
+                            image: { _ in PreviewFrames.baseline() }
+                        )
+                    }
+                    .padding(Anvil.Space.roomy)
+                    .frame(maxWidth: Anvil.readableWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+            },
             PreviewRenderer.Scene("04-runs-light", colorScheme: .light) {
                 Shell(selection: .runs) {
                     RunsWorkspace(

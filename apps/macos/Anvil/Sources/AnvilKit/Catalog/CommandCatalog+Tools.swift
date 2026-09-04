@@ -211,6 +211,53 @@ extension CommandCatalog {
             durable: true,
             authorities: [.confirm, .allowGPU, .allowPerformance]
         ),
+        // Project onboarding reached the registry: adapter templates and the probe SDK,
+        // each as a plan step and an install step. The installs write into a project the
+        // user owns, so they carry confirm, and they serialize on that project.
+        tool(
+            "list_adapter_templates",
+            title: "Adapter templates",
+            summary: "List the capture adapter templates that ship with the toolchain.",
+            route: .setup
+        ),
+        tool(
+            "plan_adapter_install",
+            title: "Plan an adapter install",
+            summary: "Show what installing an adapter template into a project would write. Writes nothing.",
+            route: .setup
+        ),
+        tool(
+            "install_adapter_template",
+            title: "Install an adapter",
+            summary: "Write an adapter manifest into a project, refusing to overwrite a different one.",
+            lane: .project("project"),
+            route: .setup,
+            durable: true,
+            authorities: [.confirm]
+        ),
+        tool(
+            "plan_probe_install",
+            title: "Plan a probe SDK install",
+            summary: "Show what vendoring the probe SDK sources into a project would write. Writes nothing.",
+            route: .setup
+        ),
+        tool(
+            "install_probe_sdk",
+            title: "Install the probe SDK",
+            summary: "Vendor the probe SDK sources into a project so its engine can produce sealed captures.",
+            lane: .project("project"),
+            route: .setup,
+            durable: true,
+            authorities: [.confirm]
+        ),
+        tool(
+            "render_asset_contact_sheet",
+            title: "Contact sheet",
+            summary: "Draw an asset's UV layout and textures as one image, so the asset can be looked at rather than described.",
+            lane: .workspaceWrite,
+            route: .mesh,
+            durable: true
+        ),
         tool(
             "summarize_run_performance",
             title: "Summarize performance",

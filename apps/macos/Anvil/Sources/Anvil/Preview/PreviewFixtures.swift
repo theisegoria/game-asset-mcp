@@ -236,4 +236,33 @@ enum PreviewFixtures {
             heatmapsGenerated: true
         )
     }
+
+    static func analysis() -> CaptureAnalysis {
+        func raster(_ kind: AttachmentKind, _ path: String, min: [Double], mean: [Double], max: [Double], lum: Double, ids: Int? = nil) -> RasterAnalysis {
+            RasterAnalysis(frameIndex: 0, kind: kind, path: path, width: 1_920, height: 1_080,
+                           minimum: min, maximum: max, mean: mean, meanLuminance: lum, alphaCoverage: 1, uniqueSemanticIDs: ids)
+        }
+        return CaptureAnalysis(
+            runID: "run_1770000000_a91f",
+            runPath: "\(workspace.path)/.game-dev/runs/run_1770000000_a91f",
+            adapterID: "genome-game",
+            scenarioID: "gbuffer-matrix",
+            rasters: [
+                raster(.color, "color", min: [3, 4, 9, 255], mean: [61, 68, 96, 255], max: [230, 178, 110, 255], lum: 71.2),
+                raster(.objectID, "object_id", min: [0, 0, 0, 255], mean: [12, 3, 0, 255], max: [41, 0, 0, 255], lum: 6.1, ids: 4),
+                raster(.normal, "normal", min: [128, 128, 255, 255], mean: [128, 128, 255, 255], max: [128, 128, 255, 255], lum: 150),
+                raster(.wireframe, "wireframe", min: [0, 0, 0, 255], mean: [14, 14, 14, 255], max: [255, 255, 255, 255], lum: 14)
+            ],
+            floatRasters: [
+                FloatRasterAnalysis(frameIndex: 0, kind: .depth, path: "depth.bin", previewPath: "depth.png",
+                                    pixelFormat: .d32f, width: 1_920, height: 1_080, samples: 2_073_600,
+                                    minimum: 0.0421, maximum: 0.9987, mean: 0.612, nonFiniteSamples: 37)
+            ],
+            evidenceCeiling: """
+            Every raster attachment in this sealed run was decoded and measured. Float buffers were \
+            read at capture precision. This establishes what the frames contain; it does not prove \
+            GPU execution, does not judge the frames, and no human reviewed them.
+            """
+        )
+    }
 }
