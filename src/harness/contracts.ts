@@ -466,6 +466,21 @@ export type RunArtifact = z.infer<typeof runArtifactSchema>;
 export const metricStatisticsSchema = z.object({
   metric: metricIdentifier,
   unit: z.string().min(1).max(48),
+  /**
+   * What the reported values already were when the harness received them.
+   *
+   * Load-bearing, and previously ignored. A capture that emits both a p99 and
+   * per-frame samples for one metric was pooling them into a single
+   * distribution, so the reported "median" was the median of a mixed bag --
+   * silently wrong, and inherited by every goal evaluated against it.
+   */
+  aggregation: z.enum(['sample', 'mean', 'median', 'p95', 'p99', 'min', 'max']).default('sample'),
+  /**
+   * True when these values arrived already aggregated. A median of p99s is
+   * not a statistic of anything, so the distribution fields are not computed
+   * across them.
+   */
+  preAggregated: z.boolean().default(false),
   samples: z.number().int().min(1),
   min: z.number().finite(),
   max: z.number().finite(),

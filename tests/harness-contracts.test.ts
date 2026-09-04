@@ -142,8 +142,16 @@ describe('local game adapter and sealed run contract', () => {
     expect(frameTime?.baselineSamples).toBe(baselineFrameTime?.samples);
     expect(frameTime?.baselineStandardDeviation).toBe(baselineFrameTime?.standardDeviation);
 
-    // And the ceiling must not let a caller mistake carried numbers for a test.
-    expect(performance.evidenceCeiling).toContain('no significance test');
+    // This fixture reports a single measurement per run. The honest verdict for
+    // a delta drawn from one sample is that the data cannot support one --
+    // reporting "separable" here is exactly how a loop starts chasing noise.
+    expect(frameTime?.separability).toBe('underpowered');
+    expect(frameTime?.standardErrorOfDifference).toBeNull();
+    expect(frameTime?.aggregation).toBe('sample');
+
+    // And the ceiling must not let a caller mistake the screen for a test.
+    expect(performance.evidenceCeiling).toContain('NOT a hypothesis test');
+    expect(performance.evidenceCeiling).toContain('autocorrelated');
 
     const created = await createOptimizationGoal({
       projectRoot: project.projectRoot,
