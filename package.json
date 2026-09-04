@@ -93,7 +93,8 @@
     "vitest": "^4.1.11"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "repository": {
     "type": "git",

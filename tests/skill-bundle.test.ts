@@ -49,8 +49,7 @@ describe('packaged Codex skill suite', () => {
     const first = await listSkillBundle();
     const second = await listSkillBundle();
     expect(first).toEqual(second);
-    expect(first).toMatchObject({ schema: 'game_dev.skill_bundle.v1', version: '1.0.2' });
-    expect(GAME_DEV_VERSION).toBe('1.0.2');
+    expect(first).toMatchObject({ schema: 'game_dev.skill_bundle.v1', version: GAME_DEV_VERSION });
     expect(first.bundleSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(first.skills.map((skill) => skill.id)).toEqual([
       'game-development-studio',
@@ -146,7 +145,7 @@ describe('packaged Codex skill suite', () => {
         schema: 'game_dev.result.v1',
         operation: 'skill.list',
         ok: true,
-        data: { schema: 'game_dev.skill_bundle.v1', version: '1.0.2' },
+        data: { schema: 'game_dev.skill_bundle.v1', version: GAME_DEV_VERSION },
       },
     });
     expect(listed.payload.data.skills).toHaveLength(5);

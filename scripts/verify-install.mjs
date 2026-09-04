@@ -378,7 +378,7 @@ async function main() {
     const skillEnvelope = JSON.parse(skillRun.stdout);
     invariant(skillEnvelope.ok === true, 'installed skill listing failed');
     invariant(skillEnvelope.data?.schema === 'game_dev.skill_bundle.v1', 'installed skill schema changed');
-    invariant(skillEnvelope.data?.version === '1.0.2', 'installed skill bundle version changed');
+    invariant(skillEnvelope.data?.version === packRecord.version, 'installed skill bundle version changed');
     invariant(skillEnvelope.data?.skills?.length === EXPECTED_SKILLS.length, 'installed skill count changed');
     invariant(
       skillEnvelope.data.skills.every((skill) => typeof skill.source !== 'string'),
@@ -423,7 +423,7 @@ async function main() {
       exportedManifest.mcpServers === undefined && exportedManifest.apps === undefined,
       'installed builder exported an MCP server or app',
     );
-    invariant(exportedManifest.version === '1.0.2', 'installed builder exported the wrong plugin version');
+    invariant(exportedManifest.version === packRecord.version, 'installed builder exported the wrong plugin version');
     invariant(
       exportedManifest.interface?.screenshots === undefined,
       'installed builder exported screenshots in a no-UI plugin',

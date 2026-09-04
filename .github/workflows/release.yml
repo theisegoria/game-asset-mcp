@@ -1,0 +1,80 @@
+name: Release
+
+# Publishes the npm package when a version tag is pushed. Everything the
+# tag claims is checked before anything leaves the machine: the tag must
+# match package.json, every version site must agree, and the full
+# prepublishOnly gate must pass -- including verify-install, which packs the
+# real tarball, installs it into an empty consumer, and drives the installed
+# MCP server over stdio.
+#
+# Publishing uses OIDC trusted publishing with provenance. This repository's
+# whole identity is closed rosters and hashed artefacts; a package without a
+# verifiable link back to the commit that built it would contradict that.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+
+      - name: The tag must name the version the package states
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "tag v$tag does not match package.json version $version" >&2
+            exit 1
+          fi
+          if ! grep -q "^## $version" CHANGELOG.md; then
+            echo "CHANGELOG.md has no '## $version' section" >&2
+            exit 1
+          fi
+
+      - name: Every version site must agree
+        run: npx vitest run tests/version-parity.test.ts --no-file-parallelism
+
+      - name: Full publish gate
+        run: npm run prepublishOnly
+
+      - name: Audit the roster that would ship
+        run: npm pack --dry-run --json
+
+  publish-npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

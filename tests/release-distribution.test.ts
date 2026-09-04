@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { GAME_DEV_VERSION } from '../src/version.js';
 
 const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
 const builder = path.join(sourceRoot, 'scripts', 'build-skills-repository.mjs');
@@ -160,7 +161,7 @@ describe('public release distribution', () => {
     const verification = await run(pythonExecutable, ['scripts/verify.py'], destination);
     expect(JSON.parse(verification.stdout)).toMatchObject({
       schema: 'game_dev.public_plugin_verification.v1',
-      version: '1.0.2',
+      version: GAME_DEV_VERSION,
       screenshots: 0,
       marketingScreenshots: 3,
     });
@@ -175,7 +176,7 @@ describe('public release distribution', () => {
       path.join(plugin, '.codex-plugin', 'plugin.json'),
       'utf8',
     )) as { version?: string; interface?: Record<string, unknown> };
-    expect(manifest.version).toBe('1.0.2');
+    expect(manifest.version).toBe(GAME_DEV_VERSION);
     expect(manifest).not.toHaveProperty('mcpServers');
     expect(manifest).not.toHaveProperty('apps');
     expect(manifest.interface?.screenshots).toBeUndefined();
