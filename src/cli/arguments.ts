@@ -69,7 +69,7 @@ export function booleanFlag(parsed: ParsedArguments, name: string): boolean {
  * call sites and fails if the two drift apart.
  */
 export const KNOWN_FLAGS: ReadonlySet<string> = new Set([
-  'allow-gpu', 'allow-invalid', 'allow-performance', 'allow-unknown-license',
+  'aa-tolerance', 'allow-gpu', 'allow-invalid', 'allow-performance', 'allow-unknown-license',
   'approve-spend', 'category', 'client', 'confirm', 'description', 'destination', 'detail',
   'dry-run', 'from', 'help', 'input', 'invalid', 'json', 'jsonl', 'license', 'limit',
   'manifest', 'max-seconds', 'name', 'output', 'output-dir', 'package-version',

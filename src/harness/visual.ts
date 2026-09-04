@@ -66,6 +66,11 @@ export interface VisualComparison {
   baselineRunId: string;
   candidateRunId: string;
   threshold: number;
+  /**
+   * Radius, in pixels, within which a difference is treated as the same content
+   * landing elsewhere rather than as a change. 0 compares strictly.
+   */
+  antialiasTolerancePixels: number;
   pairs: Array<{
     identity: string;
     kind: CaptureAttachment['kind'];
@@ -372,12 +377,52 @@ function semanticBreakdown(
   };
 }
 
+/**
+ * Smallest channel difference between a pixel and any pixel within `radius` of
+ * the same position in the other image.
+ *
+ * Anti-aliasing, a sub-pixel camera nudge and a driver's rasterisation rule all
+ * move colour by one pixel without changing what is drawn. Compared strictly,
+ * every edge in the frame reports as changed, the diff cries wolf on a
+ * correct render, and a harness that cries wolf gets switched off. Requiring
+ * the difference to hold against a whole neighbourhood keeps genuine structural
+ * change while ignoring where an edge landed.
+ */
+function neighbourhoodDelta(
+  from: RasterImage,
+  to: RasterImage,
+  x: number,
+  y: number,
+  radius: number,
+): number {
+  const offset = (y * from.width + x) * 4;
+  let best = Number.POSITIVE_INFINITY;
+  for (let dy = -radius; dy <= radius; dy += 1) {
+    const ny = y + dy;
+    if (ny < 0 || ny >= to.height) continue;
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      const nx = x + dx;
+      if (nx < 0 || nx >= to.width) continue;
+      const other = (ny * to.width + nx) * 4;
+      let worst = 0;
+      for (let channel = 0; channel < 4; channel += 1) {
+        worst = Math.max(worst, Math.abs((to.data[other + channel] ?? 0) - (from.data[offset + channel] ?? 0)));
+        if (worst >= best) break;
+      }
+      if (worst < best) best = worst;
+      if (best === 0) return 0;
+    }
+  }
+  return best;
+}
+
 function diffRasters(
   baseline: RasterImage,
   candidate: RasterImage,
   threshold: number,
   baselineIds?: RasterImage,
   candidateIds?: RasterImage,
+  antialiasTolerancePixels = 0,
 ): {
   meanAbsoluteError: number;
   rootMeanSquaredError: number;
@@ -412,7 +457,18 @@ function diffRasters(
     const candidateLuminance = 0.2126 * (candidate.data[offset] ?? 0) +
       0.7152 * (candidate.data[offset + 1] ?? 0) + 0.0722 * (candidate.data[offset + 2] ?? 0);
     luminanceDelta += candidateLuminance - baseLuminance;
-    if (pixelMaximum > threshold) changed += 1;
+    // Symmetric on purpose. A one-directional check calls a pixel unchanged if
+    // it merely resembles SOMETHING nearby, which quietly hides an object
+    // appearing next to a similar one.
+    const tolerated = antialiasTolerancePixels > 0 && pixelMaximum > threshold
+      ? Math.max(
+        neighbourhoodDelta(baseline, candidate, pixel % baseline.width,
+          Math.floor(pixel / baseline.width), antialiasTolerancePixels),
+        neighbourhoodDelta(candidate, baseline, pixel % baseline.width,
+          Math.floor(pixel / baseline.width), antialiasTolerancePixels),
+      )
+      : pixelMaximum;
+    if (tolerated > threshold) changed += 1;
     heatmap[offset] = pixelMaximum;
     heatmap[offset + 1] = Math.round(pixelMaximum * 0.15);
     heatmap[offset + 2] = 0;
@@ -452,8 +508,14 @@ export async function compareRunVisuals(options: {
   candidateRunPath: string;
   threshold?: number;
   outputPath?: string;
+  antialiasTolerancePixels?: number;
 }): Promise<VisualComparison> {
   const threshold = options.threshold ?? 0;
+  const antialiasTolerancePixels = options.antialiasTolerancePixels ?? 0;
+  if (!Number.isInteger(antialiasTolerancePixels)
+    || antialiasTolerancePixels < 0 || antialiasTolerancePixels > 4) {
+    throw invalidInput('antialias tolerance must be an integer from 0 through 4');
+  }
   if (!Number.isInteger(threshold) || threshold < 0 || threshold > 255) {
     throw invalidInput('visual diff threshold must be an integer from 0 through 255');
   }
@@ -521,7 +583,9 @@ export async function compareRunVisuals(options: {
       findObjectIds(baseline, baselineEntry.frame.index),
       findObjectIds(candidate, candidateEntry.frame.index),
     ]);
-    const diff = diffRasters(baselineImage, candidateImage, threshold, baselineIds, candidateIds);
+    const diff = diffRasters(
+      baselineImage, candidateImage, threshold, baselineIds, candidateIds, antialiasTolerancePixels,
+    );
     let heatmapPath: string | undefined;
     if (outputPath) {
       heatmapPath = path.join(outputPath, `${safeFileComponent(identity)}.heatmap.png`);
@@ -552,6 +616,7 @@ export async function compareRunVisuals(options: {
     baselineRunId: baseline.runId,
     candidateRunId: candidate.runId,
     threshold,
+    antialiasTolerancePixels,
     pairs,
     verdict: 'changed',
     summary: [],

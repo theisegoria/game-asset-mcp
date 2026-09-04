@@ -240,6 +240,12 @@ export function registerHarnessTools(server: ToolRegistrar, ctx: ToolContext): v
         candidate: runReference,
         threshold: z.number().int().min(0).max(255).default(0)
           .describe('A channel delta at or below this counts as unchanged.'),
+        antialiasTolerancePixels: z.number().int().min(0).max(4).default(0)
+          .describe(
+            'Treat a difference as the same content landing elsewhere if a matching pixel exists '
+            + 'within this radius. Use 1 for a real renderer: anti-aliasing and sub-pixel camera '
+            + 'jitter otherwise make every edge in the frame report as changed. 0 compares strictly.',
+          ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
@@ -260,6 +266,7 @@ export function registerHarnessTools(server: ToolRegistrar, ctx: ToolContext): v
         baselineRunPath,
         candidateRunPath,
         threshold: args.threshold,
+        antialiasTolerancePixels: args.antialiasTolerancePixels,
         outputPath,
       });
       const visuals: VisualAttachment[] = comparison.pairs

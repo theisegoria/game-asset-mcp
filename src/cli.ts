@@ -76,7 +76,7 @@ Usage:
                     [--allow-gpu] [--allow-performance] [--jsonl]
   game-dev capture verify <run-id|path> [--json]
   game-dev visual analyze <run-id|path> [--json]
-  game-dev visual compare <baseline-run> <candidate-run> [--threshold 0..255]
+  game-dev visual compare <baseline-run> <candidate-run> [--threshold 0..255] [--aa-tolerance 0..4]
                   [--output NEW_DIRECTORY] [--jsonl]
   game-dev performance summarize <run-id|path> [--json]
   game-dev performance compare <baseline-run> <candidate-run> [--stat median] [--json]
@@ -980,6 +980,7 @@ async function dispatch(
       baselineRunPath: baseline,
       candidateRunPath: candidate,
       threshold: nonNegativeIntegerFlag(parsed, 'threshold', 0),
+      antialiasTolerancePixels: nonNegativeIntegerFlag(parsed, 'aa-tolerance', 0),
       ...(output ? { outputPath: path.resolve(output) } : {}),
     });
     if (comparison.outputPath) events.emit('artifact', { kind: 'visual_comparison', path: comparison.outputPath });
