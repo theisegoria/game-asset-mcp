@@ -77,7 +77,7 @@ async function readJson<T>(file: string): Promise<T> {
 const expectedLicenseAssets = [
   'brotli-1.2.0-MIT.txt',
   'c-ares-1.34.6-MIT.txt',
-  'game-development-studio-1.0.1-MIT.txt',
+  'game-development-studio-1.0.2-MIT.txt',
   'icu4c-78.3-ICU.txt',
   'libuv-1.51.0-BSD-2-Clause-tree.h.txt',
   'libuv-1.51.0-ISC-inet.c.txt',
@@ -188,8 +188,10 @@ describe('macOS bundled-runtime third-party notices', () => {
       path.join(distributionRoot, 'THIRD_PARTY_PROVENANCE.json'),
     );
 
-    expect(notice).toContain('`game-dev` CLI 1.0.1');
-    expect(notice).toContain('Node.js 25.2.1');
+    // Derived, not pinned. A literal here is the same staleness one level up:
+    // it went on asserting 1.0.1 after the package shipped 1.0.2.
+    expect(notice).toContain(`\`game-dev\` CLI ${provenance.bundledRuntime.gameDevCli.version}`);
+    expect(notice).toContain(`Node.js ${provenance.bundledRuntime.node.version}`);
     expect(notice).toContain('18 non-system dynamic libraries');
     expect(notice).not.toContain('No provider SDK, game engine, Blender build, Node.js runtime, or `game-dev` CLI is bundled');
     expect(provenance.schema).toBe('game_dev.macos_bundled_third_party_provenance.v1');
@@ -198,7 +200,11 @@ describe('macOS bundled-runtime third-party notices', () => {
       bundleIdentifier: 'com.theisegoria.GameDevelopmentStudio',
       licenseDirectory: 'ThirdPartyLicenses',
     });
-    expect(provenance.bundledRuntime.gameDevCli.version).toBe('1.0.1');
+    // The bundled CLI version is asserted against package.json in its own test
+    // rather than pinned here. A literal in this position is what let the
+    // record sit at 1.0.1 through the 1.0.2 release: the test agreed with the
+    // stale value, so it confirmed the bug instead of catching it.
+    expect(provenance.bundledRuntime.gameDevCli.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(provenance.bundledRuntime.node.version).toBe('25.2.1');
     expect(provenance.bundledRuntime.nonSystemDylibCount).toBe(18);
     expect(provenance.bundledRuntime.nonSystemDylibs.flatMap((item) => item.runtimeFiles).sort())
@@ -225,6 +231,35 @@ describe('macOS bundled-runtime third-party notices', () => {
       expect(createHash('sha256').update(contents).digest('hex')).toBe(asset.sha256);
       expect(asset.source).not.toHaveLength(0);
       expect(asset.scope).not.toHaveLength(0);
+    }
+  });
+
+  it('bundles the CLI version the package actually ships', async () => {
+    // The 1.0.2 release bumped package.json and left this record pinned at
+    // 1.0.1. verify-macos-runtime-provenance asserts the two match, so staging
+    // the app died on an unrelated-looking line and the CI macos-app job went
+    // red -- for a stale legal record, not a build problem.
+    const [provenance, packageJson] = await Promise.all([
+      readJson<Provenance>(path.join(distributionRoot, 'THIRD_PARTY_PROVENANCE.json')),
+      readJson<{ version: string }>(path.join(sourceRoot, 'package.json')),
+    ]);
+
+    expect(provenance.bundledRuntime.gameDevCli.version).toBe(packageJson.version);
+  });
+
+  it('names only legal assets that the corpus actually contains', async () => {
+    // Nothing cross-checked these two lists, so licenseAssets could name a file
+    // that had been renamed out from under it and stay silently wrong.
+    const provenance = await readJson<Provenance>(
+      path.join(distributionRoot, 'THIRD_PARTY_PROVENANCE.json'),
+    );
+    const corpus = new Set(provenance.legalAssets.map((asset) => asset.path));
+
+    for (const [component, record] of Object.entries(provenance.bundledRuntime)) {
+      const named = (record as { licenseAssets?: string[] }).licenseAssets ?? [];
+      for (const asset of named) {
+        expect(corpus, `bundledRuntime.${component} names ${asset}`).toContain(asset);
+      }
     }
   });
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,6 +150,54 @@ function usage() {
   return 'Usage: node scripts/verify-macos-runtime-provenance.mjs --runtime <GameDevelopmentStudioRuntime> --provenance <THIRD_PARTY_PROVENANCE.json> --node-version <vX.Y.Z>';
 }
 
+/**
+ * Check that every legal asset the provenance names is actually on disk, with
+ * the bytes it claims.
+ *
+ * Nothing validated this before. The pure binding validator never touches the
+ * filesystem, so `legalAssets[].path` and `licenseAssets[]` were free text: the
+ * 1.0.2 release bumped the CLI version and left the record naming
+ * `game-development-studio-1.0.1-MIT.txt`, and the only symptom was an
+ * unrelated version assertion failing further down. A shipped legal record
+ * pointing at a file that does not exist should fail loudly and immediately.
+ */
+export async function verifyLegalAssets(provenancePath, provenance) {
+  const legalRoot = path.join(path.dirname(path.resolve(provenancePath)), 'legal', 'third-party-licenses');
+  const entries = provenance.legalAssets;
+  invariant(Array.isArray(entries) && entries.length > 0, 'provenance legalAssets must be a non-empty array');
+
+  const known = new Set();
+  for (const entry of entries) {
+    invariant(isPlainObject(entry), 'each legalAssets entry must be an object');
+    const { path: name, sha256, bytes } = entry;
+    invariant(typeof name === 'string' && name.length > 0, 'legalAssets entry path must be a non-empty string');
+    invariant(!name.includes('/') && !name.includes('\\') && name !== '.' && name !== '..',
+      `legalAssets entry path must be a bare filename: ${name}`);
+
+    let contents;
+    try {
+      contents = await readFile(path.join(legalRoot, name));
+    } catch {
+      throw new Error(`provenance names a legal asset that is not present: ${name}`);
+    }
+    invariant(contents.byteLength === bytes,
+      `legal asset ${name} is ${contents.byteLength} bytes but provenance records ${bytes}`);
+    const digest = createHash('sha256').update(contents).digest('hex');
+    invariant(digest === sha256,
+      `legal asset ${name} hashes to ${digest} but provenance records ${sha256}`);
+    known.add(name);
+  }
+
+  for (const [component, record] of Object.entries(provenance.bundledRuntime ?? {})) {
+    for (const asset of (isPlainObject(record) ? record.licenseAssets : undefined) ?? []) {
+      invariant(known.has(asset),
+        `bundledRuntime.${component} names license asset ${asset}, which is not in legalAssets`);
+    }
+  }
+
+  return entries.length;
+}
+
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) {
@@ -161,12 +210,16 @@ async function main() {
     readFile(path.join(runtimeRoot, 'payload', 'app', 'package.json'), 'utf8').then(JSON.parse),
     readFile(path.resolve(options.provenance), 'utf8').then(JSON.parse),
   ]);
-  console.log(JSON.stringify(validateMacOSRuntimeProvenanceBinding({
-    runtimeRoster,
-    runtimePackage,
-    provenance,
-    nodeVersion: options.nodeVersion,
-  })));
+  const legalAssetsVerified = await verifyLegalAssets(options.provenance, provenance);
+  console.log(JSON.stringify({
+    ...validateMacOSRuntimeProvenanceBinding({
+      runtimeRoster,
+      runtimePackage,
+      provenance,
+      nodeVersion: options.nodeVersion,
+    }),
+    legalAssetsVerified,
+  }));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

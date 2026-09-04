@@ -17,7 +17,7 @@ The app is a native macOS application built with Apple's Swift and SwiftUI
 toolchain and links Apple system frameworks supplied by macOS. It also carries
 a closed local runtime. That runtime includes:
 
-- `game-dev` CLI 1.0.1, licensed under MIT;
+- `game-dev` CLI 1.0.2, licensed under MIT;
 - Node.js 25.2.1, including Node's complete distributed `LICENSE` notice;
 - the five lockfile-pinned production npm packages below; and
 - the 18 non-system dynamic libraries below.

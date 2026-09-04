@@ -42,11 +42,11 @@
   },
   "bundledRuntime": {
     "gameDevCli": {
-      "version": "1.0.1",
+      "version": "1.0.2",
       "license": "MIT",
       "evidence": "The staged CLI package manifest and root package-lock entry.",
       "licenseAssets": [
-        "game-development-studio-1.0.1-MIT.txt"
+        "game-development-studio-1.0.2-MIT.txt"
       ]
     },
     "node": {
@@ -291,10 +291,10 @@
       "scope": "Bundled dylib dependency"
     },
     {
-      "path": "game-development-studio-1.0.1-MIT.txt",
+      "path": "game-development-studio-1.0.2-MIT.txt",
       "sha256": "915b4af615fcf20f331b7aa09822ea6dff49cc8e39c1ab5860ed5b91fe4aa79d",
       "bytes": 1066,
-      "source": "CLI package root LICENSE at version 1.0.1",
+      "source": "CLI package root LICENSE at version 1.0.2",
       "scope": "Bundled game-dev CLI"
     },
     {

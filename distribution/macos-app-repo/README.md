@@ -17,7 +17,7 @@ This first release has a deliberately narrow platform contract:
 
 - macOS 26.0 or later
 - Apple silicon (`arm64`) only
-- the bundled, roster-verified `game-dev` CLI 1.0.1 and its pinned Node runtime
+- the bundled, roster-verified `game-dev` CLI 1.0.2 and its pinned Node runtime
 
 Blender is needed only for CLI operations that explicitly use Blender. Tripo
 or Leonardo credentials are needed only for the selected provider's paid
