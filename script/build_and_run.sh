@@ -183,8 +183,26 @@ APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 /usr/bin/xattr -cr "$APP_BUNDLE"
 node "$RUNTIME_VERIFIER" --runtime "$APP_RESOURCES/$RUNTIME_NAME" >/dev/null
-/usr/bin/xattr -d com.apple.FinderInfo "$APP_BUNDLE" 2>/dev/null || true
-/usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+
+# The clear above is already stale by the time codesign looks. When the checkout
+# lives under an iCloud-synced path, the File Provider re-attaches
+# com.apple.FinderInfo and com.apple.fileprovider.fpfs#P to the bundle root
+# during the window the runtime verifier occupies, and the signature check then
+# fails with "resource fork, Finder information, or similar detritus not
+# allowed". Clearing only com.apple.FinderInfo, only at the bundle root, missed
+# both the second attribute and everything below the root.
+#
+# It is a race, so it presents as intermittent rather than broken: clear
+# recursively immediately before the check, and retry once if the provider wins
+# anyway.
+verify_bundle_signature() {
+  /usr/bin/xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+  /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+}
+verify_bundle_signature || {
+  sleep 1
+  verify_bundle_signature
+}
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
