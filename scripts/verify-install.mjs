@@ -22,6 +22,7 @@ const EXPECTED_TOOLS = [
   'analyze_capture_run',
   'compare_capture_visuals',
   'plan_scenario_run',
+  'render_asset_contact_sheet',
   'run_scenario',
   'compare_run_performance',
   'summarize_run_performance',

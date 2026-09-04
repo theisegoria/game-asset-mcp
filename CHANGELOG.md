@@ -54,6 +54,9 @@ capture contract, and the release machinery to publish it. See pull request #1.
   allowlist; seven new attachment kinds.
 - The probe SDK (`probe/`): a C99 library engines compile in to produce valid
   bundles, validated against the harness rather than against golden files.
+- `render_asset_contact_sheet`: the UV layout and every bound texture of a
+  GLB as images, pure JS, so mirrored islands, layouts outside the unit square
+  and flat-colour textures can be seen rather than inferred from counts.
 - `--dry-run` on `package build` and `catalog admit`.
 - `scripts/set-version.mjs`, a version-parity test, and a tag-driven release
   workflow that publishes with npm provenance.

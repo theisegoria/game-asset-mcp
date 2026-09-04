@@ -103,6 +103,9 @@ export const FREE_TOOLS: ReadonlySet<string> = new Set([
   // by the separate execution authority, not by the spend ceiling.
   'plan_scenario_run',
   'run_scenario',
+  // A diagram of local accessor and texture data. Writes thumbnails into the
+  // workspace, contacts no provider.
+  'render_asset_contact_sheet',
 ]);
 
 export function isSpendingTool(tool: string): boolean {
