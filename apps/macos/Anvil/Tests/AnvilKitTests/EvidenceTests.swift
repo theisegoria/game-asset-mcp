@@ -15,7 +15,8 @@ struct EvidenceTests {
         gpu: Bool = false,
         completionIdentity: Bool = false,
         hardwareTiming: Bool = false,
-        admitted: Bool = false
+        admitted: Bool = false,
+        refused: [String] = []
     ) -> RunEvidence {
         RunEvidence(
             rendererClass: renderer,
@@ -24,6 +25,7 @@ struct EvidenceTests {
             adapterReportedGpuCompletionIdentity: completionIdentity,
             adapterReportedHardwarePerformance: hardwareTiming,
             hardwarePerformanceEvidenceAdmitted: admitted,
+            refusedAdapterClaims: refused,
             evidenceCeiling: "This run does not prove GPU execution."
         )
     }
@@ -40,19 +42,27 @@ struct EvidenceTests {
             gpu: true,
             completionIdentity: true,
             hardwareTiming: true,
-            admitted: false
+            admitted: false,
+            refused: ["gpu execution", "gpu completion identity", "hardware performance"]
         )
         #expect(!refused.mayPresentAsGpuExecution)
         #expect(!refused.mayPresentHardwareTimings)
-        #expect(refused.refusedClaims == ["GPU execution", "GPU completion identity", "hardware timing"])
+        // Recorded by the harness rather than reconstructed here by diffing the
+        // capture manifest against the run.
+        #expect(refused.refusedClaims == ["gpu execution", "gpu completion identity", "hardware performance"])
     }
 
     @Test("A refused claim is surfaced rather than silently dropped")
     func refusedClaimsAreVisible() {
         // An adapter asserting hardware execution from a CPU renderer is a defect in the
         // adapter. Dropping the claim quietly would hide it from the person who could fix it.
-        let refused = evidence(renderer: .software, softwareLane: true, gpu: true)
-        #expect(refused.refusedClaims == ["GPU execution"])
+        let refused = evidence(
+            renderer: .software,
+            softwareLane: true,
+            gpu: true,
+            refused: ["gpu execution"]
+        )
+        #expect(refused.refusedClaims == ["gpu execution"])
 
         let honest = evidence(renderer: .software, softwareLane: true)
         #expect(honest.refusedClaims.isEmpty, "A software lane that claimed nothing has nothing to report")
@@ -91,10 +101,12 @@ struct EvidenceTests {
             "adapterReportedGpuCompletionIdentity": .bool(false),
             "adapterReportedHardwarePerformance": .bool(false),
             "hardwarePerformanceEvidenceAdmitted": .bool(false),
+            "refusedAdapterClaims": .array([.string("gpu execution")]),
             "evidenceCeiling": .string("Software lane. No GPU evidence.")
         ]))
         #expect(decoded.rendererClass == .software)
         #expect(decoded.softwareRasterizedLane)
+        #expect(decoded.refusedClaims == ["gpu execution"])
     }
 
     @Test("A missing evidence field fails rather than defaulting")
@@ -251,5 +263,116 @@ struct EvidenceTests {
         // output. Accepting one would let an engine report a histogram that disagrees
         // with its own pixels; Anvil computes it from the decoded bytes instead.
         #expect(AttachmentKind(rawValue: "histogram") == nil)
+    }
+
+    // MARK: - Float attachments
+
+    @Test("Row stride is honoured, because real APIs pad")
+    func rowStrideIsHonoured() {
+        // wgpu aligns copy rows to 256 bytes. Reading width * bytesPerPixel walks into
+        // the padding and reports it as data.
+        let padded = FloatFormat(
+            pixelFormat: .r32f,
+            width: 60,
+            height: 40,
+            rowStride: 256
+        )
+        #expect(padded.isPadded)
+        #expect(padded.byteOffset(ofRow: 3) == 768)
+        // Multiplying by width would have given 720, landing mid-row.
+        #expect(padded.byteOffset(ofRow: 3) != 3 * padded.width * padded.pixelFormat.bytesPerPixel)
+
+        let tight = FloatFormat(pixelFormat: .r32f, width: 64, height: 40, rowStride: 256)
+        #expect(!tight.isPadded)
+    }
+
+    @Test("Non-finite samples are surfaced as a defect, not smoothed over")
+    func nonFiniteSamplesAreFlagged() {
+        let broken = FloatRasterAnalysis(
+            frameIndex: 0,
+            kind: .depth,
+            path: "frames/0000/depth.bin",
+            pixelFormat: .d32f,
+            width: 100,
+            height: 100,
+            samples: 10_000,
+            minimum: 0.1,
+            maximum: 0.98,
+            mean: 0.42,
+            nonFiniteSamples: 37
+        )
+        // The range looks perfectly healthy; the frame is not.
+        #expect(broken.hasNonFiniteSamples)
+        let diagnosis = try? #require(broken.nonFiniteDiagnosis)
+        #expect(diagnosis?.contains("uninitialised clear") == true)
+
+        let clean = FloatRasterAnalysis(
+            frameIndex: 0,
+            kind: .depth,
+            path: "frames/0000/depth.bin",
+            pixelFormat: .d32f,
+            width: 100,
+            height: 100,
+            samples: 10_000,
+            minimum: 0.1,
+            maximum: 0.98,
+            mean: 0.42,
+            nonFiniteSamples: 0
+        )
+        #expect(!clean.hasNonFiniteSamples)
+        #expect(clean.nonFiniteDiagnosis == nil)
+    }
+
+    @Test("A probe value is measured from the float buffer, never from the preview")
+    func measurementComesFromTheBuffer() {
+        // The preview is lossy by construction: a visualisation, not the measurement.
+        // Reading a hover value off it would report the picture instead of the data.
+        let raster = FloatRasterAnalysis(
+            frameIndex: 0,
+            kind: .depth,
+            path: "frames/0000/depth.bin",
+            previewPath: "frames/0000/depth.png",
+            pixelFormat: .d32f,
+            width: 8,
+            height: 8,
+            samples: 64,
+            minimum: 0,
+            maximum: 1,
+            mean: 0.5,
+            nonFiniteSamples: 0
+        )
+        #expect(raster.isMeasurementSource)
+        #expect(raster.previewPath != nil, "The preview is for looking at, and is cited as such")
+    }
+
+    @Test("A float raster decodes from an analysis entry")
+    func floatRasterDecodes() throws {
+        let decoded = try FloatRasterAnalysis(payload: .object([
+            "frameIndex": .number(2),
+            "kind": .string("depth"),
+            "path": .string("frames/0002/depth.bin"),
+            "previewPath": .string("frames/0002/depth.png"),
+            "pixelFormat": .string("r16f"),
+            "width": .number(1_920),
+            "height": .number(1_080),
+            "samples": .number(2_073_600),
+            "minimum": .number(0.0),
+            "maximum": .number(1.0),
+            "mean": .number(0.734),
+            "nonFiniteSamples": .number(0)
+        ]))
+        #expect(decoded.pixelFormat == .r16f)
+        #expect(decoded.kind == .depth)
+        #expect(decoded.previewPath == "frames/0002/depth.png")
+        #expect(!decoded.hasNonFiniteSamples)
+    }
+
+    @Test("Every float pixel format states its size")
+    func pixelFormatSizes() {
+        #expect(FloatPixelFormat.r16f.bytesPerPixel == 2)
+        #expect(FloatPixelFormat.r32f.bytesPerPixel == 4)
+        #expect(FloatPixelFormat.d32f.bytesPerPixel == 4)
+        #expect(FloatPixelFormat.r32u.bytesPerPixel == 4)
+        #expect(FloatPixelFormat.rgba32f.bytesPerPixel == 16)
     }
 }

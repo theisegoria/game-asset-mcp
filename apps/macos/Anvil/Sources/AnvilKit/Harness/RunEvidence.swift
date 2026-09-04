@@ -19,6 +19,13 @@ public struct RunEvidence: Sendable, Hashable, Codable {
     public let adapterReportedGpuCompletionIdentity: Bool
     public let adapterReportedHardwarePerformance: Bool
     public let hardwarePerformanceEvidenceAdmitted: Bool
+    /// Claims the adapter made that the harness then refused, recorded by the harness
+    /// rather than reconstructed here.
+    ///
+    /// Reading this beats diffing the capture manifest against the run: the harness
+    /// knows what it overwrote, and a UI comparing two documents to infer it would be
+    /// re-deriving a fact that was already established.
+    public let refusedAdapterClaims: [String]
     /// The toolchain's own words for what this run does not establish. Shown verbatim;
     /// never paraphrased, because a paraphrase is a new claim.
     public let evidenceCeiling: String
@@ -30,6 +37,7 @@ public struct RunEvidence: Sendable, Hashable, Codable {
         adapterReportedGpuCompletionIdentity: Bool,
         adapterReportedHardwarePerformance: Bool,
         hardwarePerformanceEvidenceAdmitted: Bool,
+        refusedAdapterClaims: [String] = [],
         evidenceCeiling: String
     ) {
         self.rendererClass = rendererClass
@@ -38,6 +46,7 @@ public struct RunEvidence: Sendable, Hashable, Codable {
         self.adapterReportedGpuCompletionIdentity = adapterReportedGpuCompletionIdentity
         self.adapterReportedHardwarePerformance = adapterReportedHardwarePerformance
         self.hardwarePerformanceEvidenceAdmitted = hardwarePerformanceEvidenceAdmitted
+        self.refusedAdapterClaims = refusedAdapterClaims
         self.evidenceCeiling = evidenceCeiling
     }
 
@@ -65,6 +74,10 @@ public struct RunEvidence: Sendable, Hashable, Codable {
             adapterReportedGpuCompletionIdentity: try flag("adapterReportedGpuCompletionIdentity"),
             adapterReportedHardwarePerformance: try flag("adapterReportedHardwarePerformance"),
             hardwarePerformanceEvidenceAdmitted: try flag("hardwarePerformanceEvidenceAdmitted"),
+            refusedAdapterClaims: {
+                guard case let .array(raw)? = fields["refusedAdapterClaims"] else { return [] }
+                return raw.compactMap(\.stringValue)
+            }(),
             evidenceCeiling: ceiling
         )
     }
@@ -96,17 +109,12 @@ public struct RunEvidence: Sendable, Hashable, Codable {
         hardwarePerformanceEvidenceAdmitted
     }
 
-    /// A claim the adapter made that the harness then refused, if any. Worth surfacing:
-    /// an adapter asserting hardware execution from a CPU renderer is a defect in the
-    /// adapter, and silently dropping the claim hides it.
-    public var refusedClaims: [String] {
-        guard softwareRasterizedLane else { return [] }
-        var refused: [String] = []
-        if adapterReportedGpuExecution { refused.append("GPU execution") }
-        if adapterReportedGpuCompletionIdentity { refused.append("GPU completion identity") }
-        if adapterReportedHardwarePerformance { refused.append("hardware timing") }
-        return refused
-    }
+    /// Claims the adapter made that the harness refused.
+    ///
+    /// Surfaced rather than dropped: an adapter asserting hardware execution from a CPU
+    /// renderer is a defect in the adapter, and discarding the claim silently means
+    /// whoever could fix it never learns it was made.
+    public var refusedClaims: [String] { refusedAdapterClaims }
 
     /// One line stating what this run establishes about its renderer.
     public var rendererSummary: String {
