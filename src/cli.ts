@@ -19,7 +19,7 @@ import {
 } from './version.js';
 import type { DurableArtifact, DurableJob } from './jobs/durable.js';
 import { isSpendingTool } from './domain/spend.js';
-import { buildAssetPackage, readAssetPackage, type AssetProvenanceInput } from './packages/format.js';
+import { buildAssetPackage, planAssetPackage, readAssetPackage, type AssetProvenanceInput } from './packages/format.js';
 import { AssetCatalog } from './packages/catalog.js';
 import { admitVendorPackage } from './packages/vendor.js';
 import { executeLaunchPlan, planPackageLaunch, type LaunchApplication } from './packages/launcher.js';
@@ -57,12 +57,12 @@ Usage:
   game-dev asset validate <model.glb> [--request POLICY.json] [--json]
   game-dev asset normalize <model.glb> [--output PATH] [--request OPTIONS.json] [--jsonl]
   game-dev asset preview-usdz <model.glb> --output PATH [--jsonl]
-  game-dev package build <model.glb> --name NAME [--version 1.0.0] [--license SPDX] [--request METADATA.json]
+  game-dev package build <model.glb> --name NAME [--version 1.0.0] [--license SPDX] [--request METADATA.json] [--dry-run]
   game-dev package show <package-id|path> [--json]
   game-dev package verify <package-id|path> [--json]
   game-dev catalog list [--query TEXT] [--category CATEGORY] [--valid|--invalid] [--json]
   game-dev catalog show <package-id> [--json]
-  game-dev catalog admit <package-path> [--jsonl]
+  game-dev catalog admit <package-path> [--dry-run] [--jsonl]
   game-dev catalog rebuild --confirm [--jsonl]
   game-dev vendor admit <package-id|path> --project PATH [--destination RELATIVE] [--confirm]
   game-dev launch <package-id|path> --with finder|quicklook|blender [--confirm]
@@ -727,7 +727,7 @@ async function dispatch(
     const previewPath = stringFlag(parsed, 'preview') ?? request.previewPath;
     const provenance = request.provenance;
     const policy = request.policy;
-    const built = await buildAssetPackage({
+    const buildOptions = {
       packagesRoot: runtime.config.packagesDir,
       sourcePath,
       name: requestedName,
@@ -743,7 +743,48 @@ async function dispatch(
         ? { policy: policy as Partial<GameAssetPolicy> }
         : {}),
       maximumBytes: runtime.config.maxDownloadBytes,
-    });
+    };
+
+    // `package build` writes without --confirm, unlike every other write path.
+    // Gating it now would break the README, docs/asset-packages.md and a skill
+    // reference that all invoke it bare -- and it only ever writes inside the
+    // tool's own workspace, content-addressed and idempotent. So it gets a plan
+    // step instead of a gate: the rule is that confirmation is required for
+    // writes OUTSIDE the workspace, and this states it accurately rather than
+    // enforcing it by breaking callers.
+    if (booleanFlag(parsed, 'dry-run')) {
+      const plan = await planAssetPackage(buildOptions);
+      return {
+        operation: 'package.build',
+        data: {
+          schema: 'game_dev.package_build_plan.v1',
+          dryRun: true,
+          sourcePath: plan.sourcePath,
+          sourceSha256: plan.sourceIdentity.sha256,
+          sourceBytes: plan.sourceIdentity.bytes,
+          assetId: plan.assetId,
+          version: plan.version,
+          license: plan.license,
+          destination: plan.destination,
+          destinationExists: plan.destinationExists,
+          validation: plan.validation,
+          wouldWrite: !plan.destinationExists,
+          evidence: {
+            staticInspectionCompleted: true,
+            policyValidationCompleted: true,
+            packageIdComputed: false,
+            nothingWritten: true,
+          },
+          evidenceCeiling:
+            'A plan reports what the build would validate and where it would land. The packageId ' +
+            'hashes the staged file set, so it cannot be computed without performing the write ' +
+            'this plan exists to avoid. When the destination already holds a package, the build ' +
+            'reuses it if identical and refuses if not.',
+        },
+      };
+    }
+
+    const built = await buildAssetPackage(buildOptions);
     const catalogAsset = await withCatalog(runtime, (catalog) => catalog.admit(built.packagePath));
     events.emit('artifact', {
       kind: 'asset_package',
@@ -825,6 +866,20 @@ async function dispatch(
 
   if (family === 'catalog' && action === 'admit') {
     const packagePath = path.resolve(requirePositional(parsed, 2, 'package path'));
+    if (booleanFlag(parsed, 'dry-run')) {
+      const plan = await withCatalog(runtime, (catalog) => catalog.planAdmission(packagePath));
+      return {
+        operation: 'catalog.admit',
+        data: {
+          schema: 'game_dev.catalog_admission_plan.v1',
+          dryRun: true,
+          packagePath,
+          alreadyIndexed: plan.alreadyIndexed,
+          asset: plan.asset,
+          evidence: { manifestRead: true, nothingWritten: true },
+        },
+      };
+    }
     const asset = await withCatalog(runtime, (catalog) => catalog.admit(packagePath));
     return { operation: 'catalog.admit', data: asset as unknown as Record<string, unknown> };
   }
