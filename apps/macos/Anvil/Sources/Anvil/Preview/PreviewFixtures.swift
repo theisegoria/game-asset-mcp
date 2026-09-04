@@ -153,4 +153,87 @@ enum PreviewFixtures {
             data: data
         )
     }
+
+    static func comparisonEvidence() -> EvidenceCeiling {
+        EvidenceCeiling(RunEvidence(
+            rendererClass: .hardware,
+            softwareRasterizedLane: false,
+            adapterReportedGpuExecution: true,
+            adapterReportedGpuCompletionIdentity: true,
+            adapterReportedHardwarePerformance: false,
+            hardwarePerformanceEvidenceAdmitted: false,
+            evidenceCeiling: """
+            Two sealed runs were verified and their rasters compared deterministically. \
+            This establishes that pixels changed and where; it does not establish why, \
+            does not judge whether the change is a defect, and no human reviewed the frames.
+            """
+        ))
+    }
+
+    static func comparison() -> VisualComparison {
+        VisualComparison(
+            baselineRunID: "run_1770000000_a91f",
+            candidateRunID: "run_1770000420_c3b8",
+            threshold: 4,
+            pairs: [
+                ComparisonPair(
+                    identity: "0000/color",
+                    kind: .color,
+                    comparable: true,
+                    baselinePath: "frames/0000/color.png",
+                    candidatePath: "frames/0000/color.png",
+                    width: 1_920,
+                    height: 1_080,
+                    meanAbsoluteError: 6.42,
+                    rootMeanSquaredError: 21.7,
+                    maximumChannelDelta: 255,
+                    changedPixelRatio: 0.0731,
+                    meanLuminanceDelta: -1.8,
+                    meanAbsoluteEdgeDelta: 11.3,
+                    meanSSIM: 0.874,
+                    worstSSIMWindow: .init(x: 1_360, y: 240, ssim: 0.21),
+                    semanticRegions: [
+                        .init(objectID: "crate_02", pixels: 6_400, meanAbsoluteError: 61.2, changedPixelRatio: 0.98, pixelsRetained: 0, pixelsLost: 6_400, pixelsGained: 0),
+                        .init(objectID: "barrel_01", pixels: 8_000, meanAbsoluteError: 34.8, changedPixelRatio: 0.44, pixelsRetained: 6_240, pixelsLost: 1_760, pixelsGained: 1_760),
+                        .init(objectID: "floor", pixels: 412_000, meanAbsoluteError: 0.9, changedPixelRatio: 0.012, pixelsRetained: 412_000, pixelsLost: 0, pixelsGained: 0),
+                        .init(objectID: "crate_01", pixels: 8_100, meanAbsoluteError: 0.0, changedPixelRatio: 0, pixelsRetained: 8_100, pixelsLost: 0, pixelsGained: 0)
+                    ],
+                    objectsDisappeared: ["crate_02"],
+                    heatmapPath: "diff/0000/color.heatmap.png"
+                ),
+                ComparisonPair(
+                    identity: "0000/object_id",
+                    kind: .objectID,
+                    comparable: true,
+                    baselinePath: "frames/0000/object_id.png",
+                    candidatePath: "frames/0000/object_id.png",
+                    width: 1_920,
+                    height: 1_080,
+                    meanAbsoluteError: 3.1,
+                    changedPixelRatio: 0.041,
+                    meanSSIM: 0.93
+                ),
+                ComparisonPair(
+                    identity: "0000/depth",
+                    kind: .depth,
+                    comparable: false,
+                    baselinePath: "frames/0000/depth.png",
+                    candidatePath: "frames/0000/depth.png",
+                    reason: "Baseline is 1920×1080 and candidate is 1280×720."
+                )
+            ],
+            verdict: .changed,
+            summary: [
+                "7.31% of colour pixels changed beyond the threshold of 4.",
+                "crate_02 is present in the baseline and absent from the candidate.",
+                "barrel_01 lost and gained equal coverage, which reads as movement rather than a shading change.",
+                "Edges moved and structure diverged (SSIM 0.87), so this is not only shading."
+            ],
+            unmatchedCandidate: ["0001/color"],
+            outputPath: "/Users/dev/Anvil/.game-dev/diff/run_1770000420_c3b8",
+            evidenceCeiling: comparisonEvidence().text,
+            semanticObjectRegionsCompared: true,
+            heatmapsGenerated: true
+        )
+    }
 }

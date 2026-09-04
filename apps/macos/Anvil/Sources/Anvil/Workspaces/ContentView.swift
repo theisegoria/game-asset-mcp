@@ -26,6 +26,8 @@ struct ContentView: View {
         switch route {
         case .overview:
             HealthWorkspace()
+        case .visual:
+            VisualWorkspace(runs: model.runs.runs)
         case .runs:
             RunsWorkspace(
                 runs: model.runs.runs,

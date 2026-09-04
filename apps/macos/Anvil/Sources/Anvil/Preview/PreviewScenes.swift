@@ -32,6 +32,27 @@ enum PreviewScenes {
                     ).content
                 }
             },
+            PreviewRenderer.Scene("05-diff-side-by-side", height: 1_500) {
+                Shell(selection: .visual) {
+                    VStack(alignment: .leading, spacing: Anvil.Space.roomy) {
+                        WorkspaceHeading(
+                            title: WorkspaceRoute.visual.title,
+                            subtitle: WorkspaceRoute.visual.subtitle,
+                            symbolName: WorkspaceRoute.visual.symbolName
+                        )
+                        DiffViewer(
+                            comparison: PreviewFixtures.comparison(),
+                            ceiling: PreviewFixtures.comparisonEvidence(),
+                            images: { _ in
+                                (PreviewFrames.baseline(), PreviewFrames.candidate(), PreviewFrames.heatmap())
+                            }
+                        )
+                    }
+                    .padding(Anvil.Space.roomy)
+                    .frame(maxWidth: Anvil.readableWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+            },
             PreviewRenderer.Scene("04-runs-light", colorScheme: .light) {
                 Shell(selection: .runs) {
                     RunsWorkspace(
