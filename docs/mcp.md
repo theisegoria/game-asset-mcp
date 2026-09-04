@@ -74,12 +74,25 @@ once approves every future charge through it.
 `GAME_DEV_MCP_PROFILE=readonly` registers only tools annotated read-only: no
 spending, no writes. Useful for exploratory sessions. The default is `all`.
 
-## What is not here yet
+## Capture and analysis over MCP
 
-The capture, visual-debugging and performance commands are currently CLI-only —
-they live in the CLI dispatch rather than the shared registry, so MCP does not
-expose them. Moving them is planned. Until then, drive visual debugging through
-the CLI.
+The harness is on MCP: `verify_capture_run`, `analyze_capture_run`,
+`compare_capture_visuals`, `summarize_run_performance`,
+`compare_run_performance`, `plan_scenario_run` and `run_scenario`, plus
+`render_asset_contact_sheet` for assets. Frames, heatmaps, UV plots and
+texture thumbnails come back as images the model can see.
+
+`run_scenario` starts a process the project declares, so it is gated twice.
+The handler refuses unless `GAME_DEV_MCP_ALLOW_EXECUTION=1` is in the server
+environment — plus `GAME_DEV_MCP_ALLOW_GPU=1` or
+`GAME_DEV_MCP_ALLOW_PERFORMANCE=1` when the resolved plan declares those
+capabilities — and that check lives in the handler because the same tool is
+reachable through `game-dev tool call`. The transport then asks you to confirm
+each run, because the CLI demands `--confirm` per invocation and a standing
+environment variable is not that. `plan_scenario_run` needs no authority and
+executes nothing; call it first.
+
+## What is not here yet
 
 Streamable HTTP is not implemented. When it lands it will be loopback-only with
 an `Origin` check and a bearer token. SSE is deprecated and will not be added.

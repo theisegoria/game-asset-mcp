@@ -148,6 +148,10 @@ No provider call is made during installation, build, test, `doctor`, or
 
 ## Quick start
 
+New here? [Your first capture](docs/quickstart.md) goes from an empty
+directory to a sealed capture your AI can verify, look at and diff — ten
+minutes, no GPU, using the example engine that ships with the probe SDK.
+
 Choose a workspace and inspect the local environment:
 
 ```sh
