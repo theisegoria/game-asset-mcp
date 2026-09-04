@@ -109,6 +109,24 @@ export function describePair(pair: Pair): string[] {
   // than cause. Silhouettes largely unchanged while brightness shifts is the
   // signature of a shading change; the converse is the signature of geometry
   // moving.
+  // SSIM separates "everything shifted slightly" from "something here is
+  // structurally different", which a mean error cannot.
+  if (pair.meanSSIM !== undefined && changed > 0) {
+    const worst = pair.worstSSIMWindow;
+    if (pair.meanSSIM > 0.99 && worst && worst.ssim > 0.95) {
+      lines.push(
+        `Structural similarity is ${pair.meanSSIM.toFixed(4)} and no window falls below ` +
+        `${worst.ssim.toFixed(4)}: the difference is spread thinly rather than concentrated in ` +
+        'a structurally altered region.',
+      );
+    } else if (worst) {
+      lines.push(
+        `Structural similarity is ${pair.meanSSIM.toFixed(4)}, worst at (${worst.x}, ${worst.y}) ` +
+        `where it drops to ${worst.ssim.toFixed(4)}.`,
+      );
+    }
+  }
+
   const edge = pair.meanAbsoluteEdgeDelta ?? 0;
   const luminance = Math.abs(pair.meanLuminanceDelta ?? 0);
   if (changed > 0) {

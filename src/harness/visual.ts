@@ -7,6 +7,7 @@ import { invalidInput, invalidState } from '../util/errors.js';
 import { validateCaptureManifest } from './capture.js';
 import { GAME_DEV_VISUAL_COMPARISON_SCHEMA, type CaptureAttachment, type CaptureManifest } from './contracts.js';
 import { describeComparison, type ComparisonVerdict } from './describe-comparison.js';
+import { structuralSimilarity } from './ssim.js';
 import { verifyRunBundle } from './run-bundle.js';
 
 export interface RasterAnalysis {
@@ -85,6 +86,14 @@ export interface VisualComparison {
     changedPixelRatio?: number;
     meanLuminanceDelta?: number;
     meanAbsoluteEdgeDelta?: number;
+    /**
+     * Structural similarity, 1.0 for identical. Unlike a mean error it can
+     * separate a uniform brightness shift from one object becoming
+     * unrecognisable, which can produce the same average.
+     */
+    meanSSIM?: number;
+    /** Where structure differs most, so a caller has somewhere to look. */
+    worstSSIMWindow?: { x: number; y: number; ssim: number };
     semanticRegions?: Array<{
       objectId: string;
       pixels: number;
@@ -430,6 +439,8 @@ function diffRasters(
   changedPixelRatio: number;
   meanLuminanceDelta: number;
   meanAbsoluteEdgeDelta: number;
+  meanSSIM?: number;
+  worstSSIMWindow?: { x: number; y: number; ssim: number };
   semanticRegions?: NonNullable<VisualComparison['pairs'][number]['semanticRegions']>;
   objectsAppeared?: string[];
   objectsDisappeared?: string[];
@@ -483,6 +494,7 @@ function diffRasters(
     }
   }
   const semantic = semanticBreakdown(baseline, candidate, baselineIds, candidateIds, threshold);
+  const ssim = structuralSimilarity(baseline, candidate);
   return {
     meanAbsoluteError: absolute / (pixels * 4 * 255),
     rootMeanSquaredError: Math.sqrt(squared / (pixels * 4)) / 255,
@@ -490,6 +502,7 @@ function diffRasters(
     changedPixelRatio: changed / pixels,
     meanLuminanceDelta: luminanceDelta / pixels / 255,
     meanAbsoluteEdgeDelta: edgePixels > 0 ? edgeDelta / edgePixels : 0,
+    ...(ssim ? { meanSSIM: ssim.meanSSIM, worstSSIMWindow: ssim.worstWindow } : {}),
     ...(semantic.regions ? { semanticRegions: semantic.regions } : {}),
     ...(semantic.objectsAppeared.length > 0 ? { objectsAppeared: semantic.objectsAppeared } : {}),
     ...(semantic.objectsDisappeared.length > 0
@@ -605,6 +618,8 @@ export async function compareRunVisuals(options: {
       changedPixelRatio: diff.changedPixelRatio,
       meanLuminanceDelta: diff.meanLuminanceDelta,
       meanAbsoluteEdgeDelta: diff.meanAbsoluteEdgeDelta,
+      ...(diff.meanSSIM !== undefined ? { meanSSIM: diff.meanSSIM } : {}),
+      ...(diff.worstSSIMWindow ? { worstSSIMWindow: diff.worstSSIMWindow } : {}),
       ...(diff.semanticRegions ? { semanticRegions: diff.semanticRegions } : {}),
       ...(diff.objectsAppeared ? { objectsAppeared: diff.objectsAppeared } : {}),
       ...(diff.objectsDisappeared ? { objectsDisappeared: diff.objectsDisappeared } : {}),
