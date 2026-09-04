@@ -84,7 +84,17 @@ export interface VisualComparison {
       pixels: number;
       meanAbsoluteError: number;
       changedPixelRatio: number;
+      /** Pixels this object still covers in the candidate. */
+      pixelsRetained: number;
+      /** Pixels it covered in the baseline and no longer does. */
+      pixelsLost: number;
+      /** Pixels it covers now and did not before. */
+      pixelsGained: number;
     }>;
+    /** Object ids present only in the candidate. */
+    objectsAppeared?: string[];
+    /** Object ids present only in the baseline: usually the actual finding. */
+    objectsDisappeared?: string[];
     heatmapPath?: string;
     reason?: string;
   }>;
@@ -246,20 +256,61 @@ function edgeMagnitude(image: RasterImage, x: number, y: number): number {
   return Math.hypot(gx, gy) / 1_442.5;
 }
 
+function objectIdAt(buffer: RasterImage, offset: number): number {
+  return ((buffer.data[offset] ?? 0) << 16)
+    | ((buffer.data[offset + 1] ?? 0) << 8)
+    | (buffer.data[offset + 2] ?? 0);
+}
+
+function formatObjectId(objectId: number): string {
+  return `0x${objectId.toString(16).padStart(6, '0')}`;
+}
+
+/**
+ * Attribute the diff to objects, reading BOTH id buffers.
+ *
+ * Reading only the baseline's was silently wrong exactly when the diff
+ * mattered most: if an object moved or vanished, its pixels were attributed to
+ * whatever the BASELINE said was there, so a deleted mesh showed up as
+ * "the floor changed a lot" and the actual finding -- that an object is gone --
+ * was not reported at all.
+ *
+ * Per region this now separates pixels the object still covers from those it
+ * lost and gained, which is the difference between "this object was reshaded"
+ * and "this object moved".
+ */
 function semanticBreakdown(
   baseline: RasterImage,
   candidate: RasterImage,
-  objectIds: RasterImage | undefined,
+  baselineIds: RasterImage | undefined,
+  candidateIds: RasterImage | undefined,
   threshold: number,
-): VisualComparison['pairs'][number]['semanticRegions'] {
-  if (!objectIds || objectIds.width !== baseline.width || objectIds.height !== baseline.height) return undefined;
-  const regions = new Map<number, { pixels: number; absolute: number; changed: number }>();
+): {
+  regions: VisualComparison['pairs'][number]['semanticRegions'];
+  objectsAppeared: string[];
+  objectsDisappeared: string[];
+} {
+  const usable = (buffer: RasterImage | undefined): buffer is RasterImage =>
+    buffer !== undefined && buffer.width === baseline.width && buffer.height === baseline.height;
+  if (!usable(baselineIds)) return { regions: undefined, objectsAppeared: [], objectsDisappeared: [] };
+
+  const paired = usable(candidateIds) ? candidateIds : undefined;
+  const regions = new Map<number, {
+    pixels: number; absolute: number; changed: number; retained: number; lost: number; gained: number;
+  }>();
+  const emptyRegion = () =>
+    ({ pixels: 0, absolute: 0, changed: 0, retained: 0, lost: 0, gained: 0 });
+  const baselineSeen = new Set<number>();
+  const candidateSeen = new Set<number>();
+
   for (let pixel = 0; pixel < baseline.width * baseline.height; pixel += 1) {
     const offset = pixel * 4;
-    const objectId = ((objectIds.data[offset] ?? 0) << 16) |
-      ((objectIds.data[offset + 1] ?? 0) << 8) |
-      (objectIds.data[offset + 2] ?? 0);
-    if (objectId === 0) continue;
+    const before = objectIdAt(baselineIds, offset);
+    const after = paired ? objectIdAt(paired, offset) : before;
+    if (before !== 0) baselineSeen.add(before);
+    if (after !== 0) candidateSeen.add(after);
+    if (before === 0 && after === 0) continue;
+
     let absolute = 0;
     let maximum = 0;
     for (let channel = 0; channel < 3; channel += 1) {
@@ -267,28 +318,55 @@ function semanticBreakdown(
       absolute += delta;
       maximum = Math.max(maximum, delta);
     }
-    const region = regions.get(objectId) ?? { pixels: 0, absolute: 0, changed: 0 };
-    region.pixels += 1;
-    region.absolute += absolute / (3 * 255);
-    if (maximum > threshold) region.changed += 1;
-    regions.set(objectId, region);
+
+    if (before !== 0) {
+      const region = regions.get(before) ?? emptyRegion();
+      region.pixels += 1;
+      region.absolute += absolute / (3 * 255);
+      if (maximum > threshold) region.changed += 1;
+      if (after === before) region.retained += 1;
+      else region.lost += 1;
+      regions.set(before, region);
+    }
+    if (after !== 0 && after !== before) {
+      const region = regions.get(after) ?? emptyRegion();
+      region.gained += 1;
+      regions.set(after, region);
+    }
   }
-  return [...regions.entries()]
+
+  const ordered = [...regions.entries()]
     .map(([objectId, region]) => ({
-      objectId: `0x${objectId.toString(16).padStart(6, '0')}`,
+      objectId: formatObjectId(objectId),
       pixels: region.pixels,
-      meanAbsoluteError: region.absolute / region.pixels,
-      changedPixelRatio: region.changed / region.pixels,
+      meanAbsoluteError: region.pixels > 0 ? region.absolute / region.pixels : 0,
+      changedPixelRatio: region.pixels > 0 ? region.changed / region.pixels : 0,
+      pixelsRetained: region.retained,
+      pixelsLost: region.lost,
+      pixelsGained: region.gained,
     }))
     .sort((left, right) => right.meanAbsoluteError - left.meanAbsoluteError || right.pixels - left.pixels)
     .slice(0, 128);
+
+  return {
+    regions: ordered,
+    // "This object is gone" is a finding in its own right, and the single most
+    // common visual regression in a renderer under active development.
+    objectsAppeared: paired
+      ? [...candidateSeen].filter((id) => !baselineSeen.has(id)).sort().map(formatObjectId)
+      : [],
+    objectsDisappeared: paired
+      ? [...baselineSeen].filter((id) => !candidateSeen.has(id)).sort().map(formatObjectId)
+      : [],
+  };
 }
 
 function diffRasters(
   baseline: RasterImage,
   candidate: RasterImage,
   threshold: number,
-  objectIds?: RasterImage,
+  baselineIds?: RasterImage,
+  candidateIds?: RasterImage,
 ): {
   meanAbsoluteError: number;
   rootMeanSquaredError: number;
@@ -297,6 +375,8 @@ function diffRasters(
   meanLuminanceDelta: number;
   meanAbsoluteEdgeDelta: number;
   semanticRegions?: NonNullable<VisualComparison['pairs'][number]['semanticRegions']>;
+  objectsAppeared?: string[];
+  objectsDisappeared?: string[];
   heatmap: RasterImage;
 } {
   const pixels = baseline.width * baseline.height;
@@ -335,7 +415,7 @@ function diffRasters(
       edgePixels += 1;
     }
   }
-  const semanticRegions = semanticBreakdown(baseline, candidate, objectIds, threshold);
+  const semantic = semanticBreakdown(baseline, candidate, baselineIds, candidateIds, threshold);
   return {
     meanAbsoluteError: absolute / (pixels * 4 * 255),
     rootMeanSquaredError: Math.sqrt(squared / (pixels * 4)) / 255,
@@ -343,7 +423,11 @@ function diffRasters(
     changedPixelRatio: changed / pixels,
     meanLuminanceDelta: luminanceDelta / pixels / 255,
     meanAbsoluteEdgeDelta: edgePixels > 0 ? edgeDelta / edgePixels : 0,
-    ...(semanticRegions ? { semanticRegions } : {}),
+    ...(semantic.regions ? { semanticRegions: semantic.regions } : {}),
+    ...(semantic.objectsAppeared.length > 0 ? { objectsAppeared: semantic.objectsAppeared } : {}),
+    ...(semantic.objectsDisappeared.length > 0
+      ? { objectsDisappeared: semantic.objectsDisappeared }
+      : {}),
     heatmap: { width: baseline.width, height: baseline.height, data: heatmap },
   };
 }
@@ -410,13 +494,23 @@ export async function compareRunVisuals(options: {
       });
       continue;
     }
-    const objectEntry = baseline.manifest.frames
-      .find((frame) => frame.index === baselineEntry.frame.index)
-      ?.attachments.find((attachment) => attachment.kind === 'object_id' && attachment.encoding === 'png');
-    const objectIds = objectEntry
-      ? decodeImage(await fs.readFile(path.resolve(baseline.runPath, objectEntry.path)))
-      : undefined;
-    const diff = diffRasters(baselineImage, candidateImage, threshold, objectIds);
+    // Both id buffers, not just the baseline's. Attributing candidate pixels to
+    // baseline ids reports a deleted mesh as "the floor changed a lot" and
+    // never mentions the object that is gone.
+    const findObjectIds = async (
+      run: { manifest: { frames: Array<{ index: number; attachments: Array<{ kind: string; encoding: string; path: string }> }> }; runPath: string },
+      frameIndex: number,
+    ): Promise<RasterImage | undefined> => {
+      const entry = run.manifest.frames
+        .find((frame) => frame.index === frameIndex)
+        ?.attachments.find((attachment) => attachment.kind === 'object_id' && attachment.encoding === 'png');
+      return entry ? decodeImage(await fs.readFile(path.resolve(run.runPath, entry.path))) : undefined;
+    };
+    const [baselineIds, candidateIds] = await Promise.all([
+      findObjectIds(baseline, baselineEntry.frame.index),
+      findObjectIds(candidate, candidateEntry.frame.index),
+    ]);
+    const diff = diffRasters(baselineImage, candidateImage, threshold, baselineIds, candidateIds);
     let heatmapPath: string | undefined;
     if (outputPath) {
       heatmapPath = path.join(outputPath, `${safeFileComponent(identity)}.heatmap.png`);
@@ -437,6 +531,8 @@ export async function compareRunVisuals(options: {
       meanLuminanceDelta: diff.meanLuminanceDelta,
       meanAbsoluteEdgeDelta: diff.meanAbsoluteEdgeDelta,
       ...(diff.semanticRegions ? { semanticRegions: diff.semanticRegions } : {}),
+      ...(diff.objectsAppeared ? { objectsAppeared: diff.objectsAppeared } : {}),
+      ...(diff.objectsDisappeared ? { objectsDisappeared: diff.objectsDisappeared } : {}),
       ...(heatmapPath ? { heatmapPath } : {}),
     });
   }
