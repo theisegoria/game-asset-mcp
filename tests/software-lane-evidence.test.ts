@@ -71,6 +71,15 @@ describe('an adapter claiming hardware it does not have', () => {
     // measurements exist. It is still inadmissible, because the numbers came
     // off a CPU.
     expect(evidence.hardwarePerformanceEvidenceAdmitted).toBe(false);
+
+    // Refused, not silently dropped. An adapter asserting hardware execution
+    // from a CPU renderer is a defect in the adapter, and discarding the claim
+    // means whoever could fix it never learns it was made.
+    expect(evidence.refusedAdapterClaims).toEqual([
+      'gpu execution',
+      'gpu completion identity',
+      'hardware performance',
+    ]);
   }, 30_000);
 
   it('says so in the ceiling, where a reader will actually meet it', async () => {
@@ -91,6 +100,7 @@ describe('an ordinary lane is left alone', () => {
     // answer -- not "hardware", which would be a claim nobody made.
     expect(evidence.rendererClass).toBe('unknown');
     expect(evidence.softwareRasterizedLane).toBe(false);
+    expect(evidence.refusedAdapterClaims).toEqual([]);
     expect(result.manifest.evidence.evidenceCeiling).not.toContain('software-rasterized');
   }, 30_000);
 });

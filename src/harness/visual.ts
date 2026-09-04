@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import { analyzeFloatRaster, type FloatRasterStatistics } from './raster-float.js';
 import { decodeImage, encodePNG, type RasterImage } from '../inspection/image.js';
 import { canonicalJson } from '../packages/format.js';
 import { invalidInput, invalidState } from '../util/errors.js';
@@ -25,6 +26,16 @@ export interface RasterAnalysis {
   uniqueSemanticIds?: number;
 }
 
+export interface FloatRasterAnalysis extends FloatRasterStatistics {
+  frameIndex: number;
+  frameLabel?: string;
+  kind: CaptureAttachment['kind'];
+  label?: string;
+  path: string;
+  /** The lossy PNG that visualises this buffer, when the adapter linked one. */
+  previewPath?: string;
+}
+
 export interface CaptureAnalysis {
   schema: 'game_dev.visual_analysis.v1';
   runId: string;
@@ -32,6 +43,13 @@ export interface CaptureAnalysis {
   adapterId: string;
   scenarioId: string;
   rasters: RasterAnalysis[];
+  /**
+   * Binary attachments read at full precision.
+   *
+   * Previously skipped entirely: a float depth buffer was sealed, hashed, and
+   * never looked at by anything.
+   */
+  floatRasters: FloatRasterAnalysis[];
   evidence: {
     sealedRunVerified: true;
     rasterBytesDecoded: true;
@@ -166,11 +184,29 @@ function analyzeRaster(
 export async function analyzeRunCapture(runPath: string): Promise<CaptureAnalysis> {
   const loaded = await loadCapture(runPath);
   const rasters: RasterAnalysis[] = [];
+  const floatRasters: FloatRasterAnalysis[] = [];
   for (const frame of loaded.manifest.frames) {
     for (const attachment of frame.attachments) {
-      if (attachment.encoding !== 'png') continue;
       const absolute = path.resolve(loaded.runPath, attachment.path);
-      rasters.push(analyzeRaster(decodeImage(await fs.readFile(absolute)), frame, attachment, absolute));
+      if (attachment.encoding === 'png') {
+        rasters.push(analyzeRaster(decodeImage(await fs.readFile(absolute)), frame, attachment, absolute));
+        continue;
+      }
+      // The schema guarantees a binary attachment declares its format, so the
+      // bytes are readable rather than sealed and opaque.
+      if (attachment.encoding === 'binary' && attachment.format) {
+        floatRasters.push({
+          ...analyzeFloatRaster(await fs.readFile(absolute), attachment.format),
+          frameIndex: frame.index,
+          ...(frame.label !== undefined ? { frameLabel: frame.label } : {}),
+          kind: attachment.kind,
+          ...(attachment.label !== undefined ? { label: attachment.label } : {}),
+          path: absolute,
+          ...(attachment.previewOf !== undefined
+            ? { previewPath: path.resolve(loaded.runPath, attachment.previewOf) }
+            : {}),
+        });
+      }
     }
   }
   return {
@@ -180,6 +216,7 @@ export async function analyzeRunCapture(runPath: string): Promise<CaptureAnalysi
     adapterId: loaded.adapterId,
     scenarioId: loaded.scenarioId,
     rasters,
+    floatRasters,
     evidence: {
       sealedRunVerified: true,
       rasterBytesDecoded: true,

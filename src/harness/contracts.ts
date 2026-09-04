@@ -204,6 +204,15 @@ export type AdapterManifest = z.infer<typeof adapterManifestSchema>;
 export type AdapterScenario = z.infer<typeof scenarioSchema>;
 export type AdapterParameter = z.infer<typeof adapterParameterSchema>;
 
+/** Bytes per pixel for each declarable binary attachment format. */
+export const BYTES_PER_PIXEL: Record<'r16f' | 'r32f' | 'rgba32f' | 'd32f' | 'r32u', number> = {
+  r16f: 2,
+  r32f: 4,
+  rgba32f: 16,
+  d32f: 4,
+  r32u: 4,
+};
+
 export const captureAttachmentSchema = z.object({
   kind: z.enum([
     'color',
@@ -250,8 +259,58 @@ export const captureAttachmentSchema = z.object({
   label: identifier.optional(),
   path: relativePathSchema,
   encoding: z.enum(['png', 'json', 'jsonl', 'binary']),
+  /**
+   * How to read a raw buffer. REQUIRED when encoding is `binary`, because
+   * without it the bytes are unreadable and the attachment is sealed evidence
+   * nobody can inspect.
+   *
+   * This exists because PNG could not carry the data. The decoder normalises
+   * every PNG to 8-bit RGBA, 16-bit sources included, so a depth buffer round
+   * -tripped through PNG loses exactly the precision that makes depth worth
+   * capturing: depth fighting and near/far-plane error are invisible at 8 bits.
+   */
+  format: z.object({
+    pixelFormat: z.enum(['r16f', 'r32f', 'rgba32f', 'd32f', 'r32u']),
+    width: z.number().int().min(1).max(16_384),
+    height: z.number().int().min(1).max(16_384),
+    /** Bytes per row, which is not width*bpp when the API pads (wgpu aligns to 256). */
+    rowStride: z.number().int().min(1).max(1_073_741_824),
+    colorSpace: z.enum(['srgb', 'linear']).default('linear'),
+  }).strict().optional(),
+  /**
+   * The float attachment this one is a lossy visualisation of.
+   *
+   * A caller gets both: a picture it can look at, and the numbers it can
+   * measure, with the relationship stated rather than guessed from filenames.
+   */
+  previewOf: relativePathSchema.optional(),
   description: z.string().min(1).max(400).optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  // A binary attachment without a format is bytes nobody can read: sealed,
+  // hashed, and useless. Refuse it at the contract rather than discovering it
+  // when an analysis silently skips the one attachment that mattered.
+  if (value.encoding === 'binary' && value.format === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'a binary attachment must declare its pixel format',
+    });
+  }
+  if (value.encoding !== 'binary' && value.format !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'only a binary attachment declares a pixel format',
+    });
+  }
+  if (value.format !== undefined) {
+    const minimumStride = value.format.width * BYTES_PER_PIXEL[value.format.pixelFormat];
+    if (value.format.rowStride < minimumStride) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `rowStride ${value.format.rowStride} cannot hold ${value.format.width} ${value.format.pixelFormat} pixels`,
+      });
+    }
+  }
+});
 
 export const captureManifestSchema = z.object({
   schema: z.literal(GAME_DEV_CAPTURE_SCHEMA),
@@ -380,6 +439,16 @@ export const runManifestSchema = z.object({
     rendererClass: z.enum(['hardware', 'software', 'unknown']),
     /** True when the harness refused GPU and timing claims for this run. */
     softwareRasterizedLane: z.boolean(),
+    /**
+     * Claims the adapter made that the harness overwrote.
+     *
+     * The downgrade alone loses the fact that a claim was ever made, and an
+     * adapter asserting hardware execution from a CPU renderer is a defect in
+     * the adapter. Discarding it silently means the person who could fix it
+     * never learns it happened. The refusal stays authoritative; this records
+     * what was refused.
+     */
+    refusedAdapterClaims: z.array(z.string().min(1).max(96)).max(8),
     adapterReportedGpuExecution: z.boolean(),
     adapterReportedGpuCompletionIdentity: z.boolean(),
     adapterReportedHardwarePerformance: z.boolean(),

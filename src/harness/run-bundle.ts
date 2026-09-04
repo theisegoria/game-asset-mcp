@@ -441,6 +441,16 @@ export async function executeScenarioRun(options: {
   // overwritten here, on the harness side, where the adapter cannot reach.
   const softwareRasterizedLane = adapterEvidence?.rendererClass === 'software';
   const rendererClass = adapterEvidence?.rendererClass ?? 'unknown';
+  const refusedAdapterClaims: string[] = [];
+  if (softwareRasterizedLane) {
+    if (adapterEvidence?.gpuExecutionReported) refusedAdapterClaims.push('gpu execution');
+    if (adapterEvidence?.gpuCompletionIdentityReported) {
+      refusedAdapterClaims.push('gpu completion identity');
+    }
+    if (adapterEvidence?.hardwarePerformanceReported) {
+      refusedAdapterClaims.push('hardware performance');
+    }
+  }
   const performanceAdmitted = Boolean(
     !softwareRasterizedLane &&
     options.allowPerformance &&
@@ -479,6 +489,7 @@ export async function executeScenarioRun(options: {
       rasterBytesDecoded: capture?.rasterBytesDecoded ?? false,
       rendererClass,
       softwareRasterizedLane,
+      refusedAdapterClaims,
       adapterReportedGpuExecution:
         softwareRasterizedLane ? false : adapterEvidence?.gpuExecutionReported ?? false,
       adapterReportedGpuCompletionIdentity:
