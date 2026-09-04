@@ -295,11 +295,20 @@ export function registerHarnessTools(server: ToolRegistrar, ctx: ToolContext): v
         'FREE, local. Aggregates capture measurements, telemetry and profile files from a sealed ' +
         'run into per-metric statistics. Arithmetic over what the game reported; the harness ' +
         'does not measure hardware performance itself and says so in the result.',
-      inputSchema: { run: runReference },
+      inputSchema: {
+        run: runReference,
+        warmupFrames: z.number().int().min(0).max(10_000).default(0)
+          .describe(
+            'Exclude this many leading frames. Shader compilation, texture upload and cache '
+            + 'warming all land in the first frames, so a run that includes them reports a cold '
+            + 'start as a regression. Only measurements whose source reported a frame index can '
+            + 'be excluded.',
+          ),
+      },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     guard(ctx.logger, 'summarize_run_performance', async (args) =>
-      ok(await summarizeRunPerformance(await resolve(args.run)))),
+      ok(await summarizeRunPerformance(await resolve(args.run), { warmupFrames: args.warmupFrames }))),
   );
 
   server.registerTool(

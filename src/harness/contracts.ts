@@ -489,6 +489,25 @@ export const metricStatisticsSchema = z.object({
   p95: z.number().finite(),
   p99: z.number().finite(),
   standardDeviation: z.number().finite(),
+  /**
+   * Median absolute deviation: the robust dispersion measure for frame times.
+   *
+   * A standard deviation is dominated by the hitches, so a run with one 400ms
+   * stall and a thousand steady frames reports a spread that describes neither.
+   */
+  medianAbsoluteDeviation: z.number().finite(),
+  /**
+   * Samples beyond 2x the median. Named rather than trimmed: a single 400ms
+   * hitch is very often THE bug, and removing it to tidy the distribution
+   * deletes the finding.
+   */
+  hitchCount: z.number().int().min(0),
+  /**
+   * Mean of the worst 1% of samples -- the "1% low" an engine developer
+   * actually looks at. p99 approximates it badly at low sample counts and is
+   * what people reach for by mistake.
+   */
+  worst1PercentMean: z.number().finite(),
 }).strict();
 
 export type MetricStatistics = z.infer<typeof metricStatisticsSchema>;

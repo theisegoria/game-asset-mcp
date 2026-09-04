@@ -11,6 +11,7 @@ import {
   type TelemetryEvent,
 } from './contracts.js';
 import { verifyRunBundle } from './run-bundle.js';
+import { describeComparison, describeSummary } from './describe-performance.js';
 
 const MAX_TELEMETRY_BYTES = 64 * 1024 * 1024;
 const MAX_TELEMETRY_LINES = 250_000;
@@ -29,6 +30,12 @@ interface Measurement {
    * only a capture manifest can declare otherwise.
    */
   aggregation: Aggregation;
+  /**
+   * Which frame produced it, when the source said. Both capture measurements
+   * and telemetry events carry this and it was dropped at ingestion, which is
+   * why warmup frames could not be excluded.
+   */
+  frameIndex?: number;
 }
 
 export interface PerformanceSummary {
@@ -45,6 +52,11 @@ export interface PerformanceSummary {
    * are reading rather than getting a silently merged one.
    */
   mixedAggregationMetrics: string[];
+  /** How many leading frames were excluded, and how many samples that removed. */
+  warmupFramesExcluded: number;
+  warmupSamplesExcluded: number;
+  /** The same numbers in sentences, so a caller can act without interpreting them. */
+  summary: string[];
   hardwarePerformanceEvidenceAdmitted: boolean;
   evidenceCeiling: string;
 }
@@ -88,6 +100,8 @@ export interface PerformanceComparison {
     standardErrorOfDifference: number | null;
   }>;
   hardwarePerformanceComparisonAdmitted: boolean;
+  /** The same deltas in sentences, largest movement first. */
+  summary: string[];
   evidenceCeiling: string;
 }
 
@@ -131,7 +145,7 @@ function foreignTelemetryMeasurements(value: unknown): Measurement[] {
         unit,
         value: number,
         source: 'foreign-telemetry',
-      aggregation: 'sample',
+        aggregation: 'sample',
       });
     }
   }
@@ -169,7 +183,8 @@ async function telemetryMeasurements(filePath: string, expectedRunId: string): P
           unit: event.unit,
           value: event.value,
           source: 'telemetry',
-      aggregation: 'sample',
+          aggregation: 'sample',
+          ...(event.frameIndex !== undefined ? { frameIndex: event.frameIndex } : {}),
         });
       }
       continue;
@@ -251,6 +266,7 @@ export function statistics(
   const sorted = [...values].sort((left, right) => left - right);
   const mean = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
   const variance = sorted.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / sorted.length;
+  const middle = percentile(sorted, 0.5);
   return {
     metric,
     unit,
@@ -268,10 +284,48 @@ export function statistics(
     p95: percentile(sorted, 0.95),
     p99: percentile(sorted, 0.99),
     standardDeviation: Math.sqrt(variance),
+    medianAbsoluteDeviation: medianAbsoluteDeviation(sorted, middle),
+    // Reported, never trimmed. A single 400ms stall is very often the bug, and
+    // removing it to tidy the distribution deletes the finding.
+    hitchCount: middle > 0 ? sorted.filter((value) => value > middle * 2).length : 0,
+    worst1PercentMean: worstPercentMean(sorted, 0.01),
   };
 }
 
-export async function summarizeRunPerformance(runPathInput: string): Promise<PerformanceSummary> {
+function medianOf(sorted: number[]): number {
+  if (sorted.length === 0) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+    : sorted[middle] ?? 0;
+}
+
+function medianAbsoluteDeviation(sorted: number[], median: number): number {
+  if (sorted.length === 0) return 0;
+  return medianOf(sorted.map((value) => Math.abs(value - median)).sort((a, b) => a - b));
+}
+
+/**
+ * Mean of the worst `fraction` of samples -- the "1% low".
+ *
+ * Always at least one sample, so a short run reports its worst frame rather
+ * than zero, which would read as "no bad frames".
+ */
+function worstPercentMean(sorted: number[], fraction: number): number {
+  if (sorted.length === 0) return 0;
+  const count = Math.max(1, Math.ceil(sorted.length * fraction));
+  const worst = sorted.slice(-count);
+  return worst.reduce((total, value) => total + value, 0) / worst.length;
+}
+
+export async function summarizeRunPerformance(
+  runPathInput: string,
+  options: { warmupFrames?: number } = {},
+): Promise<PerformanceSummary> {
+  const warmupFrames = options.warmupFrames ?? 0;
+  if (!Number.isInteger(warmupFrames) || warmupFrames < 0 || warmupFrames > 10_000) {
+    throw invalidInput('warmup frames must be an integer from 0 through 10000');
+  }
   const verified = await verifyRunBundle(runPathInput);
   const measurements: Measurement[] = [];
   if (verified.manifest.captureManifest) {
@@ -287,6 +341,7 @@ export async function summarizeRunPerformance(runPathInput: string): Promise<Per
         value: measurement.value,
         source: 'capture',
         aggregation: measurement.aggregation,
+        ...(measurement.frameIndex !== undefined ? { frameIndex: measurement.frameIndex } : {}),
       });
     }
     for (const relative of capture.manifest.telemetry) {
@@ -300,6 +355,17 @@ export async function summarizeRunPerformance(runPathInput: string): Promise<Per
   // Keyed by aggregation as well as metric and unit. Without it, a capture
   // emitting both a p99 and per-frame samples for one metric pooled them into
   // one distribution and reported the median of a mixed bag.
+  // Shader compilation, texture upload and cache warming all land in the first
+  // frames, and a run that includes them reports a regression that is really a
+  // cold start. Only measurements whose source told us a frame index can be
+  // excluded; anything unattributed is kept rather than guessed at.
+  const warmupSamplesExcluded = warmupFrames > 0
+    ? measurements.filter((m) => m.frameIndex !== undefined && m.frameIndex < warmupFrames).length
+    : 0;
+  const admitted = warmupFrames > 0
+    ? measurements.filter((m) => m.frameIndex === undefined || m.frameIndex >= warmupFrames)
+    : measurements;
+
   const grouped = new Map<string, { metric: string; unit: string; aggregation: Aggregation; values: number[] }>();
   const aggregationsByMetric = new Map<string, Set<Aggregation>>();
   const sources: PerformanceSummary['sources'] = {
@@ -308,7 +374,7 @@ export async function summarizeRunPerformance(runPathInput: string): Promise<Per
     'foreign-telemetry': 0,
     profile: 0,
   };
-  for (const measurement of measurements) {
+  for (const measurement of admitted) {
     sources[measurement.source] += 1;
     const key = `${measurement.metric}\u0000${measurement.unit}\u0000${measurement.aggregation}`;
     const group = grouped.get(key)
@@ -334,8 +400,9 @@ export async function summarizeRunPerformance(runPathInput: string): Promise<Per
     .map(([metric]) => metric)
     .sort();
 
-  return {
+  const result: PerformanceSummary = {
     schema: GAME_DEV_PERFORMANCE_SUMMARY_SCHEMA,
+    summary: [],
     runId: verified.manifest.runId,
     runPath: verified.runPath,
     adapterId: verified.manifest.adapterId,
@@ -343,10 +410,14 @@ export async function summarizeRunPerformance(runPathInput: string): Promise<Per
     metrics,
     sources,
     mixedAggregationMetrics,
+    warmupFramesExcluded: warmupFrames,
+    warmupSamplesExcluded,
     hardwarePerformanceEvidenceAdmitted: verified.manifest.evidence.hardwarePerformanceEvidenceAdmitted,
     evidenceCeiling:
-      'Statistics are deterministic reductions over sealed capture measurements, JSONL telemetry, and timing-shaped numeric profile fields. They prove neither hardware timing authority nor causal attribution unless the run separately admits native performance evidence.',
+      'Statistics are deterministic reductions over sealed capture measurements, JSONL telemetry, and timing-shaped numeric profile fields. They prove neither hardware timing authority nor causal attribution unless the run separately admits native performance evidence. The prose summary is generated from those statistics and describes them.',
   };
+  result.summary = describeSummary(result);
+  return result;
 }
 
 /** Below this, spread is not estimated well enough to say anything. */
@@ -434,8 +505,9 @@ export async function compareRunPerformance(
       ...separability(baselineMetric, candidateMetric, delta),
     });
   }
-  return {
+  const result: PerformanceComparison = {
     schema: GAME_DEV_PERFORMANCE_COMPARISON_SCHEMA,
+    summary: [],
     baselineRunId: baseline.runId,
     candidateRunId: candidate.runId,
     statistic,
@@ -454,4 +526,6 @@ export async function compareRunPerformance(
       'an explicit bounded goal; hardware claims require both runs to admit hardware-performance ' +
       'evidence.',
   };
+  result.summary = describeComparison(result);
+  return result;
 }

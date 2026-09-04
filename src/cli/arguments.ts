@@ -74,7 +74,7 @@ export const KNOWN_FLAGS: ReadonlySet<string> = new Set([
   'dry-run', 'from', 'help', 'input', 'invalid', 'json', 'jsonl', 'license', 'limit',
   'manifest', 'max-seconds', 'name', 'output', 'output-dir', 'package-version',
   'preview', 'project', 'query', 'request', 'spend-limit-cents', 'stat',
-  'status', 'target', 'threshold', 'valid', 'version', 'with',
+  'status', 'target', 'threshold', 'valid', 'version', 'warmup-frames', 'with',
 ]);
 
 /** Edit distance, capped: we only care whether it is 1 or 2. */

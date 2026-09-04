@@ -78,7 +78,7 @@ Usage:
   game-dev visual analyze <run-id|path> [--json]
   game-dev visual compare <baseline-run> <candidate-run> [--threshold 0..255] [--aa-tolerance 0..4]
                   [--output NEW_DIRECTORY] [--jsonl]
-  game-dev performance summarize <run-id|path> [--json]
+  game-dev performance summarize <run-id|path> [--warmup-frames N] [--json]
   game-dev performance compare <baseline-run> <candidate-run> [--stat median] [--json]
   game-dev performance goal-create <baseline-run> --project PATH --request GOAL.json [--confirm]
   game-dev performance goal-evaluate <goal.json> <candidate-run> [--confirm]
@@ -997,7 +997,9 @@ async function dispatch(
     const runPath = await resolveRunPath(runtime.config.runsDir, requirePositional(parsed, 2, 'run id or path'));
     return {
       operation: 'performance.summarize',
-      data: await summarizeRunPerformance(runPath) as unknown as Record<string, unknown>,
+      data: await summarizeRunPerformance(runPath, {
+        warmupFrames: nonNegativeIntegerFlag(parsed, 'warmup-frames', 0),
+      }) as unknown as Record<string, unknown>,
     };
   }
 
