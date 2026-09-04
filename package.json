@@ -41,6 +41,7 @@
     "scripts/*.py",
     "scripts/*.mjs",
     "distribution/skills-repo",
+    "probe",
     "adapters",
     "skills",
     ".codex-plugin",

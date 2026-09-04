@@ -121,8 +121,14 @@ function safeChildEnvironment(plan: ScenarioRunPlan): NodeJS.ProcessEnv {
   // Where the harness will actually look for the capture manifest. Without it
   // an engine has to guess, and both shapes exist in the wild -- the fixture
   // writes capture.json at the run root, Genome writes it under native/.
+  //
+  // plan.output.path is ALREADY absolute and already containment-checked by
+  // planScenarioRun. Joining it onto runPath again produced a doubled,
+  // nonexistent path, and nothing noticed because the fixture ignores this
+  // variable. The probe SDK is its first consumer, and failed on it within
+  // minutes of existing -- which is what an independent consumer is for.
   if (plan.output.path !== undefined) {
-    environment.GAME_DEV_CAPTURE_MANIFEST = path.join(plan.runPath, plan.output.path);
+    environment.GAME_DEV_CAPTURE_MANIFEST = plan.output.path;
   }
   return environment;
 }
