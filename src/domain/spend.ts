@@ -106,6 +106,13 @@ export const FREE_TOOLS: ReadonlySet<string> = new Set([
   // A diagram of local accessor and texture data. Writes thumbnails into the
   // workspace, contacts no provider.
   'render_asset_contact_sheet',
+  // Project writes: files copied into the user's project. Governed by the
+  // project-write authority, not by the spend ceiling; no provider contact.
+  'plan_probe_install',
+  'install_probe_sdk',
+  'list_adapter_templates',
+  'plan_adapter_install',
+  'install_adapter_template',
 ]);
 
 export function isSpendingTool(tool: string): boolean {

@@ -39,12 +39,16 @@ anywhere:
 
 ```sh
 mkdir -p ~/first-capture && cd ~/first-capture
-cc -std=c99 -Wall -Wextra -Werror \
-  "$(npm root -g)/@theisegoria/game-development-studio/probe/c/gdprobe.c" \
-  "$(npm root -g)/@theisegoria/game-development-studio/probe/examples/minimal/main.c" \
-  -o engine
+game-dev probe install --project . --confirm
+cp "$(npm root -g)/@theisegoria/game-development-studio/probe/examples/minimal/main.c" .
+cc -std=c99 -Wall -Wextra -Werror third_party/gdprobe/gdprobe.c main.c -o engine
 ./engine
 ```
+
+`probe install` copies `gdprobe.h` and `gdprobe.c` into `third_party/gdprobe/`
+— plan first, write on `--confirm`, and it refuses to overwrite a copy you have
+since changed. The example's `#include` expects the header beside it, so adjust
+the include path or copy `main.c` into that directory.
 
 Run outside the harness it prints `not attached to the harness; rendering
 normally` and exits 0. That is the contract: the same binary renders normally

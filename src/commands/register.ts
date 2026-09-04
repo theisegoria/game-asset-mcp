@@ -15,6 +15,7 @@ import { registerAnimationTools } from '../tools/animation.js';
 import { registerBatchTools } from '../tools/batch.js';
 import { registerHarnessTools } from '../tools/harness.js';
 import { registerContactSheetTools } from '../tools/contact-sheet.js';
+import { registerProjectWriteTools } from '../tools/project-writes.js';
 import type { ToolRegistrar } from './registry.js';
 
 export function registerAssetCommands(registry: ToolRegistrar, ctx: ToolContext): void {
@@ -34,4 +35,5 @@ export function registerAssetCommands(registry: ToolRegistrar, ctx: ToolContext)
   registerBatchTools(registry, ctx);
   registerHarnessTools(registry, ctx);
   registerContactSheetTools(registry, ctx);
+  registerProjectWriteTools(registry, ctx);
 }

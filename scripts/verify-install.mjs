@@ -21,6 +21,11 @@ const NPM_INSTALL_TIMEOUT_MS = 60_000;
 const EXPECTED_TOOLS = [
   'analyze_capture_run',
   'compare_capture_visuals',
+  'install_adapter_template',
+  'install_probe_sdk',
+  'list_adapter_templates',
+  'plan_adapter_install',
+  'plan_probe_install',
   'plan_scenario_run',
   'render_asset_contact_sheet',
   'run_scenario',

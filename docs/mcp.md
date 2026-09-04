@@ -92,6 +92,16 @@ each run, because the CLI demands `--confirm` per invocation and a standing
 environment variable is not that. `plan_scenario_run` needs no authority and
 executes nothing; call it first.
 
+## Writing into a project over MCP
+
+`install_probe_sdk` and `install_adapter_template` write files into a game
+project — outside the tool's own workspace, which on the CLI is a `--confirm`
+action. Over MCP they are gated the same way as `run_scenario`: the handler
+refuses unless `GAME_DEV_MCP_ALLOW_PROJECT_WRITE=1` is in the server
+environment, and the transport asks you to confirm each write. Neither layer
+alone is enough. `plan_probe_install`, `plan_adapter_install` and
+`list_adapter_templates` need no authority and write nothing; call them first.
+
 ## What is not here yet
 
 Streamable HTTP is not implemented. When it lands it will be loopback-only with

@@ -10,6 +10,15 @@ import type { ElicitApproval } from './spend-gate.js';
  */
 export const EXECUTION_TOOLS: ReadonlySet<string> = new Set(['run_scenario']);
 
+/**
+ * Tools that write into the user's project rather than the tool's workspace.
+ * On the CLI these take --confirm; the same per-call human act applies here.
+ */
+export const PROJECT_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'install_probe_sdk',
+  'install_adapter_template',
+]);
+
 export interface ExecutionGateOptions {
   /** Absent when the connected client declared no elicitation capability. */
   canElicit?: (() => boolean) | undefined;
@@ -23,7 +32,7 @@ function refusal(tool: string, reason: string): ToolResult {
       type: 'text',
       text: JSON.stringify({
         error: 'APPROVAL_REQUIRED',
-        message: 'Running a project executable requires a human to approve this specific run.',
+        message: 'This action reaches into your project and requires a human to approve it, each time.',
         tool,
         reason,
         approval: {
@@ -54,7 +63,9 @@ export class ExecutionGate {
     name: string,
     handler: (args: A) => Promise<ToolResult>,
   ): (args: A) => Promise<ToolResult> {
-    if (!EXECUTION_TOOLS.has(name)) return handler;
+    const isExecution = EXECUTION_TOOLS.has(name);
+    const isProjectWrite = PROJECT_WRITE_TOOLS.has(name);
+    if (!isExecution && !isProjectWrite) return handler;
 
     return async (args: A): Promise<ToolResult> => {
       if (!this.options.elicit || !(this.options.canElicit?.() ?? true)) {
@@ -63,17 +74,22 @@ export class ExecutionGate {
 
       const scenario = (args as { scenario?: unknown })?.scenario;
       const project = (args as { project?: unknown })?.project;
-      const accepted = await this.options
-        .elicit(
-          `Run scenario "${String(scenario)}" from the project at ${String(project)}?\n\n` +
+      const message = isExecution
+        ? `Run scenario "${String(scenario)}" from the project at ${String(project)}?\n\n` +
           'This starts an executable that the project declares, in a contained process, and ' +
           'seals whatever it produces into a run bundle.\n\n' +
-          'Confirm this run?',
-        )
+          'Confirm this run?'
+        : `Write files into the project at ${String(project)}?\n\n` +
+          `${name} writes into your project directory, outside the tool's own workspace. It ` +
+          'never overwrites a file whose contents differ, and the matching plan_* tool shows ' +
+          'exactly what it would write.\n\n' +
+          'Confirm this write?';
+      const accepted = await this.options
+        .elicit(message)
         // A throw, a transport error or a timeout is not consent.
         .catch(() => false);
 
-      if (!accepted) return refusal(name, 'the run was not confirmed');
+      if (!accepted) return refusal(name, isExecution ? 'the run was not confirmed' : 'the write was not confirmed');
       return handler(args);
     };
   }

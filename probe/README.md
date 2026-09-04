@@ -1,8 +1,18 @@
 # Probe SDK
 
 A small C99 library your engine compiles in to produce a capture bundle the
-harness can seal, verify and analyse. There is nothing to link and nothing to
-install: copy `c/gdprobe.h` and `c/gdprobe.c` into your engine's build.
+harness can seal, verify and analyse. There is nothing to link: two source
+files, compiled by your build.
+
+```sh
+game-dev probe install --project /path/to/engine            # plan
+game-dev probe install --project /path/to/engine --confirm  # write
+```
+
+That copies `gdprobe.h` and `gdprobe.c` into `third_party/gdprobe/` (or
+`--destination RELATIVE`), refuses to overwrite a copy you have changed, and
+reports every file with its hash. Or copy `c/gdprobe.h` and `c/gdprobe.c` by
+hand; there is nothing else.
 
 ## Why it exists
 

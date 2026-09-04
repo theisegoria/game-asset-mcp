@@ -32,8 +32,12 @@ is a claim nobody made.
 
 No tool schema has an approval input. Spending needs a human-written spend
 ceiling plus per-call elicitation; execution needs `GAME_DEV_MCP_ALLOW_*`
-in the launch environment plus per-call elicitation. Every non-acceptance
-path fails closed, and the tests assert the provider was never contacted.
+in the launch environment plus per-call elicitation; writes into a user's
+project need `GAME_DEV_MCP_ALLOW_PROJECT_WRITE=1` plus per-call elicitation.
+Every non-acceptance path fails closed, and the tests assert the provider was
+never contacted and nothing was written. Every gated write has a free
+`plan_*` twin. The environment check lives in the handler, because
+`game-dev tool call` reaches the same handler.
 
 ## Plan, then confirm — and where the line actually is
 

@@ -30,6 +30,7 @@ import type { GameAssetPolicy } from './domain/asset-policy.js';
 import { loadAdapter, planScenarioRun } from './harness/adapter.js';
 import { executeScenarioRun, resolveRunPath, verifyRunBundle } from './harness/run-bundle.js';
 import { installAdapterTemplate, listAdapterTemplates } from './harness/templates.js';
+import { installProbeSdk } from './harness/probe-install.js';
 import { analyzeRunCapture, compareRunVisuals } from './harness/visual.js';
 import { compareRunPerformance, summarizeRunPerformance } from './harness/performance.js';
 import { createOptimizationGoal, evaluateOptimizationGoal } from './harness/goals.js';
@@ -68,6 +69,7 @@ Usage:
   game-dev launch <package-id|path> --with finder|quicklook|blender [--confirm]
   game-dev migrate legacy --from OUTPUT_ROOT [--license SPDX] [--confirm]
   game-dev adapter templates [--json]
+  game-dev probe install --project PATH [--destination RELATIVE] [--confirm]
   game-dev adapter install <template-id> --project PATH [--confirm]
   game-dev adapter inspect --project PATH [--manifest RELATIVE] [--json]
   game-dev scenario list --project PATH [--json]
@@ -270,6 +272,7 @@ function capabilities(runtime: GameDevRuntime): Record<string, unknown> {
       'doctor',
       'credentials',
       'adapter',
+      'probe',
       'provider',
       'job',
       'catalog',
@@ -453,6 +456,14 @@ async function dispatch(
         templates: await listAdapterTemplates(),
       },
     };
+  }
+  if (family === 'probe' && action === 'install') {
+    const result = await installProbeSdk({
+      projectRoot: path.resolve(requireFlag(parsed, 'project')),
+      destination: stringFlag(parsed, 'destination'),
+      confirm: booleanFlag(parsed, 'confirm'),
+    });
+    return { operation: 'probe.install', data: result as unknown as Record<string, unknown> };
   }
   if (family === 'adapter' && action === 'install') {
     const result = await installAdapterTemplate({
@@ -1214,6 +1225,7 @@ function needsDurableJob(runtime: GameDevRuntime, parsed: ParsedArguments): bool
   if (family === 'asset' && ['normalize', 'preview-usdz'].includes(action ?? '')) return true;
   if (['vendor', 'package', 'migrate'].includes(family ?? '')) return true;
   if (family === 'adapter' && action === 'install' && booleanFlag(parsed, 'confirm')) return true;
+  if (family === 'probe' && action === 'install' && booleanFlag(parsed, 'confirm')) return true;
   if (family === 'skill' && action === 'install' && booleanFlag(parsed, 'confirm')) return true;
   if (family === 'scenario' && action === 'run') return true;
   if (family === 'visual' && action === 'compare' && stringFlag(parsed, 'output') !== undefined) return true;
