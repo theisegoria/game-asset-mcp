@@ -22,7 +22,11 @@ async function exists(target: string): Promise<boolean> {
   }
 }
 
-export async function runDoctor(runtime: GameDevRuntime): Promise<Record<string, unknown>> {
+/**
+ * Accepts anything carrying `config`, not the whole runtime: the MCP tool
+ * calls this from a ToolContext, and doctor never needed more than config.
+ */
+export async function runDoctor(runtime: Pick<GameDevRuntime, 'config'>): Promise<Record<string, unknown>> {
   const checks: DoctorCheck[] = [];
   checks.push({
     id: 'platform',

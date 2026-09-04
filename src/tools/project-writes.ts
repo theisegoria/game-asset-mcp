@@ -25,7 +25,7 @@ import { guard, ok, type ToolContext } from './context.js';
 
 const PROJECT_WRITE_ENV = 'GAME_DEV_MCP_ALLOW_PROJECT_WRITE';
 
-function assertProjectWriteAuthority(): void {
+export function assertProjectWriteAuthority(): void {
   if (process.env[PROJECT_WRITE_ENV]?.trim() === '1') return;
   throw invalidInput('writing into a project requires authority this process was not given', {
     missingGrants: ['project-write'],

@@ -92,10 +92,30 @@ each run, because the CLI demands `--confirm` per invocation and a standing
 environment variable is not that. `plan_scenario_run` needs no authority and
 executes nothing; call it first.
 
+## The optimisation loop over MCP
+
+`create_optimization_goal` binds one metric, a direction, a target and an
+iteration budget to a baseline run, with an allowlist of project paths a change
+may touch. `evaluate_optimization_goal` records exactly one candidate run and
+advances the goal to `active`, `met` or `exhausted`; a run id can be used once,
+so an iteration cannot be replayed. Both write into the project's
+`.game-dev/goals`, so both take the project-write authority below.
+`plan_optimization_goal` and `plan_goal_evaluation` are free and write nothing
+— they give the same verdict without consuming an iteration.
+
+The loop a model should run: plan the goal, create it, change **one** thing
+inside the allowlist, capture, plan the evaluation, record it, repeat until
+met or exhausted. The verdict is arithmetic over reported numbers and
+establishes no cause; `compare_run_performance` says whether the delta stands
+out from the spread.
+
+`run_doctor` is free and reports what this environment can do — provider
+credentials as configured or not, never their values.
+
 ## Writing into a project over MCP
 
-`install_probe_sdk` and `install_adapter_template` write files into a game
-project — outside the tool's own workspace, which on the CLI is a `--confirm`
+`install_probe_sdk`, `install_adapter_template`, `create_optimization_goal`
+and `evaluate_optimization_goal` write files into a game project — outside the tool's own workspace, which on the CLI is a `--confirm`
 action. Over MCP they are gated the same way as `run_scenario`: the handler
 refuses unless `GAME_DEV_MCP_ALLOW_PROJECT_WRITE=1` is in the server
 environment, and the transport asks you to confirm each write. Neither layer

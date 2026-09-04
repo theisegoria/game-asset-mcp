@@ -57,6 +57,9 @@ capture contract, and the release machinery to publish it. See pull request #1.
 - `render_asset_contact_sheet`: the UV layout and every bound texture of a
   GLB as images, pure JS, so mirrored islands, layouts outside the unit square
   and flat-colour textures can be seen rather than inferred from counts.
+- The bounded optimisation loop on MCP: `create_optimization_goal`,
+  `evaluate_optimization_goal` and their free `plan_*` twins, behind the
+  project-write authority; and `run_doctor` for self-diagnosis.
 - `game-dev probe install`, and over MCP `install_probe_sdk` and
   `install_adapter_template` with free `plan_*` twins, behind
   `GAME_DEV_MCP_ALLOW_PROJECT_WRITE` plus per-call confirmation.

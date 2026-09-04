@@ -113,6 +113,13 @@ export const FREE_TOOLS: ReadonlySet<string> = new Set([
   'list_adapter_templates',
   'plan_adapter_install',
   'install_adapter_template',
+  // The optimisation loop and self-diagnosis: local arithmetic and local
+  // checks. Goal writes are governed by the project-write authority.
+  'plan_optimization_goal',
+  'create_optimization_goal',
+  'plan_goal_evaluation',
+  'evaluate_optimization_goal',
+  'run_doctor',
 ]);
 
 export function isSpendingTool(tool: string): boolean {

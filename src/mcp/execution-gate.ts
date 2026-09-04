@@ -17,6 +17,8 @@ export const EXECUTION_TOOLS: ReadonlySet<string> = new Set(['run_scenario']);
 export const PROJECT_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'install_probe_sdk',
   'install_adapter_template',
+  'create_optimization_goal',
+  'evaluate_optimization_goal',
 ]);
 
 export interface ExecutionGateOptions {
