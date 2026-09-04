@@ -114,7 +114,15 @@ describe('creating and evaluating a goal', () => {
     const evaluated = await tools.call('evaluate_optimization_goal', { goalPath, candidate });
     expect(evaluated.isError).toBe(false);
     expect(evaluated.payload.dryRun).toBe(false);
-    expect((evaluated.payload.goal as { state: { status: string } }).state.status).toBe('met');
+    // The fixture is deterministic: baseline 12ms, candidate 8ms, target 10ms.
+    expect(evaluated.payload).toMatchObject({
+      baselineValue: 12,
+      candidateValue: 8,
+      target: 10,
+      targetMet: true,
+      status: 'met',
+      remainingIterations: 2,
+    });
   }, 60_000);
 
   it('cannot reuse a candidate run, so an iteration cannot be replayed', async () => {
