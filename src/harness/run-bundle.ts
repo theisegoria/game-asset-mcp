@@ -418,7 +418,17 @@ export async function executeScenarioRun(options: {
   const artifacts = await roster(runPath, capture);
   const completedAt = new Date();
   const adapterEvidence = capture?.manifest.adapterEvidence;
+
+  // A software rasterizer is not a GPU, and an adapter must not be able to say
+  // otherwise. lavapipe, llvmpipe and SwiftShader all render correct-looking
+  // pixels on the CPU, so an adapter that reported GPU execution -- by mistake
+  // or by copy-paste from a hardware lane -- would mint authority it never
+  // earned. The claim is therefore not trusted and not merely flagged: it is
+  // overwritten here, on the harness side, where the adapter cannot reach.
+  const softwareRasterizedLane = adapterEvidence?.rendererClass === 'software';
+  const rendererClass = adapterEvidence?.rendererClass ?? 'unknown';
   const performanceAdmitted = Boolean(
+    !softwareRasterizedLane &&
     options.allowPerformance &&
     adapterEvidence?.hardwarePerformanceReported &&
     (capture?.manifest.measurements.length ?? 0) > 0,
@@ -453,15 +463,22 @@ export async function executeScenarioRun(options: {
       artifactRosterClosedAndHashed: true,
       captureContractValidated: capture !== undefined,
       rasterBytesDecoded: capture?.rasterBytesDecoded ?? false,
-      adapterReportedGpuExecution: adapterEvidence?.gpuExecutionReported ?? false,
-      adapterReportedGpuCompletionIdentity: adapterEvidence?.gpuCompletionIdentityReported ?? false,
+      rendererClass,
+      softwareRasterizedLane,
+      adapterReportedGpuExecution:
+        softwareRasterizedLane ? false : adapterEvidence?.gpuExecutionReported ?? false,
+      adapterReportedGpuCompletionIdentity:
+        softwareRasterizedLane ? false : adapterEvidence?.gpuCompletionIdentityReported ?? false,
       adapterReportedHardwarePerformance: adapterEvidence?.hardwarePerformanceReported ?? false,
       hardwareGpuExecutionProvenByHarnessAlone: false,
       hardwarePerformanceEvidenceAdmitted: performanceAdmitted,
       hardwarePerformanceMeasuredByHarnessAlone: false,
       humanVisualReviewPerformed: false,
       evidenceCeiling:
-        'The harness proves process status, schema validation, decoded raster bytes, and a closed SHA-256 artifact roster. GPU completion and hardware timing remain source-adapter claims unless separately joined to native evidence; no human visual review is inferred.',
+        'The harness proves process status, schema validation, decoded raster bytes, and a closed SHA-256 artifact roster. GPU completion and hardware timing remain source-adapter claims unless separately joined to native evidence; no human visual review is inferred.'
+        + (softwareRasterizedLane
+          ? ' This run was software-rasterized. It proves pipeline logic, shader arithmetic against a reference implementation, and asset correctness. It proves NOTHING about hardware GPU execution, driver behaviour, precision, or any timing property of real hardware, and its timing measurements are inadmissible. Any GPU claim the adapter made for this run has been refused.'
+          : ''),
     },
   });
   const manifestPath = path.join(runPath, 'run.json');

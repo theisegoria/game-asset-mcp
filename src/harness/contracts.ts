@@ -104,9 +104,20 @@ const scenarioSchema = z.object({
     'cpu',
     'project-write',
     'gpu',
-    'metal',
     'performance',
-  ])).min(1).max(5).default(['cpu']),
+    // Graphics lanes. These describe WHICH api the scenario asks for; none of
+    // them weakens the `gpu` gate, which is still what authorizes hardware use.
+    'metal',
+    'vulkan',
+    'webgpu',
+    'opengl',
+    // A software rasterizer is not a GPU. It runs on the CPU authorization
+    // path deliberately: demanding --allow-gpu for lavapipe would train users
+    // to grant GPU authority for runs that never touch one.
+    'software-raster',
+    // The bound was `.max(5)` against exactly five members, so declaring every
+    // capability was already impossible and adding one made it worse.
+  ])).min(1).max(16).default(['cpu']),
   parameters: z.record(parameterName, adapterParameterSchema).default({}),
   outputs: z.object({
     format: z.enum(['none', 'game-dev-capture-v1', 'genome-hemera-v1']),
@@ -167,7 +178,39 @@ export const captureAttachmentSchema = z.object({
     'material_id',
     'motion',
     'overdraw',
+    /** Unlit base colour: separates a texture-binding failure from a lighting one. */
+    'albedo',
+    /**
+     * Geometry only. Bisects "the geometry is wrong" from "the shading is
+     * wrong": a black colour buffer with correct wireframe silhouettes means
+     * the mesh and transforms are fine and the bug is in lighting or material.
+     */
+    'wireframe',
+    /**
+     * The scene re-rendered with a procedural checker instead of albedo.
+     * Flipped or mirrored UVs, wrong tiling, a missing second UV set and
+     * inconsistent texel density are all invisible in a normal colour render
+     * and obvious here.
+     */
+    'uv_checker',
+    /** False-coloured sampled LOD: missing mips, wrong bias, shimmer causes. */
+    'mipmap_level',
+    /** Portal, decal, outline and shadow-volume masks, inferable from nothing else. */
+    'stencil',
+    /**
+     * Per-pixel cost. Localizes WHERE a frame-time regression lives, which
+     * pass-level timings cannot. Engine-authored, so `description` must state
+     * the cost model.
+     */
+    'shader_complexity',
+    /** Lights per tile or cluster: why adding lights made this slow. */
+    'light_complexity',
     'custom',
+    // Deliberately NOT a kind: `histogram`. A histogram is a statistic derived
+    // from the colour buffer, not a distinct render output, and accepting one
+    // invites an engine to report a histogram that disagrees with its own
+    // pixels -- an unverifiable claim. The harness computes it from bytes it
+    // already decodes instead.
   ]),
   label: identifier.optional(),
   path: relativePathSchema,
@@ -199,6 +242,14 @@ export const captureManifestSchema = z.object({
   adapterEvidence: z.object({
     windowless: z.boolean().optional(),
     graphicsApi: z.string().min(1).max(64).optional(),
+    /**
+     * Whether a real GPU produced these pixels.
+     *
+     * Declared by the adapter and then INDEPENDENTLY DOWNGRADED by the harness
+     * when it says `software`: see run-bundle. A lane running on lavapipe or
+     * SwiftShader must not be able to mint GPU authority by claiming otherwise.
+     */
+    rendererClass: z.enum(['hardware', 'software', 'unknown']).default('unknown'),
     gpuExecutionReported: z.boolean().default(false),
     gpuCompletionIdentityReported: z.boolean().default(false),
     hardwarePerformanceReported: z.boolean().default(false),
@@ -287,6 +338,13 @@ export const runManifestSchema = z.object({
     artifactRosterClosedAndHashed: z.literal(true),
     captureContractValidated: z.boolean(),
     rasterBytesDecoded: z.boolean(),
+    /**
+     * What the harness concluded the renderer was, after applying its own
+     * downgrade -- not merely what the adapter claimed.
+     */
+    rendererClass: z.enum(['hardware', 'software', 'unknown']),
+    /** True when the harness refused GPU and timing claims for this run. */
+    softwareRasterizedLane: z.boolean(),
     adapterReportedGpuExecution: z.boolean(),
     adapterReportedGpuCompletionIdentity: z.boolean(),
     adapterReportedHardwarePerformance: z.boolean(),

@@ -65,13 +65,36 @@ Each scenario declares one or more:
 - `cpu`
 - `project-write`
 - `gpu`
-- `metal`
 - `performance`
+- a graphics lane: `metal`, `vulkan`, `webgpu`, or `opengl`
+- `software-raster`
 
 `--confirm` authorizes execution. GPU scenarios additionally need
 `--allow-gpu`; performance scenarios additionally need
-`--allow-performance`. `metal` describes the requested graphics lane but
+`--allow-performance`. A graphics lane describes which API is requested and
 does not weaken either gate.
+
+`software-raster` runs on the CPU authorization path and deliberately does NOT
+require `--allow-gpu`: demanding GPU authority for lavapipe would train users to
+grant it for runs that never touch a GPU.
+
+## Renderer class and the software lane
+
+`adapterEvidence.rendererClass` is `hardware`, `software`, or `unknown`
+(the default — "unknown" is truthful where "hardware" would be a claim nobody
+made).
+
+When it is `software`, the harness **overwrites** the adapter's GPU and
+hardware-timing claims rather than recording them: `adapterReportedGpuExecution`,
+`adapterReportedGpuCompletionIdentity` and `hardwarePerformanceEvidenceAdmitted`
+are all forced false, `softwareRasterizedLane` is set, and the run's evidence
+ceiling says the timings are inadmissible. This is not a lint. An adapter that
+declared a software renderer and claimed GPU execution anyway cannot make that
+claim stick.
+
+What the lane is genuinely good for is the reason to keep it: a CPU rasterizer
+is bit-deterministic where a real GPU is not, so `visual compare --threshold 0`
+becomes a usable hard gate in CI.
 
 ## Parameters
 
@@ -96,8 +119,21 @@ For `game-dev-capture-v1`, the adapter writes a capture manifest and every
 referenced attachment under its declared staging directory. The capture
 manifest can contain:
 
-- frames with color, depth, normal, object-ID, material-ID, motion, overdraw,
-  or custom attachments
+- frames with color, albedo, depth, normal, object-ID, material-ID, motion,
+  overdraw, wireframe, UV-checker, mipmap-level, stencil, shader-complexity,
+  light-complexity, or custom attachments
+
+  The less obvious ones earn their place by discriminating a failure class
+  nothing else does. `wireframe` bisects "the geometry is wrong" from "the
+  shading is wrong": correct silhouettes over a black colour buffer means the
+  mesh and transforms are fine. `uv_checker` exposes flipped or mirrored UVs,
+  wrong tiling and inconsistent texel density, all invisible in a normal render.
+  `shader_complexity` and `light_complexity` are engine-authored heuristics, so
+  their `description` must state the cost model.
+
+  There is deliberately no `histogram` kind: a histogram is a statistic derived
+  from the colour buffer rather than a distinct render output, and accepting one
+  would let an engine report a histogram that disagrees with its own pixels.
 - JSON or JSONL telemetry
 - profile files
 - numeric measurements with metric, value, unit, frame index, and aggregation
