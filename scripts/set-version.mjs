@@ -77,4 +77,17 @@ await editText('script/package_macos_release.sh', `"${oldAsset}"`, `"${newAsset}
 await editText('distribution/macos-app-repo/THIRD_PARTY_NOTICES.md', `CLI ${current},`, `CLI ${next},`);
 await editText('distribution/macos-app-repo/README.md', `CLI ${current} and`, `CLI ${next} and`);
 
-console.log(`\n${current} -> ${next}. Now: npm test (version-parity), add a CHANGELOG entry, commit, tag v${next}.`);
+// The release workflow refuses a tag with no matching CHANGELOG section. If an
+// Unreleased section exists, promote it; otherwise say so rather than guess.
+{
+  const changelog = path.join(root, 'CHANGELOG.md');
+  const text = await readFile(changelog, 'utf8');
+  if (text.includes('\n## Unreleased\n')) {
+    await writeFile(changelog, text.replace('\n## Unreleased\n', `\n## ${next}\n`));
+    console.log('promoted CHANGELOG "Unreleased" to', next);
+  } else if (!text.includes(`\n## ${next}\n`)) {
+    console.log(`note: CHANGELOG.md has no "## Unreleased" or "## ${next}" section; the release workflow will refuse the tag until one exists`);
+  }
+}
+
+console.log(`\n${current} -> ${next}. Now: npm test (version-parity), commit, tag v${next}.`);

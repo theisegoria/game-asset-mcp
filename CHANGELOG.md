@@ -1,5 +1,63 @@
 # Changelog
 
+## Unreleased
+
+Audit of every feature, an MCP transport that can show pictures, a wider
+capture contract, and the release machinery to publish it. See pull request #1.
+
+### Fixed — answers that were confidently wrong
+
+- `doctor` checked three skill ids that no longer shipped, so its check warned
+  forever and `skill install all` could never clear it. Ids now derive from the
+  bundle the installer writes.
+- Unknown CLI flags were silently ignored: `--treshold 20` ran with threshold 0
+  and reported every pixel changed. Unknown flags are now refused by name with
+  a nearest-match suggestion.
+- Undrawn geometry was counted and never judged; a mesh outside the default
+  scene failed as "0 triangles". `has_geometry` names the cause; the partial
+  case warns.
+- `aggregation` was declared in the capture contract and read nowhere, so a
+  pre-aggregated p99 was pooled with raw samples. Grouping keys on it now.
+- The object-ID diff read only the baseline's buffer, so a deleted mesh reported
+  as "the floor changed". Both buffers are read; disappeared objects are named.
+- Binary attachments were skipped by analysis and 16-bit PNG was quantised to
+  8 bits, so depth could not show depth fighting. Attachments declare a
+  `format`; float buffers are read at capture precision.
+- The macOS legal record stayed at CLI 1.0.1 through the 1.0.2 release, which
+  broke the app build and a CI job. Fixed, with a guard that resolves every
+  named legal asset to a file with the recorded hash.
+- The app signature check lost a race with iCloud's File Provider re-attaching
+  extended attributes; it now clears immediately before verifying, with a retry.
+
+### Added — MCP, and what the model can now see
+
+- An MCP server on stdio (`game-dev-mcp`, `game-dev mcp serve`) over the same
+  registry the CLI drives, with 27 tools, typed schemas, and a release check
+  that fails if the two transports ever advertise different tool sets.
+- `game-dev mcp config --client …` generates ready-to-paste client
+  configuration with the absolute output directory resolved.
+- A money gate: no tool takes an approval argument; spending needs a
+  human-written ceiling plus per-call elicitation, and every other path fails
+  closed. Scenario execution needs `GAME_DEV_MCP_ALLOW_EXECUTION` (and GPU /
+  performance equivalents) plus per-call confirmation.
+- Results carry `visuals`; MCP returns image blocks. Reference candidates are
+  cached locally instead of handed over as expiring URLs no client fetches.
+- Capture, visual and performance analysis exposed to MCP; `plan_scenario_run`
+  and `run_scenario` behind the authority gate.
+- Prose summaries on visual and performance results, derived deterministically
+  from the statistics and phrased as consistency, never cause.
+- SSIM, anti-aliasing tolerance (`--aa-tolerance`), hitch counts, median
+  absolute deviation, the "1% low", warmup exclusion, and a noise screen that
+  reports `underpowered` rather than a verdict the data cannot support.
+- A software-rasterizer lane whose GPU and timing claims the harness refuses,
+  recording what it refused; a declared graphics environment from a hardcoded
+  allowlist; seven new attachment kinds.
+- The probe SDK (`probe/`): a C99 library engines compile in to produce valid
+  bundles, validated against the harness rather than against golden files.
+- `--dry-run` on `package build` and `catalog admit`.
+- `scripts/set-version.mjs`, a version-parity test, and a tag-driven release
+  workflow that publishes with npm provenance.
+
 ## 1.0.2
 
 Public plugin and CLI corrective release:

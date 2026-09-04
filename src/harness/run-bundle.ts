@@ -350,6 +350,26 @@ export async function executeScenarioRun(options: {
   if (options.plan.requiredAuthorizations.includes('performance') && !options.allowPerformance) {
     throw invalidInput('this scenario requires separate hardware-performance authorization');
   }
+  // A hosted CI runner is not target hardware. Its timings are real numbers
+  // from a real machine -- a virtualised, shared, unspecified one -- and
+  // admitting them as hardware-performance evidence would let a green build
+  // imply a claim about the player's device that nothing measured. Refused
+  // rather than annotated, because an annotation on admitted evidence is the
+  // kind of caveat that gets stripped on the way to a dashboard. A self-hosted
+  // runner that IS the declared target hardware can say so explicitly.
+  if (
+    options.allowPerformance
+    && process.env.CI !== undefined && process.env.CI !== '' && process.env.CI !== 'false'
+    && process.env.GAME_DEV_CI_HARDWARE_ATTESTED !== '1'
+  ) {
+    throw invalidInput(
+      'hardware-performance authorization is refused under CI: a hosted runner is not target ' +
+      'hardware, so its timings cannot be admitted as evidence about the player\'s device. Run the ' +
+      'scenario without --allow-performance to keep the capture, or set ' +
+      'GAME_DEV_CI_HARDWARE_ATTESTED=1 only on a self-hosted runner that is the declared target.',
+      { ci: process.env.CI },
+    );
+  }
   if (options.plan.adapterManifestSha256 !== options.adapter.manifestSha256) {
     throw invalidState('scenario plan no longer matches the loaded adapter manifest');
   }
