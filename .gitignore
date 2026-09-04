@@ -7,6 +7,11 @@ dist/
 apps/macos/GameDevelopmentStudio/.build/
 apps/macos/GameDevelopmentStudio/.swiftpm/
 apps/macos/GameDevelopmentStudio/dist/
+apps/macos/Anvil/.build/
+apps/macos/Anvil/.swiftpm/
+apps/macos/Anvil/dist/
+apps/macos/Anvil/Resources/AnvilIcon.png
+apps/macos/Anvil/Resources/AnvilIcon.icns
 
 # Secrets — never commit. See .env.example.
 .env
