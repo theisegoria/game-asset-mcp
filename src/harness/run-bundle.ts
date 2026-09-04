@@ -106,10 +106,24 @@ function safeChildEnvironment(plan: ScenarioRunPlan): NodeJS.ProcessEnv {
     const value = process.env[name];
     if (value !== undefined) environment[name] = value;
   }
+
+  // Declared by the adapter, already restricted to a hardcoded graphics
+  // allowlist by the schema, and applied BEFORE the injected GAME_DEV_* names
+  // so a manifest cannot redirect the harness's own contract surface.
+  for (const [name, value] of Object.entries(plan.environment)) {
+    environment[name] = value;
+  }
+
   environment.GAME_DEV_RUN_ID = plan.runId;
   environment.GAME_DEV_RUN_DIR = plan.runPath;
   environment.GAME_DEV_ADAPTER_ID = plan.adapterId;
   environment.GAME_DEV_SCENARIO_ID = plan.scenarioId;
+  // Where the harness will actually look for the capture manifest. Without it
+  // an engine has to guess, and both shapes exist in the wild -- the fixture
+  // writes capture.json at the run root, Genome writes it under native/.
+  if (plan.output.path !== undefined) {
+    environment.GAME_DEV_CAPTURE_MANIFEST = path.join(plan.runPath, plan.output.path);
+  }
   return environment;
 }
 

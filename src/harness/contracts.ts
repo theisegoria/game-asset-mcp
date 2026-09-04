@@ -90,6 +90,40 @@ export const adapterParameterSchema = z.union([
   projectPathParameterSchema,
 ]);
 
+/**
+ * Graphics environment variables a scenario may set for its own process.
+ *
+ * A hardcoded allowlist, not a pattern. The inherited environment stays as
+ * narrow as it was, because widening it would make a run's meaning depend on
+ * the shell that invoked it -- which contradicts the determinism the whole
+ * sealed-bundle model rests on. Declaring the values in the adapter instead
+ * puts them in the plan, and therefore in the sealed run, where they are
+ * reviewable and reproducible.
+ *
+ * LD_* and DYLD_* are absent deliberately: they are loader-injection vectors,
+ * and a capture harness that let a manifest set them would be a code-execution
+ * primitive wearing a configuration hat. DISPLAY and WAYLAND_DISPLAY are absent
+ * because surfaceless rendering is the entire point.
+ */
+export const GRAPHICS_ENVIRONMENT_NAMES = [
+  'VK_ICD_FILENAMES',
+  'VK_DRIVER_FILES',
+  'VK_LAYER_PATH',
+  'VK_INSTANCE_LAYERS',
+  'LIBGL_ALWAYS_SOFTWARE',
+  'MESA_LOADER_DRIVER_OVERRIDE',
+  'EGL_PLATFORM',
+  '__EGL_VENDOR_LIBRARY_FILENAMES',
+  'MTL_CAPTURE_ENABLED',
+  'MTL_DEBUG_LAYER',
+  'MTL_SHADER_VALIDATION',
+  'WGPU_BACKEND',
+  'DRI_PRIME',
+  'RUST_BACKTRACE',
+] as const;
+
+const graphicsEnvironmentName = z.enum(GRAPHICS_ENVIRONMENT_NAMES);
+
 const scenarioSchema = z.object({
   id: identifier,
   title: z.string().min(1).max(160),
@@ -123,6 +157,7 @@ const scenarioSchema = z.object({
     format: z.enum(['none', 'game-dev-capture-v1', 'genome-hemera-v1']),
     path: relativePathSchema.optional(),
   }).strict().default({ format: 'none' }),
+  environment: z.record(graphicsEnvironmentName, z.string().max(4096)).default({}),
 }).strict().superRefine((value, context) => {
   if (new Set(value.capabilities).size !== value.capabilities.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'capabilities must be unique' });

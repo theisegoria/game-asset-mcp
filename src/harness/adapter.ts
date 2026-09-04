@@ -41,6 +41,8 @@ export interface ScenarioRunPlan {
     format: AdapterScenario['outputs']['format'];
     path?: string;
   };
+  /** Declared graphics environment, sealed into the plan and the run. */
+  environment: Record<string, string>;
   requiredAuthorizations: Array<'confirm' | 'gpu' | 'performance'>;
   evidenceCeiling: string;
 }
@@ -289,6 +291,7 @@ export async function planScenarioRun(options: {
       format: scenario.outputs.format,
       ...(outputPath ? { path: outputPath } : {}),
     },
+    environment: { ...scenario.environment },
     requiredAuthorizations,
     evidenceCeiling:
       'This plan proves only resolved local configuration. It executes nothing and proves no build, GPU, pixel, performance, signing, or human-review result.',

@@ -96,6 +96,35 @@ What the lane is genuinely good for is the reason to keep it: a CPU rasterizer
 is bit-deterministic where a real GPU is not, so `visual compare --threshold 0`
 becomes a usable hard gate in CI.
 
+## Declared graphics environment
+
+A scenario may set graphics environment variables for its own process:
+
+```json
+"environment": {
+  "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json",
+  "LIBGL_ALWAYS_SOFTWARE": "1"
+}
+```
+
+Only a hardcoded allowlist is accepted: the Vulkan ICD/layer variables, the
+Mesa and EGL selectors, the Metal capture and validation switches, the wgpu
+backend selector, `DRI_PRIME`, and `RUST_BACKTRACE`. Anything else is refused
+when the manifest loads.
+
+The inherited environment is deliberately NOT widened to cover these. Inheriting
+them would make a run's meaning depend on the shell that launched it, which
+contradicts the determinism the sealed-bundle model rests on. Declared values
+land in the plan and therefore in the sealed run, where they are reviewable and
+reproducible.
+
+`LD_*` and `DYLD_*` are absent from the allowlist on purpose. They are
+loader-injection vectors, and a capture harness that let a manifest set them
+would be a code-execution primitive wearing a configuration hat. `DISPLAY` and
+`WAYLAND_DISPLAY` are absent because surfaceless rendering is the point. The
+`GAME_DEV_*` contract variables are absent because a manifest that could set
+`GAME_DEV_RUN_DIR` could aim the capture write anywhere.
+
 ## Parameters
 
 Parameters are declared and typed. Supported forms include strings, booleans,
@@ -112,6 +141,27 @@ Only these templates are expanded:
 
 No shell interpolation is used. The executable and argument array are passed
 directly to the child process.
+
+## What the harness tells the process
+
+The child process inherits a narrow fixed set (`PATH`, `HOME`, `TMPDIR`,
+`LANG`, `LC_ALL`, `DEVELOPER_DIR`, `SDKROOT`, `TERM`), any declared graphics
+environment, and these injected variables — the actual contract surface:
+
+- `GAME_DEV_RUN_ID` — the run identifier
+- `GAME_DEV_RUN_DIR` — the harness-owned directory to write into
+- `GAME_DEV_ADAPTER_ID`, `GAME_DEV_SCENARIO_ID`
+- `GAME_DEV_CAPTURE_MANIFEST` — the absolute path the harness will read the
+  capture manifest from, present when the scenario declares an output path
+
+The last one exists because an engine otherwise has to guess, and both shapes
+occur in practice: some capture runners write `capture.json` at the run root,
+the Genome format writes it under `native/`. Reading the variable removes a
+whole class of "the harness cannot find my capture" failure. It is additive —
+a runner that ignores it behaves exactly as before.
+
+Injected names are applied after the declared environment, so a manifest cannot
+redirect them.
 
 ## Generic capture output
 
