@@ -14,6 +14,9 @@
 import path from 'node:path';
 import { z } from 'zod';
 import { analyzeRunCapture, compareRunVisuals, type RasterAnalysis } from '../harness/visual.js';
+import { loadAdapter, planScenarioRun, serializableAdapterSnapshot } from '../harness/adapter.js';
+import { executeScenarioRun } from '../harness/run-bundle.js';
+import { invalidInput } from '../util/errors.js';
 import { compareRunPerformance, summarizeRunPerformance } from '../harness/performance.js';
 import { resolveRunPath, verifyRunBundle } from '../harness/run-bundle.js';
 import type { ToolRegistrar } from '../commands/registry.js';
@@ -35,9 +38,139 @@ function colorimetryFor(kind: RasterAnalysis['kind']): VisualAttachment['colorim
   return kind === 'color' ? 'srgb' : 'data';
 }
 
+type Authority = 'execution' | 'gpu' | 'performance';
+
+const AUTHORITY_ENV: Record<Authority, string> = {
+  execution: 'GAME_DEV_MCP_ALLOW_EXECUTION',
+  gpu: 'GAME_DEV_MCP_ALLOW_GPU',
+  performance: 'GAME_DEV_MCP_ALLOW_PERFORMANCE',
+};
+
+function granted(authority: Authority, env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[AUTHORITY_ENV[authority]]?.trim() === '1';
+}
+
+/**
+ * Refuse to run a project executable unless a human granted the authority.
+ *
+ * The CLI asks for --confirm on every invocation, plus --allow-gpu and
+ * --allow-performance on top when the scenario declares those capabilities.
+ * This is the equivalent for a caller that types nothing: the authority lives
+ * in the launch environment, which a human writes and a model cannot reach.
+ *
+ * It is enforced HERE, in the handler, rather than only in the MCP transport,
+ * because registering the tool also exposes it through `game-dev tool call` --
+ * and a gate that one entry point walks around is not a gate.
+ */
+function assertExecutionAuthority(required: readonly string[]): void {
+  const missing: Authority[] = [];
+  if (!granted('execution')) missing.push('execution');
+  if (required.includes('gpu') && !granted('gpu')) missing.push('gpu');
+  if (required.includes('performance') && !granted('performance')) missing.push('performance');
+  if (missing.length === 0) return;
+
+  throw invalidInput(
+    'running a project scenario requires authority this process was not given',
+    {
+      // Named `missingGrants`, not `missingAuthorities`: the log redactor
+      // scrubs any key containing "auth", which is correct of it and would
+      // have blanked the one field that tells an operator what to do.
+      missingGrants: missing,
+      grantBySetting: missing.map((authority) => `${AUTHORITY_ENV[authority]}=1`),
+      note:
+        'Set these in the server configuration a human controls, then restart. They are ' +
+        'deliberately not tool arguments: an argument the caller writes cannot authorize the ' +
+        'caller. Hardware-performance authority additionally means you accept that timings from ' +
+        'this host are being recorded as evidence.',
+    },
+  );
+}
+
 export function registerHarnessTools(server: ToolRegistrar, ctx: ToolContext): void {
   const resolve = (reference: string): Promise<string> =>
     resolveRunPath(ctx.config.runsDir, reference);
+
+  const projectPath = z.string().min(1).describe('Path to the game project holding .game-dev/adapter.json.');
+  const scenarioParameters = z.record(z.unknown()).default({})
+    .describe('Values for the parameters the scenario declares. Undeclared names are refused.');
+
+  server.registerTool(
+    'plan_scenario_run',
+    {
+      title: 'Plan a capture scenario without running it',
+      description:
+        'FREE, local, executes nothing. Resolves a scenario from the project adapter into the ' +
+        'exact executable, arguments, working directory and run directory that would be used, ' +
+        'and reports which authorities the run would require. Call this first: it is the only ' +
+        'way to see what would execute before anything does.',
+      inputSchema: { project: projectPath, scenario: z.string().min(1), parameters: scenarioParameters },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    guard(ctx.logger, 'plan_scenario_run', async (args) => {
+      const adapter = await loadAdapter(args.project);
+      const plan = await planScenarioRun({
+        adapter,
+        scenarioId: args.scenario,
+        runsRoot: ctx.config.runsDir,
+        parameters: args.parameters,
+      });
+      return ok({
+        schema: 'game_dev.scenario_plan.v1',
+        plan,
+        adapter: serializableAdapterSnapshot(adapter),
+        authoritiesRequired: plan.requiredAuthorizations,
+        authoritiesGranted: {
+          execution: granted('execution'),
+          gpu: granted('gpu'),
+          performance: granted('performance'),
+        },
+      });
+    }),
+  );
+
+  server.registerTool(
+    'run_scenario',
+    {
+      title: 'Run a capture scenario the project owns',
+      description:
+        'Executes the project\'s OWN capture executable and seals the result into a run bundle. ' +
+        'Requires authority granted in the server environment, not in these arguments: ' +
+        'GAME_DEV_MCP_ALLOW_EXECUTION, plus GAME_DEV_MCP_ALLOW_GPU or ' +
+        'GAME_DEV_MCP_ALLOW_PERFORMANCE when the scenario declares those capabilities. Call ' +
+        'plan_scenario_run first to see what would run. The harness owns containment and sealing; ' +
+        'the game owns its renderer, its GPU synchronization and what it captures.',
+      inputSchema: { project: projectPath, scenario: z.string().min(1), parameters: scenarioParameters },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    guard(ctx.logger, 'run_scenario', async (args) => {
+      // Baseline authority is checked before the project is touched at all, so
+      // an unauthorized caller does no work and learns nothing about the
+      // project's adapter. The capability-specific authorities need the
+      // resolved plan, so they are checked once it exists.
+      assertExecutionAuthority([]);
+      const adapter = await loadAdapter(args.project);
+      const plan = await planScenarioRun({
+        adapter,
+        scenarioId: args.scenario,
+        runsRoot: ctx.config.runsDir,
+        parameters: args.parameters,
+      });
+
+      // Checked against the resolved plan, so authority is demanded for what
+      // this scenario actually declares rather than for a name.
+      assertExecutionAuthority(plan.requiredAuthorizations);
+
+      const result = await executeScenarioRun({
+        adapter,
+        plan,
+        request: args.parameters,
+        confirm: true,
+        allowGpu: granted('gpu'),
+        allowPerformance: granted('performance'),
+      });
+      return ok(result as unknown as Record<string, unknown>);
+    }),
+  );
 
   server.registerTool(
     'verify_capture_run',

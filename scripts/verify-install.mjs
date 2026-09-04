@@ -21,6 +21,8 @@ const NPM_INSTALL_TIMEOUT_MS = 60_000;
 const EXPECTED_TOOLS = [
   'analyze_capture_run',
   'compare_capture_visuals',
+  'plan_scenario_run',
+  'run_scenario',
   'compare_run_performance',
   'summarize_run_performance',
   'verify_capture_run',

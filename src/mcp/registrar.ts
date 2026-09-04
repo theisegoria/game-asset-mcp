@@ -9,6 +9,7 @@ import {
 } from '../commands/registry.js';
 import type { ToolResult } from '../tools/context.js';
 import type { SpendGate } from './spend-gate.js';
+import type { ExecutionGate } from './execution-gate.js';
 import { deliverVisuals, type VisualBudget } from './visuals.js';
 
 /**
@@ -43,6 +44,7 @@ export class McpToolRegistrar implements ToolRegistrar {
     private readonly gate: SpendGate,
     private readonly profile: ToolProfile = 'all',
     private readonly budget?: VisualBudget,
+    private readonly execution?: ExecutionGate,
   ) {}
 
   registerTool<Shape extends ZodRawShape>(
@@ -53,7 +55,8 @@ export class McpToolRegistrar implements ToolRegistrar {
     if (!TOOL_NAME_PATTERN.test(name)) throw new Error(`invalid command name: ${name}`);
     if (this.entries.has(name)) throw new Error(`command already registered: ${name}`);
 
-    const gated = this.gate.wrap(name, handler);
+    const spendGated = this.gate.wrap(name, handler);
+    const gated = this.execution ? this.execution.wrap(name, spendGated) : spendGated;
 
     // The input schema is advertised so a client sees real types rather than
     // guessing from a name. One consequence worth stating: the SDK validates

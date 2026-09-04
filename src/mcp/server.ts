@@ -20,6 +20,7 @@ import { isDirectInvocation } from '../util/entrypoint.js';
 import { GAME_DEV_NAME, GAME_DEV_VERSION } from '../version.js';
 import { McpToolRegistrar, type ToolProfile } from './registrar.js';
 import { SpendGate, type SpendMode } from './spend-gate.js';
+import { ExecutionGate } from './execution-gate.js';
 
 export interface McpServerOptions {
   profile?: ToolProfile;
@@ -45,32 +46,42 @@ export function createMcpServer(
 ): McpServer {
   const server = new McpServer({ name: GAME_DEV_NAME, version: GAME_DEV_VERSION });
 
+  const canElicit = (): boolean =>
+    server.server.getClientCapabilities()?.elicitation !== undefined;
+  const elicit = async (message: string): Promise<boolean> => {
+    const answer = await server.server.elicitInput({
+      message,
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          confirm: {
+            type: 'boolean',
+            title: 'Confirm',
+            description: 'Only an explicit yes proceeds.',
+          },
+        },
+        required: ['confirm'],
+      },
+    });
+    return answer.action === 'accept' && answer.content?.confirm === true;
+  };
+
   const gate = new SpendGate({
     mode: options.spendMode ?? 'off',
     limitCents: options.spendLimitCents,
     // Resolved per call rather than at construction: capabilities are only
     // known after the client initializes, which happens after this returns.
-    canElicit: () => server.server.getClientCapabilities()?.elicitation !== undefined,
-    elicit: async (message: string): Promise<boolean> => {
-      const answer = await server.server.elicitInput({
-        message,
-        requestedSchema: {
-          type: 'object',
-          properties: {
-            confirm: {
-              type: 'boolean',
-              title: 'Authorize this charge',
-              description: 'Only an explicit yes authorizes provider spending.',
-            },
-          },
-          required: ['confirm'],
-        },
-      });
-      return answer.action === 'accept' && answer.content?.confirm === true;
-    },
+    canElicit,
+    elicit,
   });
 
-  const registrar = new McpToolRegistrar(server, gate, options.profile ?? 'all');
+  const registrar = new McpToolRegistrar(
+    server,
+    gate,
+    options.profile ?? 'all',
+    undefined,
+    new ExecutionGate({ canElicit, elicit }),
+  );
   registerAssetCommands(registrar, runtime.context);
   return server;
 }

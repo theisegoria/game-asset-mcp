@@ -98,6 +98,11 @@ export const FREE_TOOLS: ReadonlySet<string> = new Set([
   'compare_capture_visuals',
   'summarize_run_performance',
   'compare_run_performance',
+  // Scenario execution runs the project's own binary. It contacts no provider,
+  // so it is free in the only sense this set measures -- its risk is governed
+  // by the separate execution authority, not by the spend ceiling.
+  'plan_scenario_run',
+  'run_scenario',
 ]);
 
 export function isSpendingTool(tool: string): boolean {
