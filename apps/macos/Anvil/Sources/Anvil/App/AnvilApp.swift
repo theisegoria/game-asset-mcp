@@ -1,15 +1,15 @@
+import AnvilKit
 import SwiftUI
 
-@main
 struct AnvilApp: App {
     @State private var model = AnvilModel()
 
     var body: some Scene {
         WindowGroup("Anvil", id: "anvil") {
-            HealthWorkspace()
+            ContentView()
                 .environment(model)
-                .frame(minWidth: 720, minHeight: 520)
+                .frame(minWidth: 900, minHeight: 600)
         }
-        .defaultSize(width: 1_040, height: 760)
+        .defaultSize(width: 1_280, height: 860)
     }
 }

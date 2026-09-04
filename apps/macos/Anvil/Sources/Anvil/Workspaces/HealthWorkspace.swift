@@ -4,6 +4,7 @@ import SwiftUI
 /// Toolchain health: the twelve `doctor` checks, the workspace paths they report, and
 /// the CLI's own statement of what the report does not prove.
 struct HealthWorkspace: View {
+    @Environment(\.anvilFlattensSurfaces) private var isFlattened
     @Environment(AnvilModel.self) private var model
 
     var body: some View {
@@ -28,7 +29,7 @@ struct HealthWorkspace: View {
                 } label: {
                     Label("Check Again", systemImage: "stethoscope")
                 }
-                .buttonStyle(.glass)
+                .anvilGlassButton(isFlattened: isFlattened)
                 .disabled(model.health.isChecking)
             }
         }
@@ -48,7 +49,7 @@ struct HealthWorkspace: View {
             }
             Spacer(minLength: 12)
             if model.health.isChecking {
-                ProgressView().controlSize(.small)
+                ActivityIndicator()
             }
         }
     }
@@ -152,6 +153,7 @@ struct HealthWorkspace: View {
 }
 
 private struct CheckRow: View {
+    @Environment(\.anvilFlattensSurfaces) private var isFlattened
     let check: DoctorReport.Check
     @State private var isExpanded = false
 
@@ -222,6 +224,7 @@ private struct CheckRow: View {
 /// a report for a stronger claim than it is. Surfacing it verbatim is the GUI's side of
 /// that bargain.
 struct EvidenceCeilingNote: View {
+    @Environment(\.anvilFlattensSurfaces) private var isFlattened
     let text: String
 
     var body: some View {
@@ -265,11 +268,5 @@ private extension DoctorReport.CheckStatus {
         case .fail: .red
         case .unavailable: .secondary
         }
-    }
-}
-
-private extension AnvilModel.HealthState {
-    var isChecking: Bool {
-        if case .checking = self { true } else { false }
     }
 }

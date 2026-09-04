@@ -3,10 +3,7 @@ import Foundation
 import Observation
 import OSLog
 
-/// Phase 0 application state: locate the bundled runtime and report toolchain health.
-///
-/// This is deliberately small. The concurrent run registry that replaces it lands in
-/// Phase 1; nothing here should grow a second operation.
+/// Application state: the runtime binding, toolchain health, and the run registry.
 @MainActor
 @Observable
 final class AnvilModel {
@@ -15,29 +12,51 @@ final class AnvilModel {
         case checking
         case ready(DoctorReport)
         case failed(String)
+
+        var isChecking: Bool {
+            if case .checking = self { true } else { false }
+        }
     }
 
     private(set) var health: HealthState = .idle
-    private(set) var runtimeDescription: String
     private(set) var outputDirectory: URL
+    let runs: RunStore
 
     @ObservationIgnored private let client: GameDevCLIClient
     @ObservationIgnored private let runtimeURL: URL?
+    @ObservationIgnored private var didStart = false
     @ObservationIgnored private static let logger = Logger(
         subsystem: "com.theisegoria.Anvil",
-        category: "Health"
+        category: "App"
     )
 
     init() {
         let runtimeURL = AnvilRuntime.bundledRuntimeURL()
-        self.runtimeURL = runtimeURL
-        self.client = GameDevCLIClient(executableURL: runtimeURL)
-        self.runtimeDescription = runtimeURL?.path ?? "not found in this app bundle"
-        self.outputDirectory = FileManager.default.homeDirectoryForCurrentUser
+        let client = GameDevCLIClient(executableURL: runtimeURL)
+        let outputDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Anvil", isDirectory: true)
+
+        self.runtimeURL = runtimeURL
+        self.client = client
+        self.outputDirectory = outputDirectory
+        self.runs = RunStore(
+            client: client,
+            log: RunLog(root: (try? RunLog.defaultRoot())
+                ?? FileManager.default.temporaryDirectory
+                    .appendingPathComponent("anvil-runs", isDirectory: true))
+        )
     }
 
     var hasRuntime: Bool { runtimeURL != nil }
+    var runtimeDescription: String { runtimeURL?.path ?? "not found in this app bundle" }
+
+    /// Idempotent: `.task` can fire again when the view is recreated.
+    func start() async {
+        guard !didStart else { return }
+        didStart = true
+        runs.restore()
+        await refreshHealth()
+    }
 
     func refreshHealth() async {
         guard runtimeURL != nil else {
