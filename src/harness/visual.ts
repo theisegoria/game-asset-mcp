@@ -6,6 +6,7 @@ import { canonicalJson } from '../packages/format.js';
 import { invalidInput, invalidState } from '../util/errors.js';
 import { validateCaptureManifest } from './capture.js';
 import { GAME_DEV_VISUAL_COMPARISON_SCHEMA, type CaptureAttachment, type CaptureManifest } from './contracts.js';
+import { describeComparison, type ComparisonVerdict } from './describe-comparison.js';
 import { verifyRunBundle } from './run-bundle.js';
 
 export interface RasterAnalysis {
@@ -98,6 +99,16 @@ export interface VisualComparison {
     heatmapPath?: string;
     reason?: string;
   }>;
+  /** Worst outcome across attachments. */
+  verdict: ComparisonVerdict;
+  /**
+   * The same numbers, in sentences.
+   *
+   * Derived deterministically from the statistics -- no model, no network --
+   * because a caller should not have to know that a low edge delta beside a
+   * large luminance shift means shading rather than geometry.
+   */
+  summary: string[];
   unmatchedBaseline: string[];
   unmatchedCandidate: string[];
   outputPath?: string;
@@ -542,6 +553,8 @@ export async function compareRunVisuals(options: {
     candidateRunId: candidate.runId,
     threshold,
     pairs,
+    verdict: 'changed',
+    summary: [],
     unmatchedBaseline: [...baselineAttachments.keys()].filter((key) => !candidateAttachments.has(key)).sort(),
     unmatchedCandidate: [...candidateAttachments.keys()].filter((key) => !baselineAttachments.has(key)).sort(),
     ...(outputPath ? { outputPath } : {}),
@@ -556,8 +569,12 @@ export async function compareRunVisuals(options: {
       humanVisualReviewPerformed: false,
     },
     evidenceCeiling:
-      'The comparison proves byte-decoded raster statistics, edge deltas, heatmaps, and optional object-ID-region grouping. It does not diagnose artistic intent, establish causality, or count as human visual review.',
+      'The comparison proves byte-decoded raster statistics, edge deltas, heatmaps, and optional object-ID-region grouping. The prose summary is generated deterministically from those statistics and describes them; it does not diagnose artistic intent, establish causality, or count as human visual review.',
   };
+  const narrative = describeComparison(comparison);
+  comparison.verdict = narrative.verdict;
+  comparison.summary = narrative.summary;
+
   if (outputPath) {
     await fs.writeFile(path.join(outputPath, 'comparison.json'), canonicalJson(comparison), { flag: 'wx', mode: 0o600 });
   }
