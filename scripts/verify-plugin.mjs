@@ -139,7 +139,6 @@ async function main() {
   );
   const manifest = await json('.codex-plugin/plugin.json');
   invariant(manifest.name === 'game-development-studio', 'unexpected plugin name');
-  invariant(manifest.version === '1.0.2', 'unexpected plugin version');
   invariant(manifest.skills === './skills/', 'plugin must publish the canonical skills directory');
   invariant(manifest.mcpServers === undefined && manifest.apps === undefined, 'skills-only plugin must not declare MCP or apps');
   invariant(manifest.interface?.screenshots === undefined, 'skills-only plugin must not declare screenshots');
@@ -240,6 +239,13 @@ async function main() {
   }
 
   const skillManifest = await json('skills/manifest.json');
+  // The plugin must state the same version as the skill bundle it wraps. Read
+  // from the tree under verification rather than from a literal or from this
+  // script's own location: the release tests relocate this file into a
+  // fixture, where a script-relative package.json does not exist, and a
+  // literal would be one more place a release can leave stale.
+  invariant(manifest.version === skillManifest.version,
+    `plugin version ${manifest.version} does not match skill bundle version ${skillManifest.version}`);
   invariant(skillManifest.schema === 'game_dev.skill_bundle.v1', 'unexpected skill bundle schema');
   invariant(skillManifest.version === manifest.version, 'skill and plugin versions must match');
   invariant(skillManifest.skills.length === 5, 'exactly five skills required');

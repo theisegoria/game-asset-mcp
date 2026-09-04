@@ -24,8 +24,9 @@ distribution a closed, reviewable roster.
 
 The supported automation boundary is `game-dev` with `game_dev.result.v1` and
 `game_dev.event.v1`. The macOS app launches a configured local CLI and validates
-its identity and protocol; it does not embed Node.js, Blender, provider services,
-or the target game.
+its identity and protocol. Its complete bundle embeds a direct Node runtime and
+a closed, exact-rostered build of that CLI; it does not embed Blender, provider
+services, or the target game.
 
 ## Public distributions
 
@@ -36,9 +37,21 @@ documentation, skills, app source, release templates, and retained history. The
 npm `files` allowlist is intentionally narrower: it omits `apps/`, native build
 outputs, tests, and repository-only release machinery.
 
-The v0.4.0 MCP implementation remains available only through its historical tag
-and commits. Current releases ship the `game-dev` CLI and must continue to reject
-stale `dist/server.js`, `.mcp.json`, and `.app.json` payloads.
+Current releases ship two transports over one registry: the `game-dev` CLI and
+an MCP server at `dist/mcp/server.js`, installed as the `game-dev-mcp` bin and
+reachable as `game-dev mcp serve`. See `docs/mcp.md`.
+
+The v0.4.0 MCP implementation stays retired and available only through its
+historical tag: its module layout, tool surface and bin name all differ, and
+shipping it beside the current server would give clients two servers claiming
+one package. Releases must therefore continue to reject stale `dist/server.js`,
+`.mcp.json`, and `.app.json` payloads. `.mcp.json` in particular is never
+shipped -- client configuration is generated per client by
+`game-dev mcp config`, because the one setting everybody gets wrong is a
+relative `ASSET_OUTPUT_DIR` and only the generator can resolve it.
+
+The Codex plugin and the macOS app repository remain skills-only and
+binary-only respectively; neither declares an MCP server.
 
 ### Skills repository and archive
 
@@ -91,3 +104,35 @@ closed roster, and never publish directly from a dirty working tree.
 Each gate proves only its literal scope. Source and tests are not live-provider,
 GPU, pixel, target-hardware performance, signing-identity, notarization, or human
 acceptance evidence.
+
+## Version bumps and publishing
+
+The product version is stated structurally in five places: `package.json`,
+`src/version.ts`, `skills/manifest.json`, `.codex-plugin/plugin.json`, and the
+macOS record `distribution/macos-app-repo/THIRD_PARTY_PROVENANCE.json` (whose
+license asset is also named after the version). Bump all of them with one
+command:
+
+```sh
+node scripts/set-version.mjs 1.1.0
+```
+
+`tests/version-parity.test.ts` reads every site from disk and fails if they
+disagree; nothing in it is a literal. The test exists because the 1.0.2 release
+bumped `package.json` and left the macOS record at 1.0.1, which broke the app
+build and a CI job — and two test literals were pinned to the stale value, so
+they confirmed the bug rather than catching it. Test and verifier assertions now
+derive the expected version rather than stating it.
+
+Prose compatibility floors ("requires 1.0.2 or newer") are deliberately not
+rewritten by the script: they describe history, not the current version.
+
+Publishing is tag-driven. Pushing `v<version>` runs
+`.github/workflows/release.yml`, which refuses to continue unless the tag
+matches `package.json`, `CHANGELOG.md` has a matching section, the parity test
+passes, and the full `prepublishOnly` gate — including the packed-tarball
+install check that drives the installed MCP server — is green. It then
+publishes with npm provenance, so the package carries a verifiable link to the
+commit that built it. Steps that are inherently human — freezing the commit,
+launching and looking at the native app, regenerating the codebase graph after
+the tree is final — stay manual and are listed above.

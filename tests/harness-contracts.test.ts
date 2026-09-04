@@ -120,12 +120,38 @@ describe('local game adapter and sealed run contract', () => {
     await expect(access(String(color?.heatmapPath))).resolves.toBeUndefined();
 
     const performance = await compareRunPerformance(baseline.runPath, candidate.runPath, 'median');
-    expect(performance.metrics.find((metric) => metric.metric === 'render.frame_time')).toMatchObject({
+    const frameTime = performance.metrics.find((metric) => metric.metric === 'render.frame_time');
+    expect(frameTime).toMatchObject({
       baseline: 12,
       candidate: 8,
       delta: -4,
     });
     expect(performance.hardwarePerformanceComparisonAdmitted).toBe(false);
+
+    // The summaries always knew how many samples each side had and how they
+    // were spread; the comparison dropped both. A caller reading only a delta
+    // cannot tell six samples from six thousand, so "is this regression real?"
+    // was unanswerable from the comparison alone.
+    expect(frameTime?.baselineSamples).toBeGreaterThan(0);
+    expect(frameTime?.candidateSamples).toBeGreaterThan(0);
+    expect(typeof frameTime?.baselineStandardDeviation).toBe('number');
+    expect(typeof frameTime?.candidateStandardDeviation).toBe('number');
+
+    const baselineSummary = await summarizeRunPerformance(baseline.runPath);
+    const baselineFrameTime = baselineSummary.metrics.find((m) => m.metric === 'render.frame_time');
+    expect(frameTime?.baselineSamples).toBe(baselineFrameTime?.samples);
+    expect(frameTime?.baselineStandardDeviation).toBe(baselineFrameTime?.standardDeviation);
+
+    // This fixture reports a single measurement per run. The honest verdict for
+    // a delta drawn from one sample is that the data cannot support one --
+    // reporting "separable" here is exactly how a loop starts chasing noise.
+    expect(frameTime?.separability).toBe('underpowered');
+    expect(frameTime?.standardErrorOfDifference).toBeNull();
+    expect(frameTime?.aggregation).toBe('sample');
+
+    // And the ceiling must not let a caller mistake the screen for a test.
+    expect(performance.evidenceCeiling).toContain('NOT a hypothesis test');
+    expect(performance.evidenceCeiling).toContain('autocorrelated');
 
     const created = await createOptimizationGoal({
       projectRoot: project.projectRoot,

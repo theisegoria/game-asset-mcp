@@ -7,6 +7,7 @@ import { SpendLedger } from './storage/spend.js';
 import { createToolContext, type ToolContext } from './tools/context.js';
 import { Logger } from './util/logging.js';
 import { DurableJobStore } from './jobs/durable.js';
+import { describeWorkspaceFailure } from './util/workspace-diagnostics.js';
 
 export interface GameDevRuntime {
   config: Config;
@@ -14,6 +15,9 @@ export interface GameDevRuntime {
   registry: LocalCommandRegistry;
   providers: { image: string[]; model3d: string[] };
   durableJobs: DurableJobStore;
+  /** Exposed so a transport can gate spending without reaching through context. */
+  spend: SpendLedger;
+  logger: Logger;
 }
 
 export async function createGameDevRuntime(options: {
@@ -28,9 +32,21 @@ export async function createGameDevRuntime(options: {
   };
   const config = loadConfig(env);
   const logger = new Logger(config.logLevel);
-  const store = await JobStore.open(config.jobsDir);
-  const spend = await SpendLedger.open(config.jobsDir, config.spendLimitCents);
-  const durableJobs = await DurableJobStore.open(config.durableJobsDir);
+  // A workspace that cannot be opened used to surface as a bare errno. Under
+  // MCP that reached the client as "connection closed" and nothing else, so the
+  // diagnosis lives here, where both transports pass through it.
+  let store: JobStore;
+  let spend: SpendLedger;
+  let durableJobs: DurableJobStore;
+  try {
+    store = await JobStore.open(config.jobsDir);
+    spend = await SpendLedger.open(config.jobsDir, config.spendLimitCents);
+    durableJobs = await DurableJobStore.open(config.durableJobsDir);
+  } catch (error) {
+    const explanation = describeWorkspaceFailure(error, config.outputDir, env);
+    if (explanation) throw new Error(explanation, { cause: error });
+    throw error;
+  }
   const context = Object.assign(
     createToolContext({ config, logger, store, spend }),
     options.contextOverrides ?? {},
@@ -43,5 +59,7 @@ export async function createGameDevRuntime(options: {
     registry,
     providers: configuredProviders(config),
     durableJobs,
+    spend,
+    logger,
   };
 }

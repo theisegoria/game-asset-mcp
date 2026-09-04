@@ -32,7 +32,7 @@ import { invalidInput, invalidState } from '../util/errors.js';
 import { MESH_EXTENSIONS } from '../util/local-file.js';
 import { assertExistingDirectory, safeJoin, uniqueFilePath, writeFileAtomic, writeJsonAtomic } from '../storage/filesystem.js';
 import { promises as fs } from 'node:fs';
-import { guard, ok, type ToolContext } from './context.js';
+import { guard, ok, type ToolContext, type VisualAttachment } from './context.js';
 
 /** What a plane is, where it came from, and whether it is real or a stand-in. */
 interface PlaneReceipt {
@@ -551,6 +551,21 @@ export function registerPbrTools(server: ToolRegistrar, ctx: ToolContext): void 
       const notDeclared = missing.filter((name) => !unreadable.includes(name));
       const failedToLoad = missing.filter((name) => unreadable.includes(name));
 
+      // The planes are already on disk and the receipt already records each
+      // one's colour space, which is exactly what a correct downscale needs:
+      // averaging a normal or roughness plane in gamma space bends the data.
+      // A transport that can show pictures now shows them; the CLI still just
+      // prints the paths.
+      const visuals: VisualAttachment[] = planes.map((plane) => ({
+        path: plane.path,
+        mimeType: 'image/png',
+        role: 'texture_plane',
+        label: `${plane.plane} plane (${plane.source === 'texture' ? 'measured from texture data' : 'flat constant from a material factor'})`,
+        colorimetry: plane.colorSpace === 'srgb' ? 'srgb' : 'data',
+        width: plane.width,
+        height: plane.height,
+      }));
+
       return ok({
         ...receipt,
         receiptPath,
@@ -584,7 +599,7 @@ export function registerPbrTools(server: ToolRegistrar, ctx: ToolContext): void 
             ]
               .filter(Boolean)
               .join(' '),
-      });
+      }, visuals);
     }),
   );
 }

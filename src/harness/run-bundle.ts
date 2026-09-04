@@ -106,10 +106,30 @@ function safeChildEnvironment(plan: ScenarioRunPlan): NodeJS.ProcessEnv {
     const value = process.env[name];
     if (value !== undefined) environment[name] = value;
   }
+
+  // Declared by the adapter, already restricted to a hardcoded graphics
+  // allowlist by the schema, and applied BEFORE the injected GAME_DEV_* names
+  // so a manifest cannot redirect the harness's own contract surface.
+  for (const [name, value] of Object.entries(plan.environment)) {
+    environment[name] = value;
+  }
+
   environment.GAME_DEV_RUN_ID = plan.runId;
   environment.GAME_DEV_RUN_DIR = plan.runPath;
   environment.GAME_DEV_ADAPTER_ID = plan.adapterId;
   environment.GAME_DEV_SCENARIO_ID = plan.scenarioId;
+  // Where the harness will actually look for the capture manifest. Without it
+  // an engine has to guess, and both shapes exist in the wild -- the fixture
+  // writes capture.json at the run root, Genome writes it under native/.
+  //
+  // plan.output.path is ALREADY absolute and already containment-checked by
+  // planScenarioRun. Joining it onto runPath again produced a doubled,
+  // nonexistent path, and nothing noticed because the fixture ignores this
+  // variable. The probe SDK is its first consumer, and failed on it within
+  // minutes of existing -- which is what an independent consumer is for.
+  if (plan.output.path !== undefined) {
+    environment.GAME_DEV_CAPTURE_MANIFEST = plan.output.path;
+  }
   return environment;
 }
 
@@ -330,6 +350,26 @@ export async function executeScenarioRun(options: {
   if (options.plan.requiredAuthorizations.includes('performance') && !options.allowPerformance) {
     throw invalidInput('this scenario requires separate hardware-performance authorization');
   }
+  // A hosted CI runner is not target hardware. Its timings are real numbers
+  // from a real machine -- a virtualised, shared, unspecified one -- and
+  // admitting them as hardware-performance evidence would let a green build
+  // imply a claim about the player's device that nothing measured. Refused
+  // rather than annotated, because an annotation on admitted evidence is the
+  // kind of caveat that gets stripped on the way to a dashboard. A self-hosted
+  // runner that IS the declared target hardware can say so explicitly.
+  if (
+    options.allowPerformance
+    && process.env.CI !== undefined && process.env.CI !== '' && process.env.CI !== 'false'
+    && process.env.GAME_DEV_CI_HARDWARE_ATTESTED !== '1'
+  ) {
+    throw invalidInput(
+      'hardware-performance authorization is refused under CI: a hosted runner is not target ' +
+      'hardware, so its timings cannot be admitted as evidence about the player\'s device. Run the ' +
+      'scenario without --allow-performance to keep the capture, or set ' +
+      'GAME_DEV_CI_HARDWARE_ATTESTED=1 only on a self-hosted runner that is the declared target.',
+      { ci: process.env.CI },
+    );
+  }
   if (options.plan.adapterManifestSha256 !== options.adapter.manifestSha256) {
     throw invalidState('scenario plan no longer matches the loaded adapter manifest');
   }
@@ -418,7 +458,27 @@ export async function executeScenarioRun(options: {
   const artifacts = await roster(runPath, capture);
   const completedAt = new Date();
   const adapterEvidence = capture?.manifest.adapterEvidence;
+
+  // A software rasterizer is not a GPU, and an adapter must not be able to say
+  // otherwise. lavapipe, llvmpipe and SwiftShader all render correct-looking
+  // pixels on the CPU, so an adapter that reported GPU execution -- by mistake
+  // or by copy-paste from a hardware lane -- would mint authority it never
+  // earned. The claim is therefore not trusted and not merely flagged: it is
+  // overwritten here, on the harness side, where the adapter cannot reach.
+  const softwareRasterizedLane = adapterEvidence?.rendererClass === 'software';
+  const rendererClass = adapterEvidence?.rendererClass ?? 'unknown';
+  const refusedAdapterClaims: string[] = [];
+  if (softwareRasterizedLane) {
+    if (adapterEvidence?.gpuExecutionReported) refusedAdapterClaims.push('gpu execution');
+    if (adapterEvidence?.gpuCompletionIdentityReported) {
+      refusedAdapterClaims.push('gpu completion identity');
+    }
+    if (adapterEvidence?.hardwarePerformanceReported) {
+      refusedAdapterClaims.push('hardware performance');
+    }
+  }
   const performanceAdmitted = Boolean(
+    !softwareRasterizedLane &&
     options.allowPerformance &&
     adapterEvidence?.hardwarePerformanceReported &&
     (capture?.manifest.measurements.length ?? 0) > 0,
@@ -453,15 +513,23 @@ export async function executeScenarioRun(options: {
       artifactRosterClosedAndHashed: true,
       captureContractValidated: capture !== undefined,
       rasterBytesDecoded: capture?.rasterBytesDecoded ?? false,
-      adapterReportedGpuExecution: adapterEvidence?.gpuExecutionReported ?? false,
-      adapterReportedGpuCompletionIdentity: adapterEvidence?.gpuCompletionIdentityReported ?? false,
+      rendererClass,
+      softwareRasterizedLane,
+      refusedAdapterClaims,
+      adapterReportedGpuExecution:
+        softwareRasterizedLane ? false : adapterEvidence?.gpuExecutionReported ?? false,
+      adapterReportedGpuCompletionIdentity:
+        softwareRasterizedLane ? false : adapterEvidence?.gpuCompletionIdentityReported ?? false,
       adapterReportedHardwarePerformance: adapterEvidence?.hardwarePerformanceReported ?? false,
       hardwareGpuExecutionProvenByHarnessAlone: false,
       hardwarePerformanceEvidenceAdmitted: performanceAdmitted,
       hardwarePerformanceMeasuredByHarnessAlone: false,
       humanVisualReviewPerformed: false,
       evidenceCeiling:
-        'The harness proves process status, schema validation, decoded raster bytes, and a closed SHA-256 artifact roster. GPU completion and hardware timing remain source-adapter claims unless separately joined to native evidence; no human visual review is inferred.',
+        'The harness proves process status, schema validation, decoded raster bytes, and a closed SHA-256 artifact roster. GPU completion and hardware timing remain source-adapter claims unless separately joined to native evidence; no human visual review is inferred.'
+        + (softwareRasterizedLane
+          ? ' This run was software-rasterized. It proves pipeline logic, shader arithmetic against a reference implementation, and asset correctness. It proves NOTHING about hardware GPU execution, driver behaviour, precision, or any timing property of real hardware, and its timing measurements are inadmissible. Any GPU claim the adapter made for this run has been refused.'
+          : ''),
     },
   });
   const manifestPath = path.join(runPath, 'run.json');

@@ -243,13 +243,42 @@ export function evaluateAsset(
     }
   }
 
+  // Undrawn geometry was already counted by the inspector and reported to
+  // callers, but nothing judged it. A file whose every mesh sits outside the
+  // default scene therefore failed as "0 triangles" — the symptom — while a
+  // file that is mostly undrawn passed outright. Only warn here when something
+  // IS drawn; when nothing is, has_geometry below names the same cause once,
+  // and one accurate error beats two.
+  if (inspection.undrawnTriangleCount > 0 && inspection.triangleCount > 0) {
+    add({
+      id: 'undrawn_geometry',
+      severity: 'warning',
+      passed: false,
+      actual:
+        `${inspection.undrawnTriangleCount} triangles across ${inspection.undrawnPrimitiveCount} ` +
+        `primitives are not reachable from the default scene`,
+      expected: 'every primitive is drawn by the default scene',
+      consequence:
+        'Undrawn geometry ships in the file and costs download size and memory without ever ' +
+        'appearing. It is usually a stale LOD, a collision proxy, or an export left in a ' +
+        'non-default scene.',
+    });
+  }
+
+  const undrawnOnly = inspection.triangleCount === 0 && inspection.undrawnTriangleCount > 0;
+
   add({
     id: 'has_geometry',
     severity: 'error',
     passed: inspection.triangleCount > 0,
-    actual: `${inspection.triangleCount} triangles`,
+    actual: undrawnOnly
+      ? `0 drawn triangles, though ${inspection.undrawnTriangleCount} exist outside the default scene`
+      : `${inspection.triangleCount} triangles`,
     expected: 'at least one triangle',
-    consequence: 'A file can parse cleanly and still contain nothing to draw.',
+    consequence: undrawnOnly
+      ? 'The mesh exists but no scene references it, so a renderer shows nothing. Re-export ' +
+        'with the mesh in the active scene, or run `game-dev asset normalize` to rebuild it.'
+      : 'A file can parse cleanly and still contain nothing to draw.',
   });
 
   const errorCount = checks.filter((check) => !check.passed && check.severity === 'error').length;

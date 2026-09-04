@@ -26,7 +26,7 @@ import { LocalCommandRegistry, type ToolRegistrar } from '../../src/commands/reg
 import { Logger } from '../../src/util/logging.js';
 import { JobStore } from '../../src/storage/jobs.js';
 import { SpendLedger } from '../../src/storage/spend.js';
-import { createToolContext } from '../../src/tools/context.js';
+import { createToolContext, resultText } from '../../src/tools/context.js';
 import { loadConfig } from '../../src/config.js';
 import type { ToolContext } from '../../src/tools/context.js';
 
@@ -74,7 +74,7 @@ export async function connectTools(
   return {
     async call(name, args) {
       const result = await registry.call(name, args);
-      const text = result.content?.[0]?.text ?? '';
+      const text = resultText(result);
       let payload: Record<string, unknown> = {};
       try {
         const parsed: unknown = JSON.parse(text);

@@ -242,6 +242,21 @@ export class AssetCatalog {
     this.database.close();
   }
 
+  /**
+   * Build the row `admit` would insert, without inserting it.
+   *
+   * `admit` was the second write path in the CLI with no plan step at all, so
+   * a caller had no way to see what indexing a package would record until it
+   * was already recorded.
+   */
+  async planAdmission(packagePath: string): Promise<{ asset: CatalogAsset; alreadyIndexed: boolean }> {
+    const asset = await catalogRecord(packagePath);
+    const row = this.database.prepare(
+      'SELECT 1 FROM assets WHERE package_id = ?',
+    ).get(asset.packageId) as unknown;
+    return { asset, alreadyIndexed: row !== undefined };
+  }
+
   async admit(packagePath: string): Promise<CatalogAsset> {
     const asset = await catalogRecord(packagePath);
     insert(this.database, asset);

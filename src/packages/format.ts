@@ -214,9 +214,34 @@ async function existingResult(
   };
 }
 
-export async function buildAssetPackage(
+export interface AssetPackagePlan {
+  assetId: string;
+  version: string;
+  license: string;
+  sourcePath: string;
+  sourceIdentity: { bytes: number; sha256: string };
+  packagesRoot: string;
+  /** Where the built package would land. */
+  destination: string;
+  destinationExists: boolean;
+  validation: ReturnType<typeof evaluateAsset>;
+  inspection: ReturnType<typeof normalizedInspection>;
+}
+
+/**
+ * Everything `buildAssetPackage` determines before it writes anything.
+ *
+ * Extracted rather than reimplemented so a plan cannot disagree with the build
+ * it predicts: the build calls this too.
+ *
+ * It deliberately does NOT report a packageId. That id hashes the staged file
+ * set, so producing it means doing the write this function exists to avoid.
+ * Saying "unknown" is better than reporting a guess that a later build
+ * contradicts.
+ */
+export async function planAssetPackage(
   options: BuildAssetPackageOptions,
-): Promise<BuildAssetPackageResult> {
+): Promise<AssetPackagePlan> {
   const { assetId, version, license } = validateInputs(options);
   const maximumBytes = options.maximumBytes ?? 512 * 1024 * 1024;
   const source = await assertPortableModel(options.sourcePath, maximumBytes);
@@ -224,6 +249,28 @@ export async function buildAssetPackage(
   const inspected = normalizedInspection(await inspectGltf(source));
   const validation = evaluateAsset(inspected, options.policy);
   const packagesRoot = path.resolve(options.packagesRoot);
+  const destination = path.join(packagesRoot, assetId, version);
+  const destinationExists = await fs.access(destination).then(() => true, () => false);
+  return {
+    assetId,
+    version,
+    license,
+    sourcePath: source,
+    sourceIdentity,
+    packagesRoot,
+    destination,
+    destinationExists,
+    validation,
+    inspection: inspected,
+  };
+}
+
+export async function buildAssetPackage(
+  options: BuildAssetPackageOptions,
+): Promise<BuildAssetPackageResult> {
+  const plan = await planAssetPackage(options);
+  const { assetId, version, license, packagesRoot, sourceIdentity, validation, inspection: inspected } = plan;
+  const source = plan.sourcePath;
   await fs.mkdir(packagesRoot, { recursive: true, mode: 0o700 });
 
   let preview: { source: string; identity: { bytes: number; sha256: string } } | undefined;

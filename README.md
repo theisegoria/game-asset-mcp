@@ -148,6 +148,10 @@ No provider call is made during installation, build, test, `doctor`, or
 
 ## Quick start
 
+New here? [Your first capture](docs/quickstart.md) goes from an empty
+directory to a sealed capture your AI can verify, look at and diff — ten
+minutes, no GPU, using the example engine that ships with the probe SDK.
+
 Choose a workspace and inspect the local environment:
 
 ```sh
@@ -316,6 +320,28 @@ published separately at
 
 Read [CLI protocol](docs/cli-protocol.md) before integrating the command with an
 agent or GUI.
+
+## MCP server
+
+The same local operations are also served over MCP on stdio, for AI clients
+that have no shell — Claude Desktop, Codex, Gemini, and any other MCP client.
+It is a second transport over one registry, not a second implementation: the
+same tools, contracts, spend rules and evidence ceilings, with a release check
+that fails if the two ever advertise different tool sets.
+
+```sh
+game-dev mcp config --client claude-desktop
+game-dev mcp config --client codex --spend-limit-cents 500
+```
+
+Generate the configuration rather than writing it by hand: `ASSET_OUTPUT_DIR`
+must be absolute, because a relative path resolves against a working directory
+the client chose, and several clients spawn servers from `/`.
+
+Paid tools are **disabled** unless the configuration a human wrote supplies a
+spend ceiling, and each charge then requires approving an elicitation prompt.
+No tool takes an approval argument, because over MCP the model writes every
+argument. See [MCP server](docs/mcp.md).
 
 ## Workspace layout
 

@@ -24,7 +24,8 @@
     "node": ">=22.5"
   },
   "bin": {
-    "game-dev": "dist/cli.js"
+    "game-dev": "dist/cli.js",
+    "game-dev-mcp": "dist/mcp/server.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -40,6 +41,7 @@
     "scripts/*.py",
     "scripts/*.mjs",
     "distribution/skills-repo",
+    "probe",
     "adapters",
     "skills",
     ".codex-plugin",
@@ -76,6 +78,7 @@
   },
   "dependencies": {
     "@gltf-transform/core": "^4.1.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0",
     "zod": "^3.23.8"
@@ -90,7 +93,8 @@
     "vitest": "^4.1.11"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "repository": {
     "type": "git",

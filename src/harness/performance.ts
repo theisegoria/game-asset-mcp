@@ -11,17 +11,31 @@ import {
   type TelemetryEvent,
 } from './contracts.js';
 import { verifyRunBundle } from './run-bundle.js';
+import { describeComparison, describeSummary } from './describe-performance.js';
 
 const MAX_TELEMETRY_BYTES = 64 * 1024 * 1024;
 const MAX_TELEMETRY_LINES = 250_000;
 const MAX_PROFILE_BYTES = 32 * 1024 * 1024;
 const MAX_PROFILE_MEASUREMENTS = 100_000;
 
+type Aggregation = 'sample' | 'mean' | 'median' | 'p95' | 'p99' | 'min' | 'max';
+
 interface Measurement {
   metric: string;
   unit: string;
   value: number;
   source: 'capture' | 'telemetry' | 'foreign-telemetry' | 'profile';
+  /**
+   * What this number already is. Telemetry and profile values are raw samples;
+   * only a capture manifest can declare otherwise.
+   */
+  aggregation: Aggregation;
+  /**
+   * Which frame produced it, when the source said. Both capture measurements
+   * and telemetry events carry this and it was dropped at ingestion, which is
+   * why warmup frames could not be excluded.
+   */
+  frameIndex?: number;
 }
 
 export interface PerformanceSummary {
@@ -32,6 +46,17 @@ export interface PerformanceSummary {
   scenarioId: string;
   metrics: MetricStatistics[];
   sources: Record<Measurement['source'], number>;
+  /**
+   * Metrics that arrived both raw and pre-aggregated. Usually an adapter
+   * emitting the same quantity twice; the caller should know which series they
+   * are reading rather than getting a silently merged one.
+   */
+  mixedAggregationMetrics: string[];
+  /** How many leading frames were excluded, and how many samples that removed. */
+  warmupFramesExcluded: number;
+  warmupSamplesExcluded: number;
+  /** The same numbers in sentences, so a caller can act without interpreting them. */
+  summary: string[];
   hardwarePerformanceEvidenceAdmitted: boolean;
   evidenceCeiling: string;
 }
@@ -48,8 +73,35 @@ export interface PerformanceComparison {
     candidate: number;
     delta: number;
     percentDelta: number | null;
+    /**
+     * Sample counts and dispersion, carried through from each summary.
+     *
+     * Without these a caller cannot tell a delta drawn from six samples from
+     * one drawn from six thousand, which makes "is this regression real?"
+     * unanswerable from the comparison alone -- and answering it wrongly is
+     * how an optimization loop chases noise.
+     */
+    baselineSamples: number;
+    candidateSamples: number;
+    baselineStandardDeviation: number;
+    candidateStandardDeviation: number;
+    aggregation: MetricStatistics['aggregation'];
+    /**
+     * A rough screen for whether the delta stands out from run-to-run spread.
+     *
+     * NOT a hypothesis test, and deliberately not reported as one: it is a
+     * two-standard-error comparison, it assumes samples are independent when
+     * frame times are strongly autocorrelated, and it says nothing about
+     * cause. It exists so a caller can tell "moved by more than the noise" from
+     * "moved by less than the noise" instead of reading a bare delta and
+     * guessing.
+     */
+    separability: 'separable' | 'within-noise' | 'underpowered';
+    standardErrorOfDifference: number | null;
   }>;
   hardwarePerformanceComparisonAdmitted: boolean;
+  /** The same deltas in sentences, largest movement first. */
+  summary: string[];
   evidenceCeiling: string;
 }
 
@@ -81,7 +133,7 @@ function foreignTelemetryMeasurements(value: unknown): Measurement[] {
   const measurements: Measurement[] = [];
   const directValue = finiteNumber(event.value);
   if (directValue !== undefined && typeof event.unit === 'string' && event.unit.length > 0) {
-    measurements.push({ metric: event.name, unit: event.unit, value: directValue, source: 'foreign-telemetry' });
+    measurements.push({ metric: event.name, unit: event.unit, value: directValue, source: 'foreign-telemetry', aggregation: 'sample' });
   }
   for (const [key, raw] of Object.entries(event)) {
     if (['ts', 'timestamp', 'timestamp_us', 'name', 'value', 'unit'].includes(key)) continue;
@@ -93,6 +145,7 @@ function foreignTelemetryMeasurements(value: unknown): Measurement[] {
         unit,
         value: number,
         source: 'foreign-telemetry',
+        aggregation: 'sample',
       });
     }
   }
@@ -130,6 +183,8 @@ async function telemetryMeasurements(filePath: string, expectedRunId: string): P
           unit: event.unit,
           value: event.value,
           source: 'telemetry',
+          aggregation: 'sample',
+          ...(event.frameIndex !== undefined ? { frameIndex: event.frameIndex } : {}),
         });
       }
       continue;
@@ -157,7 +212,7 @@ function flattenProfile(
     const leaf = pathParts.at(-1) ?? '';
     const unit = inferUnit(leaf);
     if (unit !== undefined) {
-      output.push({ metric: `profile.${pathParts.join('.')}`, unit, value, source: 'profile' });
+      output.push({ metric: `profile.${pathParts.join('.')}`, unit, value, source: 'profile', aggregation: 'sample' });
     }
     return;
   }
@@ -201,14 +256,26 @@ function percentile(sorted: number[], fraction: number): number {
   return low + (high - low) * (position - lower);
 }
 
-export function statistics(metric: string, unit: string, values: number[]): MetricStatistics {
+export function statistics(
+  metric: string,
+  unit: string,
+  values: number[],
+  aggregation: Aggregation = 'sample',
+): MetricStatistics {
   if (values.length === 0) throw invalidInput('cannot summarize an empty metric');
   const sorted = [...values].sort((left, right) => left - right);
   const mean = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
   const variance = sorted.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / sorted.length;
+  const middle = percentile(sorted, 0.5);
   return {
     metric,
     unit,
+    aggregation,
+    // A group of reported p99s has a well-defined min, max and median -- of
+    // the reported values. They are simply not statistics of the underlying
+    // frame distribution, and this flag is what stops a consumer reading them
+    // as though they were.
+    preAggregated: aggregation !== 'sample',
     samples: sorted.length,
     min: sorted[0] ?? 0,
     max: sorted.at(-1) ?? 0,
@@ -217,10 +284,48 @@ export function statistics(metric: string, unit: string, values: number[]): Metr
     p95: percentile(sorted, 0.95),
     p99: percentile(sorted, 0.99),
     standardDeviation: Math.sqrt(variance),
+    medianAbsoluteDeviation: medianAbsoluteDeviation(sorted, middle),
+    // Reported, never trimmed. A single 400ms stall is very often the bug, and
+    // removing it to tidy the distribution deletes the finding.
+    hitchCount: middle > 0 ? sorted.filter((value) => value > middle * 2).length : 0,
+    worst1PercentMean: worstPercentMean(sorted, 0.01),
   };
 }
 
-export async function summarizeRunPerformance(runPathInput: string): Promise<PerformanceSummary> {
+function medianOf(sorted: number[]): number {
+  if (sorted.length === 0) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+    : sorted[middle] ?? 0;
+}
+
+function medianAbsoluteDeviation(sorted: number[], median: number): number {
+  if (sorted.length === 0) return 0;
+  return medianOf(sorted.map((value) => Math.abs(value - median)).sort((a, b) => a - b));
+}
+
+/**
+ * Mean of the worst `fraction` of samples -- the "1% low".
+ *
+ * Always at least one sample, so a short run reports its worst frame rather
+ * than zero, which would read as "no bad frames".
+ */
+function worstPercentMean(sorted: number[], fraction: number): number {
+  if (sorted.length === 0) return 0;
+  const count = Math.max(1, Math.ceil(sorted.length * fraction));
+  const worst = sorted.slice(-count);
+  return worst.reduce((total, value) => total + value, 0) / worst.length;
+}
+
+export async function summarizeRunPerformance(
+  runPathInput: string,
+  options: { warmupFrames?: number } = {},
+): Promise<PerformanceSummary> {
+  const warmupFrames = options.warmupFrames ?? 0;
+  if (!Number.isInteger(warmupFrames) || warmupFrames < 0 || warmupFrames > 10_000) {
+    throw invalidInput('warmup frames must be an integer from 0 through 10000');
+  }
   const verified = await verifyRunBundle(runPathInput);
   const measurements: Measurement[] = [];
   if (verified.manifest.captureManifest) {
@@ -235,6 +340,8 @@ export async function summarizeRunPerformance(runPathInput: string): Promise<Per
         unit: measurement.unit,
         value: measurement.value,
         source: 'capture',
+        aggregation: measurement.aggregation,
+        ...(measurement.frameIndex !== undefined ? { frameIndex: measurement.frameIndex } : {}),
       });
     }
     for (const relative of capture.manifest.telemetry) {
@@ -245,35 +352,112 @@ export async function summarizeRunPerformance(runPathInput: string): Promise<Per
     }
   }
 
-  const grouped = new Map<string, { metric: string; unit: string; values: number[] }>();
+  // Keyed by aggregation as well as metric and unit. Without it, a capture
+  // emitting both a p99 and per-frame samples for one metric pooled them into
+  // one distribution and reported the median of a mixed bag.
+  // Shader compilation, texture upload and cache warming all land in the first
+  // frames, and a run that includes them reports a regression that is really a
+  // cold start. Only measurements whose source told us a frame index can be
+  // excluded; anything unattributed is kept rather than guessed at.
+  const warmupSamplesExcluded = warmupFrames > 0
+    ? measurements.filter((m) => m.frameIndex !== undefined && m.frameIndex < warmupFrames).length
+    : 0;
+  const admitted = warmupFrames > 0
+    ? measurements.filter((m) => m.frameIndex === undefined || m.frameIndex >= warmupFrames)
+    : measurements;
+
+  const grouped = new Map<string, { metric: string; unit: string; aggregation: Aggregation; values: number[] }>();
+  const aggregationsByMetric = new Map<string, Set<Aggregation>>();
   const sources: PerformanceSummary['sources'] = {
     capture: 0,
     telemetry: 0,
     'foreign-telemetry': 0,
     profile: 0,
   };
-  for (const measurement of measurements) {
+  for (const measurement of admitted) {
     sources[measurement.source] += 1;
-    const key = `${measurement.metric}\u0000${measurement.unit}`;
-    const group = grouped.get(key) ?? { metric: measurement.metric, unit: measurement.unit, values: [] };
+    const key = `${measurement.metric}\u0000${measurement.unit}\u0000${measurement.aggregation}`;
+    const group = grouped.get(key)
+      ?? { metric: measurement.metric, unit: measurement.unit, aggregation: measurement.aggregation, values: [] };
     group.values.push(measurement.value);
     grouped.set(key, group);
+    const seen = aggregationsByMetric.get(measurement.metric) ?? new Set<Aggregation>();
+    seen.add(measurement.aggregation);
+    aggregationsByMetric.set(measurement.metric, seen);
   }
   const metrics = [...grouped.values()]
-    .map((group) => statistics(group.metric, group.unit, group.values))
-    .sort((left, right) => left.metric.localeCompare(right.metric) || left.unit.localeCompare(right.unit));
+    .map((group) => statistics(group.metric, group.unit, group.values, group.aggregation))
+    .sort((left, right) =>
+      left.metric.localeCompare(right.metric)
+      || left.unit.localeCompare(right.unit)
+      || left.aggregation.localeCompare(right.aggregation));
 
-  return {
+  // Named rather than merged. A metric arriving both raw and pre-aggregated is
+  // usually an adapter emitting the same thing twice, and the caller should
+  // know which series they are reading.
+  const mixedAggregationMetrics = [...aggregationsByMetric.entries()]
+    .filter(([, seen]) => seen.size > 1)
+    .map(([metric]) => metric)
+    .sort();
+
+  const result: PerformanceSummary = {
     schema: GAME_DEV_PERFORMANCE_SUMMARY_SCHEMA,
+    summary: [],
     runId: verified.manifest.runId,
     runPath: verified.runPath,
     adapterId: verified.manifest.adapterId,
     scenarioId: verified.manifest.scenarioId,
     metrics,
     sources,
+    mixedAggregationMetrics,
+    warmupFramesExcluded: warmupFrames,
+    warmupSamplesExcluded,
     hardwarePerformanceEvidenceAdmitted: verified.manifest.evidence.hardwarePerformanceEvidenceAdmitted,
     evidenceCeiling:
-      'Statistics are deterministic reductions over sealed capture measurements, JSONL telemetry, and timing-shaped numeric profile fields. They prove neither hardware timing authority nor causal attribution unless the run separately admits native performance evidence.',
+      'Statistics are deterministic reductions over sealed capture measurements, JSONL telemetry, and timing-shaped numeric profile fields. They prove neither hardware timing authority nor causal attribution unless the run separately admits native performance evidence. The prose summary is generated from those statistics and describes them.',
+  };
+  result.summary = describeSummary(result);
+  return result;
+}
+
+/** Below this, spread is not estimated well enough to say anything. */
+const MINIMUM_SAMPLES_FOR_SEPARABILITY = 8;
+
+function separability(
+  baseline: MetricStatistics,
+  candidate: MetricStatistics,
+  delta: number,
+): { separability: 'separable' | 'within-noise' | 'underpowered'; standardErrorOfDifference: number | null } {
+  // Pre-aggregated values are already a summary of a distribution the harness
+  // never saw, so their spread describes the wrong thing.
+  if (baseline.preAggregated || candidate.preAggregated) {
+    return { separability: 'underpowered', standardErrorOfDifference: null };
+  }
+  if (
+    baseline.samples < MINIMUM_SAMPLES_FOR_SEPARABILITY
+    || candidate.samples < MINIMUM_SAMPLES_FOR_SEPARABILITY
+  ) {
+    return { separability: 'underpowered', standardErrorOfDifference: null };
+  }
+
+  const standardError = Math.sqrt(
+    (baseline.standardDeviation ** 2) / baseline.samples
+    + (candidate.standardDeviation ** 2) / candidate.samples,
+  );
+  if (!Number.isFinite(standardError)) {
+    return { separability: 'underpowered', standardErrorOfDifference: null };
+  }
+  // Zero spread on both sides: any nonzero delta is real, any zero delta is no
+  // change. Dividing would be a NaN presented as a verdict.
+  if (standardError === 0) {
+    return {
+      separability: delta === 0 ? 'within-noise' : 'separable',
+      standardErrorOfDifference: 0,
+    };
+  }
+  return {
+    separability: Math.abs(delta) > 2 * standardError ? 'separable' : 'within-noise',
+    standardErrorOfDifference: standardError,
   };
 }
 
@@ -292,10 +476,16 @@ export async function compareRunPerformance(
       candidate: `${candidate.adapterId}/${candidate.scenarioId}`,
     });
   }
-  const candidateByKey = new Map(candidate.metrics.map((metric) => [`${metric.metric}\u0000${metric.unit}`, metric]));
+  // Keyed by aggregation too: comparing a baseline p99 against a candidate raw
+  // sample series would be arithmetic between two different quantities.
+  const candidateByKey = new Map(candidate.metrics.map(
+    (metric) => [`${metric.metric}\u0000${metric.unit}\u0000${metric.aggregation}`, metric],
+  ));
   const metrics: PerformanceComparison['metrics'] = [];
   for (const baselineMetric of baseline.metrics) {
-    const candidateMetric = candidateByKey.get(`${baselineMetric.metric}\u0000${baselineMetric.unit}`);
+    const candidateMetric = candidateByKey.get(
+      `${baselineMetric.metric}\u0000${baselineMetric.unit}\u0000${baselineMetric.aggregation}`,
+    );
     if (!candidateMetric) continue;
     const baselineValue = baselineMetric[statistic];
     const candidateValue = candidateMetric[statistic];
@@ -307,10 +497,17 @@ export async function compareRunPerformance(
       candidate: candidateValue,
       delta,
       percentDelta: baselineValue === 0 ? null : (delta / Math.abs(baselineValue)) * 100,
+      baselineSamples: baselineMetric.samples,
+      candidateSamples: candidateMetric.samples,
+      baselineStandardDeviation: baselineMetric.standardDeviation,
+      candidateStandardDeviation: candidateMetric.standardDeviation,
+      aggregation: baselineMetric.aggregation,
+      ...separability(baselineMetric, candidateMetric, delta),
     });
   }
-  return {
+  const result: PerformanceComparison = {
     schema: GAME_DEV_PERFORMANCE_COMPARISON_SCHEMA,
+    summary: [],
     baselineRunId: baseline.runId,
     candidateRunId: candidate.runId,
     statistic,
@@ -318,6 +515,17 @@ export async function compareRunPerformance(
     hardwarePerformanceComparisonAdmitted:
       baseline.hardwarePerformanceEvidenceAdmitted && candidate.hardwarePerformanceEvidenceAdmitted,
     evidenceCeiling:
-      'The comparison reports arithmetic deltas only. Direction, target, regression status, causal explanation, and optimization success require an explicit bounded goal; hardware claims require both runs to admit hardware-performance evidence.',
+      'The comparison reports arithmetic deltas only. Sample counts and standard deviations are ' +
+      'carried through, and `separability` screens each delta against two standard errors of the ' +
+      'difference. That screen is NOT a hypothesis test: it reports no p-value, it treats samples ' +
+      'as independent when frame times are strongly autocorrelated, and it says nothing about ' +
+      'cause. Treat `separable` as "larger than the observed spread", not as "statistically ' +
+      'significant". Pre-aggregated series and series with too few samples report `underpowered` ' +
+      'rather than a verdict the data cannot support. ' +
+      'Direction, target, regression status, causal explanation, and optimization success require ' +
+      'an explicit bounded goal; hardware claims require both runs to admit hardware-performance ' +
+      'evidence.',
   };
+  result.summary = describeComparison(result);
+  return result;
 }

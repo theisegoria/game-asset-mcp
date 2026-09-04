@@ -6,17 +6,27 @@
  * has a capable vision model — far better to hand it the images and let it
  * call `select_reference` than to embed a second paid model inside this
  * server to guess on its behalf.
+ *
+ * For a long time that paragraph was aspirational: what was handed over was a
+ * list of provider HTTPS URLs, and no caller fetches an arbitrary URL on a
+ * model's behalf. The candidates are now cached locally and declared as
+ * visuals, so a transport that can show pictures shows them.
  */
 
 import { z } from 'zod';
 import type { ToolRegistrar } from '../commands/registry.js';
 import { createAssetJob, summarizeAssetJob } from '../domain/asset-job.js';
+import type { AssetJob } from '../domain/asset-job.js';
 import { gameAssetSpecSchema, sanitizeAssetName } from '../domain/asset-spec.js';
 import type { GameAssetSpec } from '../domain/asset-spec.js';
 import { buildReconstructionPrompt, buildVariationPrompt, VARIATION_AXES } from '../prompts/reconstruction-prompt.js';
 import type { VariationAxis } from '../prompts/reconstruction-prompt.js';
 import { invalidInput, invalidState } from '../util/errors.js';
-import { guard, ok, type ToolContext } from './context.js';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
+import { downloadFile } from '../util/http.js';
+import { safeJoin, writeFileAtomic } from '../storage/filesystem.js';
+import { guard, ok, type ToolContext, type VisualAttachment } from './context.js';
 import { pollUntilSettled } from './jobs.js';
 
 /** Image dimensions must be multiples of 8 for the provider; keep it in one place. */
@@ -53,6 +63,72 @@ const sharedImageArgs = {
  * copy that would drift — and drift here means two different prompts claiming
  * to be the same pipeline.
  */
+/**
+ * Fetch the candidate images onto disk and describe them as visuals.
+ *
+ * The docblock at the top of this file says these tools hand the images to the
+ * calling agent because that agent already has a vision model. They never did:
+ * they handed over provider HTTPS URLs, and no MCP client fetches an arbitrary
+ * URL on a model's behalf. The stated design has therefore never worked.
+ *
+ * These are free GETs against a generation already paid for, and
+ * ReferenceCandidate.url is documented as expiring, so the local copy is worth
+ * having even for a caller that cannot see pictures. Set
+ * ASSET_REFERENCE_THUMBNAILS=off to skip it.
+ *
+ * A fetch failure is logged and skipped, never thrown. The money is already
+ * spent and the job record is already correct; losing a paid result because one
+ * thumbnail 404'd would be the worst available trade.
+ */
+async function cacheCandidateThumbnails(
+  ctx: ToolContext,
+  job: AssetJob,
+): Promise<VisualAttachment[]> {
+  if (process.env.ASSET_REFERENCE_THUMBNAILS?.trim() === 'off') return [];
+  if (job.candidates.length === 0) return [];
+
+  // A stable per-job directory, not a reserved unique one: re-running a tool
+  // for the same job must land on the same files rather than accumulating
+  // <job>_2, <job>_3 copies of images already on disk.
+  const root = safeJoin(ctx.config.outputDir, '.thumbnails', job.id);
+  await fs.mkdir(root, { recursive: true, mode: 0o700 });
+  const visuals: VisualAttachment[] = [];
+  let changed = false;
+
+  for (const candidate of job.candidates) {
+    try {
+      let localPath = candidate.localPath;
+      if (localPath === undefined) {
+        const result = await downloadFile(candidate.url, {
+          timeoutMs: ctx.config.httpTimeoutMs,
+          maxBytes: ctx.config.maxDownloadBytes,
+        });
+        const extension = result.contentType?.includes('jpeg') === true ? '.jpg' : '.png';
+        localPath = path.join(root, `${candidate.id}${extension}`);
+        await writeFileAtomic(localPath, result.bytes);
+        candidate.localPath = localPath;
+        changed = true;
+      }
+      visuals.push({
+        path: localPath,
+        mimeType: localPath.endsWith('.jpg') ? 'image/jpeg' : 'image/png',
+        role: 'reference_candidate',
+        label: `candidate ${candidate.id}`,
+        colorimetry: 'srgb',
+      });
+    } catch (error) {
+      ctx.logger.warn('reference candidate thumbnail could not be cached', {
+        assetJobId: job.id,
+        candidateId: candidate.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (changed) await ctx.store.save(job);
+  return visuals;
+}
+
 export async function runImageGeneration(
   ctx: ToolContext,
   params: {
@@ -119,6 +195,8 @@ export async function runImageGeneration(
         })
       : job;
 
+  const visuals = await cacheCandidateThumbnails(ctx, settled);
+
   return ok({
     assetJobId: settled.id,
     status: settled.status,
@@ -131,7 +209,7 @@ export async function runImageGeneration(
       settled.candidates.length > 0
         ? 'Look at the candidate images, then call select_reference with the chosen candidateId, then create_3d_asset.'
         : 'Still generating. Call get_asset_job with this assetJobId until candidates appear.',
-  });
+  }, visuals);
 }
 
 export function registerReferenceTools(server: ToolRegistrar, ctx: ToolContext): void {

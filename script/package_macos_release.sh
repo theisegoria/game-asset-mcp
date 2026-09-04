@@ -27,7 +27,7 @@ THIRD_PARTY_LICENSE_SOURCE_DIR="$TEMPLATE_DIR/legal/third-party-licenses"
 THIRD_PARTY_LICENSE_PATHS=(
   "brotli-1.2.0-MIT.txt"
   "c-ares-1.34.6-MIT.txt"
-  "game-development-studio-1.0.1-MIT.txt"
+  "game-development-studio-1.0.2-MIT.txt"
   "icu4c-78.3-ICU.txt"
   "libuv-1.51.0-BSD-2-Clause-tree.h.txt"
   "libuv-1.51.0-ISC-inet.c.txt"

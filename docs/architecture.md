@@ -32,8 +32,8 @@ The major source modules are:
 - `providers/`: narrow Tripo and Leonardo HTTP clients
 - `jobs/` and `storage/`: durable operations, atomic files, and spend state
 - `tools/`: reusable intention-shaped local operations
-- `inspection/` and `normalize/`: static GLB/PBR inspection and Blender
-  orchestration
+- `inspection/`: static GLB/PBR inspection. Blender orchestration lives in
+  `tools/normalize.ts` and `util/blender.ts`, driving `scripts/blender_*.py`
 - `packages/`: canonical package format, catalog, migration, vendoring,
   launch planning, and USDZ previews
 - `harness/`: adapters, run bundles, capture analysis, performance summaries,

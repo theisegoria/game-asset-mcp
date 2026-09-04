@@ -90,6 +90,40 @@ export const adapterParameterSchema = z.union([
   projectPathParameterSchema,
 ]);
 
+/**
+ * Graphics environment variables a scenario may set for its own process.
+ *
+ * A hardcoded allowlist, not a pattern. The inherited environment stays as
+ * narrow as it was, because widening it would make a run's meaning depend on
+ * the shell that invoked it -- which contradicts the determinism the whole
+ * sealed-bundle model rests on. Declaring the values in the adapter instead
+ * puts them in the plan, and therefore in the sealed run, where they are
+ * reviewable and reproducible.
+ *
+ * LD_* and DYLD_* are absent deliberately: they are loader-injection vectors,
+ * and a capture harness that let a manifest set them would be a code-execution
+ * primitive wearing a configuration hat. DISPLAY and WAYLAND_DISPLAY are absent
+ * because surfaceless rendering is the entire point.
+ */
+export const GRAPHICS_ENVIRONMENT_NAMES = [
+  'VK_ICD_FILENAMES',
+  'VK_DRIVER_FILES',
+  'VK_LAYER_PATH',
+  'VK_INSTANCE_LAYERS',
+  'LIBGL_ALWAYS_SOFTWARE',
+  'MESA_LOADER_DRIVER_OVERRIDE',
+  'EGL_PLATFORM',
+  '__EGL_VENDOR_LIBRARY_FILENAMES',
+  'MTL_CAPTURE_ENABLED',
+  'MTL_DEBUG_LAYER',
+  'MTL_SHADER_VALIDATION',
+  'WGPU_BACKEND',
+  'DRI_PRIME',
+  'RUST_BACKTRACE',
+] as const;
+
+const graphicsEnvironmentName = z.enum(GRAPHICS_ENVIRONMENT_NAMES);
+
 const scenarioSchema = z.object({
   id: identifier,
   title: z.string().min(1).max(160),
@@ -104,14 +138,26 @@ const scenarioSchema = z.object({
     'cpu',
     'project-write',
     'gpu',
-    'metal',
     'performance',
-  ])).min(1).max(5).default(['cpu']),
+    // Graphics lanes. These describe WHICH api the scenario asks for; none of
+    // them weakens the `gpu` gate, which is still what authorizes hardware use.
+    'metal',
+    'vulkan',
+    'webgpu',
+    'opengl',
+    // A software rasterizer is not a GPU. It runs on the CPU authorization
+    // path deliberately: demanding --allow-gpu for lavapipe would train users
+    // to grant GPU authority for runs that never touch one.
+    'software-raster',
+    // The bound was `.max(5)` against exactly five members, so declaring every
+    // capability was already impossible and adding one made it worse.
+  ])).min(1).max(16).default(['cpu']),
   parameters: z.record(parameterName, adapterParameterSchema).default({}),
   outputs: z.object({
     format: z.enum(['none', 'game-dev-capture-v1', 'genome-hemera-v1']),
     path: relativePathSchema.optional(),
   }).strict().default({ format: 'none' }),
+  environment: z.record(graphicsEnvironmentName, z.string().max(4096)).default({}),
 }).strict().superRefine((value, context) => {
   if (new Set(value.capabilities).size !== value.capabilities.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'capabilities must be unique' });
@@ -158,6 +204,15 @@ export type AdapterManifest = z.infer<typeof adapterManifestSchema>;
 export type AdapterScenario = z.infer<typeof scenarioSchema>;
 export type AdapterParameter = z.infer<typeof adapterParameterSchema>;
 
+/** Bytes per pixel for each declarable binary attachment format. */
+export const BYTES_PER_PIXEL: Record<'r16f' | 'r32f' | 'rgba32f' | 'd32f' | 'r32u', number> = {
+  r16f: 2,
+  r32f: 4,
+  rgba32f: 16,
+  d32f: 4,
+  r32u: 4,
+};
+
 export const captureAttachmentSchema = z.object({
   kind: z.enum([
     'color',
@@ -167,13 +222,95 @@ export const captureAttachmentSchema = z.object({
     'material_id',
     'motion',
     'overdraw',
+    /** Unlit base colour: separates a texture-binding failure from a lighting one. */
+    'albedo',
+    /**
+     * Geometry only. Bisects "the geometry is wrong" from "the shading is
+     * wrong": a black colour buffer with correct wireframe silhouettes means
+     * the mesh and transforms are fine and the bug is in lighting or material.
+     */
+    'wireframe',
+    /**
+     * The scene re-rendered with a procedural checker instead of albedo.
+     * Flipped or mirrored UVs, wrong tiling, a missing second UV set and
+     * inconsistent texel density are all invisible in a normal colour render
+     * and obvious here.
+     */
+    'uv_checker',
+    /** False-coloured sampled LOD: missing mips, wrong bias, shimmer causes. */
+    'mipmap_level',
+    /** Portal, decal, outline and shadow-volume masks, inferable from nothing else. */
+    'stencil',
+    /**
+     * Per-pixel cost. Localizes WHERE a frame-time regression lives, which
+     * pass-level timings cannot. Engine-authored, so `description` must state
+     * the cost model.
+     */
+    'shader_complexity',
+    /** Lights per tile or cluster: why adding lights made this slow. */
+    'light_complexity',
     'custom',
+    // Deliberately NOT a kind: `histogram`. A histogram is a statistic derived
+    // from the colour buffer, not a distinct render output, and accepting one
+    // invites an engine to report a histogram that disagrees with its own
+    // pixels -- an unverifiable claim. The harness computes it from bytes it
+    // already decodes instead.
   ]),
   label: identifier.optional(),
   path: relativePathSchema,
   encoding: z.enum(['png', 'json', 'jsonl', 'binary']),
+  /**
+   * How to read a raw buffer. REQUIRED when encoding is `binary`, because
+   * without it the bytes are unreadable and the attachment is sealed evidence
+   * nobody can inspect.
+   *
+   * This exists because PNG could not carry the data. The decoder normalises
+   * every PNG to 8-bit RGBA, 16-bit sources included, so a depth buffer round
+   * -tripped through PNG loses exactly the precision that makes depth worth
+   * capturing: depth fighting and near/far-plane error are invisible at 8 bits.
+   */
+  format: z.object({
+    pixelFormat: z.enum(['r16f', 'r32f', 'rgba32f', 'd32f', 'r32u']),
+    width: z.number().int().min(1).max(16_384),
+    height: z.number().int().min(1).max(16_384),
+    /** Bytes per row, which is not width*bpp when the API pads (wgpu aligns to 256). */
+    rowStride: z.number().int().min(1).max(1_073_741_824),
+    colorSpace: z.enum(['srgb', 'linear']).default('linear'),
+  }).strict().optional(),
+  /**
+   * The float attachment this one is a lossy visualisation of.
+   *
+   * A caller gets both: a picture it can look at, and the numbers it can
+   * measure, with the relationship stated rather than guessed from filenames.
+   */
+  previewOf: relativePathSchema.optional(),
   description: z.string().min(1).max(400).optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  // A binary attachment without a format is bytes nobody can read: sealed,
+  // hashed, and useless. Refuse it at the contract rather than discovering it
+  // when an analysis silently skips the one attachment that mattered.
+  if (value.encoding === 'binary' && value.format === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'a binary attachment must declare its pixel format',
+    });
+  }
+  if (value.encoding !== 'binary' && value.format !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'only a binary attachment declares a pixel format',
+    });
+  }
+  if (value.format !== undefined) {
+    const minimumStride = value.format.width * BYTES_PER_PIXEL[value.format.pixelFormat];
+    if (value.format.rowStride < minimumStride) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `rowStride ${value.format.rowStride} cannot hold ${value.format.width} ${value.format.pixelFormat} pixels`,
+      });
+    }
+  }
+});
 
 export const captureManifestSchema = z.object({
   schema: z.literal(GAME_DEV_CAPTURE_SCHEMA),
@@ -199,6 +336,14 @@ export const captureManifestSchema = z.object({
   adapterEvidence: z.object({
     windowless: z.boolean().optional(),
     graphicsApi: z.string().min(1).max(64).optional(),
+    /**
+     * Whether a real GPU produced these pixels.
+     *
+     * Declared by the adapter and then INDEPENDENTLY DOWNGRADED by the harness
+     * when it says `software`: see run-bundle. A lane running on lavapipe or
+     * SwiftShader must not be able to mint GPU authority by claiming otherwise.
+     */
+    rendererClass: z.enum(['hardware', 'software', 'unknown']).default('unknown'),
     gpuExecutionReported: z.boolean().default(false),
     gpuCompletionIdentityReported: z.boolean().default(false),
     hardwarePerformanceReported: z.boolean().default(false),
@@ -287,6 +432,23 @@ export const runManifestSchema = z.object({
     artifactRosterClosedAndHashed: z.literal(true),
     captureContractValidated: z.boolean(),
     rasterBytesDecoded: z.boolean(),
+    /**
+     * What the harness concluded the renderer was, after applying its own
+     * downgrade -- not merely what the adapter claimed.
+     */
+    rendererClass: z.enum(['hardware', 'software', 'unknown']),
+    /** True when the harness refused GPU and timing claims for this run. */
+    softwareRasterizedLane: z.boolean(),
+    /**
+     * Claims the adapter made that the harness overwrote.
+     *
+     * The downgrade alone loses the fact that a claim was ever made, and an
+     * adapter asserting hardware execution from a CPU renderer is a defect in
+     * the adapter. Discarding it silently means the person who could fix it
+     * never learns it happened. The refusal stays authoritative; this records
+     * what was refused.
+     */
+    refusedAdapterClaims: z.array(z.string().min(1).max(96)).max(8),
     adapterReportedGpuExecution: z.boolean(),
     adapterReportedGpuCompletionIdentity: z.boolean(),
     adapterReportedHardwarePerformance: z.boolean(),
@@ -304,6 +466,21 @@ export type RunArtifact = z.infer<typeof runArtifactSchema>;
 export const metricStatisticsSchema = z.object({
   metric: metricIdentifier,
   unit: z.string().min(1).max(48),
+  /**
+   * What the reported values already were when the harness received them.
+   *
+   * Load-bearing, and previously ignored. A capture that emits both a p99 and
+   * per-frame samples for one metric was pooling them into a single
+   * distribution, so the reported "median" was the median of a mixed bag --
+   * silently wrong, and inherited by every goal evaluated against it.
+   */
+  aggregation: z.enum(['sample', 'mean', 'median', 'p95', 'p99', 'min', 'max']).default('sample'),
+  /**
+   * True when these values arrived already aggregated. A median of p99s is
+   * not a statistic of anything, so the distribution fields are not computed
+   * across them.
+   */
+  preAggregated: z.boolean().default(false),
   samples: z.number().int().min(1),
   min: z.number().finite(),
   max: z.number().finite(),
@@ -312,6 +489,25 @@ export const metricStatisticsSchema = z.object({
   p95: z.number().finite(),
   p99: z.number().finite(),
   standardDeviation: z.number().finite(),
+  /**
+   * Median absolute deviation: the robust dispersion measure for frame times.
+   *
+   * A standard deviation is dominated by the hitches, so a run with one 400ms
+   * stall and a thousand steady frames reports a spread that describes neither.
+   */
+  medianAbsoluteDeviation: z.number().finite(),
+  /**
+   * Samples beyond 2x the median. Named rather than trimmed: a single 400ms
+   * hitch is very often THE bug, and removing it to tidy the distribution
+   * deletes the finding.
+   */
+  hitchCount: z.number().int().min(0),
+  /**
+   * Mean of the worst 1% of samples -- the "1% low" an engine developer
+   * actually looks at. p99 approximates it badly at low sample counts and is
+   * what people reach for by mistake.
+   */
+  worst1PercentMean: z.number().finite(),
 }).strict();
 
 export type MetricStatistics = z.infer<typeof metricStatisticsSchema>;
