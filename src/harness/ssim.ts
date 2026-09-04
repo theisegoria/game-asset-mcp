@@ -26,7 +26,8 @@ export interface SsimResult {
   windowSize: number;
 }
 
-function luminancePlane(image: RasterImage): Float64Array {
+/** Rec. 709 luminance, one value per pixel. Shared so callers compute it once. */
+export function luminancePlane(image: RasterImage): Float64Array {
   const plane = new Float64Array(image.width * image.height);
   for (let pixel = 0; pixel < plane.length; pixel += 1) {
     const offset = pixel * 4;

@@ -7,7 +7,7 @@ import { invalidInput, invalidState } from '../util/errors.js';
 import { validateCaptureManifest } from './capture.js';
 import { GAME_DEV_VISUAL_COMPARISON_SCHEMA, type CaptureAttachment, type CaptureManifest } from './contracts.js';
 import { describeComparison, type ComparisonVerdict } from './describe-comparison.js';
-import { structuralSimilarity } from './ssim.js';
+import { luminancePlane, structuralSimilarity } from './ssim.js';
 import { verifyRunBundle } from './run-bundle.js';
 
 export interface RasterAnalysis {
@@ -264,20 +264,19 @@ export async function analyzeRunCapture(runPath: string): Promise<CaptureAnalysi
   };
 }
 
-function luminanceAt(image: RasterImage, x: number, y: number): number {
-  const offset = (y * image.width + x) * 4;
-  return 0.2126 * (image.data[offset] ?? 0) +
-    0.7152 * (image.data[offset + 1] ?? 0) +
-    0.0722 * (image.data[offset + 2] ?? 0);
-}
-
-function edgeMagnitude(image: RasterImage, x: number, y: number): number {
-  const gx = -luminanceAt(image, x - 1, y - 1) + luminanceAt(image, x + 1, y - 1) -
-    2 * luminanceAt(image, x - 1, y) + 2 * luminanceAt(image, x + 1, y) -
-    luminanceAt(image, x - 1, y + 1) + luminanceAt(image, x + 1, y + 1);
-  const gy = -luminanceAt(image, x - 1, y - 1) - 2 * luminanceAt(image, x, y - 1) -
-    luminanceAt(image, x + 1, y - 1) + luminanceAt(image, x - 1, y + 1) +
-    2 * luminanceAt(image, x, y + 1) + luminanceAt(image, x + 1, y + 1);
+/**
+ * Sobel magnitude over a precomputed luminance plane.
+ *
+ * Previously each call recomputed luminance for its eight neighbours from RGBA,
+ * twice per pixel pair -- sixteen luminance evaluations per pixel to produce
+ * two numbers. On a 1080p frame that is roughly 33 million redundant
+ * conversions, and it was the reason adding any further per-pixel metric felt
+ * expensive.
+ */
+function edgeMagnitudeAt(plane: Float64Array, width: number, x: number, y: number): number {
+  const at = (dx: number, dy: number): number => plane[(y + dy) * width + (x + dx)] ?? 0;
+  const gx = -at(-1, -1) + at(1, -1) - 2 * at(-1, 0) + 2 * at(1, 0) - at(-1, 1) + at(1, 1);
+  const gy = -at(-1, -1) - 2 * at(0, -1) - at(1, -1) + at(-1, 1) + 2 * at(0, 1) + at(1, 1);
   return Math.hypot(gx, gy) / 1_442.5;
 }
 
@@ -485,11 +484,16 @@ function diffRasters(
     heatmap[offset + 2] = 0;
     heatmap[offset + 3] = 255;
   }
+  const baselinePlane = luminancePlane(baseline);
+  const candidatePlane = luminancePlane(candidate);
   let edgeDelta = 0;
   let edgePixels = 0;
   for (let y = 1; y < baseline.height - 1; y += 1) {
     for (let x = 1; x < baseline.width - 1; x += 1) {
-      edgeDelta += Math.abs(edgeMagnitude(candidate, x, y) - edgeMagnitude(baseline, x, y));
+      edgeDelta += Math.abs(
+        edgeMagnitudeAt(candidatePlane, baseline.width, x, y)
+        - edgeMagnitudeAt(baselinePlane, baseline.width, x, y),
+      );
       edgePixels += 1;
     }
   }
